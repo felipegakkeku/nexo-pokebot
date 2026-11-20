@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         PokeBot (Pokeidle)
 // @namespace    https://github.com/felipegakkeku/pokebotfarm
-// @version      6.5
+// @version      6.6
 // @description  Automação para o Pokeidle: captura, bolas, equipe, evolução, mapa e fila /hunt com HUD flutuante
 // @match        https://pokeidle.io/app*
 // @run-at       document-idle
@@ -2290,7 +2290,7 @@
         window.FarmAnalyzer.stop();
     }
 
-    const VERSION = '6.5'; // preenchido no build a partir do package.json
+    const VERSION = '6.6'; // preenchido no build a partir do package.json
     const HUD_ID = 'pokebot-hud';
     const STYLE_ID = 'pokebot-hud-style';
     // Mantém chaves v60 para preservar Pokédex importada, alertas e preferências
