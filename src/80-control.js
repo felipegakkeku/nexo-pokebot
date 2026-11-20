@@ -33,6 +33,7 @@
         state.throwPending = false;
         state.timers.forEach(clearInterval);
         state.timers = [];
+        runtime.dispose();
         if (state.caidosObserver) {
             state.caidosObserver.disconnect();
             state.caidosObserver = null;

@@ -11,6 +11,203 @@
 // ==/UserScript==
 
 (() => {
+    var PokeBotModules = (() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __hasOwnProp = Object.prototype.hasOwnProperty;
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+  var __copyProps = (to, from, except, desc) => {
+    if (from && typeof from === "object" || typeof from === "function") {
+      for (let key of __getOwnPropNames(from))
+        if (!__hasOwnProp.call(to, key) && key !== except)
+          __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
+    }
+    return to;
+  };
+  var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
+
+  // src/modules/index.js
+  var index_exports = {};
+  __export(index_exports, {
+    SEL: () => SEL,
+    SEL_ALWAYS_PRESENT: () => SEL_ALWAYS_PRESENT,
+    createRuntime: () => createRuntime,
+    createScheduler: () => createScheduler,
+    dailyPass: () => dailyPass
+  });
+
+  // src/modules/scheduler.js
+  var createScheduler = ({
+    now = () => Date.now(),
+    setIntervalFn = (fn, ms) => setInterval(fn, ms),
+    clearIntervalFn = (id) => clearInterval(id),
+    tickMs = 500,
+    onError = (id, err) => console.error(`[PokeBot] tarefa "${id}" falhou:`, err)
+  } = {}) => {
+    const tasks = /* @__PURE__ */ new Map();
+    let timer = null;
+    let paused = false;
+    let disposed = false;
+    const add = ({ id, everyMs, run, priority = 0, enabled = () => true, runImmediately = false }) => {
+      if (disposed) return false;
+      if (tasks.has(id)) throw new Error(`tarefa duplicada: ${id}`);
+      tasks.set(id, { id, everyMs, run, priority, enabled, busy: false, nextAt: now() + (runImmediately ? 0 : everyMs) });
+      return true;
+    };
+    const remove = (id) => tasks.delete(id);
+    const runTask = async (task) => {
+      task.busy = true;
+      try {
+        await task.run();
+      } catch (err) {
+        onError(task.id, err);
+      } finally {
+        task.busy = false;
+      }
+    };
+    const tick = () => {
+      if (disposed || paused) return Promise.resolve();
+      const t = now();
+      const due = [...tasks.values()].filter((task) => !task.busy && task.nextAt <= t).sort((a, b) => b.priority - a.priority || a.nextAt - b.nextAt);
+      const started = [];
+      for (const task of due) {
+        task.nextAt = t + task.everyMs;
+        if (!task.enabled()) continue;
+        started.push(runTask(task));
+      }
+      return Promise.all(started);
+    };
+    const start = () => {
+      if (disposed || timer !== null) return;
+      timer = setIntervalFn(tick, tickMs);
+    };
+    const dispose = () => {
+      disposed = true;
+      if (timer !== null) clearIntervalFn(timer);
+      timer = null;
+      tasks.clear();
+    };
+    return {
+      add,
+      remove,
+      tick,
+      start,
+      dispose,
+      pause: () => {
+        paused = true;
+      },
+      resume: () => {
+        paused = false;
+      },
+      isPaused: () => paused,
+      list: () => [...tasks.keys()]
+    };
+  };
+
+  // src/modules/runtime.js
+  var createRuntime = (ctx, { scheduler = createScheduler() } = {}) => {
+    const mods = /* @__PURE__ */ new Map();
+    const register = (mod) => {
+      if (mods.has(mod.id)) throw new Error(`m\xF3dulo duplicado: ${mod.id}`);
+      mods.set(mod.id, mod);
+      mod.init?.(ctx);
+      if (typeof mod.tick === "function") {
+        const everyMs = typeof mod.everyMs === "function" ? mod.everyMs(ctx) : mod.everyMs;
+        scheduler.add({ id: mod.id, everyMs, priority: mod.priority ?? 0, run: () => mod.tick(ctx) });
+      }
+      return mod;
+    };
+    const call = (id, method, ...args) => {
+      const mod = mods.get(id);
+      if (!mod || typeof mod[method] !== "function") return void 0;
+      return mod[method](ctx, ...args);
+    };
+    const dispose = () => {
+      scheduler.dispose();
+      for (const mod of mods.values()) {
+        try {
+          mod.dispose?.(ctx);
+        } catch (err) {
+          console.error(`[PokeBot] dispose de "${mod.id}" falhou:`, err);
+        }
+      }
+      mods.clear();
+    };
+    return { register, call, start: () => scheduler.start(), dispose, scheduler, has: (id) => mods.has(id) };
+  };
+
+  // src/modules/selectors.js
+  var SEL = {
+    // Passe diário
+    passResgatar: "button.ps-resgatar",
+    passRelogio: "b[data-ps-relogio]",
+    // Confirmação de evolução / diálogos de confirmação
+    btnEvoluir: "#btn-evoluir",
+    confirmarSim: "#confirmar-sim",
+    confirmarNao: "#confirmar-nao",
+    dlgReq: ".dlg-req",
+    // Pokémon ativo e ficha
+    ativoCard: "#ativo-card",
+    ativoNome: ".ativo-nome",
+    fichaGpt: "#fi-gpt",
+    fichaFechar: "#ficha-fechar"
+  };
+  var SEL_ALWAYS_PRESENT = ["btnEvoluir", "ativoCard", "ativoNome"];
+
+  // src/modules/daily-pass.js
+  var claim = async (ctx, { force = false } = {}) => {
+    const { CONFIG, state, dom, storage, keys, sleep, randomDelay, withModalLock } = ctx;
+    if (!CONFIG.dailyPass.enabled && !force) return;
+    const { level } = dom.getTrainerHeaderInfo();
+    if (!force && level !== null && level < 10) return;
+    const nextAllowedMs = parseInt(storage.get(keys.passNext) || "0", 10);
+    if (!force && nextAllowedMs > Date.now()) return;
+    await withModalLock(
+      "Passe",
+      async () => {
+        if (dom.getVisibleModal()) await dom.closeActiveModal();
+        const passBtn = dom.findMenuButtonByImg("passe-") || dom.findClickableByText("Passe");
+        if (!passBtn) return;
+        passBtn.click();
+        const resgatarBtn = await dom.waitFor(() => dom.$(SEL.passResgatar), 3500);
+        if (!resgatarBtn) {
+          await dom.closeActiveModal();
+          return;
+        }
+        await sleep(randomDelay(220, 360));
+        if (!resgatarBtn.disabled && dom.isInteractable(resgatarBtn)) {
+          resgatarBtn.click();
+          state.stats.passClaims++;
+          state.lastActionNote = "Passe Di\xE1rio resgatado!";
+          await sleep(randomDelay(450, 700));
+        }
+        const updatedBtn = dom.$(SEL.passResgatar);
+        const nextTs = parseInt(updatedBtn?.querySelector(SEL.passRelogio)?.getAttribute("data-ps-relogio") || "0", 10);
+        if (nextTs > Date.now()) {
+          storage.set(keys.passNext, String(nextTs + 5e3));
+          if (resgatarBtn.disabled) {
+            state.lastActionNote = `Passe j\xE1 resgatado (${updatedBtn.textContent.trim()})`;
+          }
+        } else {
+          storage.set(keys.passNext, String(Date.now() + 36e5));
+        }
+        await dom.closeActiveModal();
+      },
+      { force }
+    );
+  };
+  var dailyPass = {
+    id: "dailyPass",
+    everyMs: (ctx) => ctx.CONFIG.dailyPass.checkIntervalMs,
+    tick: (ctx) => claim(ctx, { force: false }),
+    claim
+  };
+  return __toCommonJS(index_exports);
+})();
     // Se o gerenciador de userscripts isolar o script (@grant), unsafeWindow é a janela real da página
     const pageWin = typeof unsafeWindow !== 'undefined' && unsafeWindow ? unsafeWindow : window;
     [window, pageWin].forEach((w) => {
@@ -1170,54 +1367,6 @@
                         await closeActiveModal();
                     }
                 }
-            },
-            { force }
-        );
-    };
-
-    // --- 3. Auto-Passe Diário ---
-    const checkDailyPass = async (force = false) => {
-        if (!CONFIG.dailyPass.enabled && !force) return;
-        const { level } = getTrainerHeaderInfo();
-        if (!force && level !== null && level < 10) return;
-
-        const nextAllowedMs = parseInt(localStorage.getItem(STORAGE_PASS_NEXT_KEY) || '0', 10);
-        if (!force && nextAllowedMs > Date.now()) return;
-
-        await withModalLock(
-            'Passe',
-            async () => {
-                if (getVisibleModal()) await closeActiveModal();
-                const passBtn = findMenuButtonByImg('passe-') || findClickableByText('Passe');
-                if (!passBtn) return;
-
-                passBtn.click();
-                const resgatarBtn = await waitFor(() => document.querySelector('button.ps-resgatar'), 3500);
-                if (!resgatarBtn) {
-                    await closeActiveModal();
-                    return;
-                }
-                await sleep(randomDelay(220, 360));
-
-                if (!resgatarBtn.disabled && isInteractable(resgatarBtn)) {
-                    resgatarBtn.click();
-                    state.stats.passClaims++;
-                    state.lastActionNote = 'Passe Diário resgatado!';
-                    await sleep(randomDelay(450, 700));
-                }
-
-                const updatedBtn = document.querySelector('button.ps-resgatar');
-                const nextTs = parseInt(updatedBtn?.querySelector('b[data-ps-relogio]')?.getAttribute('data-ps-relogio') || '0', 10);
-                if (nextTs > Date.now()) {
-                    localStorage.setItem(STORAGE_PASS_NEXT_KEY, String(nextTs + 5000));
-                    if (resgatarBtn.disabled) {
-                        state.lastActionNote = `Passe já resgatado (${updatedBtn.textContent.trim()})`;
-                    }
-                } else {
-                    localStorage.setItem(STORAGE_PASS_NEXT_KEY, String(Date.now() + 3600000));
-                }
-
-                await closeActiveModal();
             },
             { force }
         );
@@ -3536,6 +3685,7 @@
         state.throwPending = false;
         state.timers.forEach(clearInterval);
         state.timers = [];
+        runtime.dispose();
         if (state.caidosObserver) {
             state.caidosObserver.disconnect();
             state.caidosObserver = null;
@@ -3621,6 +3771,36 @@
         }
     }
 
+    // --- Módulos (Fase 2) ---
+    // Ponte entre o código legado (este escopo) e os módulos ES empacotados em PokeBotModules.
+    // Cada módulo migrado sai de src/4x-*.js, vai para src/modules/ e ganha uma entrada aqui.
+    const moduleCtx = {
+        CONFIG,
+        state,
+        sleep,
+        randomDelay,
+        withModalLock,
+        keys: { passNext: STORAGE_PASS_NEXT_KEY },
+        storage: {
+            get: (key) => localStorage.getItem(key),
+            set: (key, value) => localStorage.setItem(key, value),
+        },
+        dom: {
+            $: (selector) => document.querySelector(selector),
+            getVisibleModal,
+            closeActiveModal,
+            findMenuButtonByImg,
+            findClickableByText,
+            waitFor,
+            isInteractable,
+            getTrainerHeaderInfo,
+        },
+    };
+    const runtime = PokeBotModules.createRuntime(moduleCtx);
+    runtime.register(PokeBotModules.dailyPass);
+
+    const checkDailyPass = (force = false) => runtime.call('dailyPass', 'claim', { force });
+
     // --- Inicialização ---
     state.lastOptimizedTrainerLevel = getTrainerHeaderInfo().level;
     state.session = createSession(getCurrentHunt(), getActivePokemon());
@@ -3642,7 +3822,6 @@
     state.timers.push(setInterval(() => smartRestock(false), CONFIG.restock.checkIntervalMs));
     state.timers.push(setInterval(updateFarmTelemetry, CONFIG.farm.tickIntervalMs));
     state.timers.push(setInterval(checkAutoRegionProgression, CONFIG.autoRegion.checkIntervalMs));
-    state.timers.push(setInterval(() => checkDailyPass(false), CONFIG.dailyPass.checkIntervalMs));
     state.timers.push(setInterval(() => runDepotManager(false), 60000));
     state.timers.push(setInterval(checkTeamRotation, CONFIG.team.checkIntervalMs));
     state.timers.push(setInterval(() => checkIncubator(false), 15000));
@@ -3652,6 +3831,8 @@
     state.timers.push(setInterval(scanMarketRadar, CONFIG.radar.checkIntervalMs));
     state.timers.push(setInterval(updateMiniGameHelper, CONFIG.minigame.checkIntervalMs));
     state.timers.push(setInterval(() => scheduleIdle(updateHud), CONFIG.hud.refreshMs));
+
+    runtime.start();
 
     updateHud();
     console.log(`[PokeBot v${VERSION}] Ativo!`);

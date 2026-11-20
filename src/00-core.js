@@ -1,4 +1,5 @@
 (() => {
+    /*__MODULES_BUNDLE__*/
     // Se o gerenciador de userscripts isolar o script (@grant), unsafeWindow é a janela real da página
     const pageWin = typeof unsafeWindow !== 'undefined' && unsafeWindow ? unsafeWindow : window;
     [window, pageWin].forEach((w) => {

@@ -36,7 +36,9 @@ src/            fragmentos numerados, juntados em ordem pelo build
   60..63-*.js     mapa, fila /hunt, ficha do Hub, hop/otimização
   70-hud.js       HUD
   80-control.js   API pública e stop()
+  89-runtime.js   ponte para os módulos (monta o ctx e registra cada módulo migrado)
   90-init.js      inicialização (fecha a IIFE)
+src/modules/    módulos ES de verdade (agendador, runtime, selectors.js, passe diário); empacotados com esbuild
 tests/          testes (node:test + jsdom)
 dist/           pokebot.user.js gerado (é este que se instala)
 legacy/         versões antigas, só para consulta
@@ -44,7 +46,7 @@ build.mjs       junta src/ em dist/ (e confere a tag com --check-tag)
 CHANGELOG.md    uma linha por versão; vira a nota da Release
 ```
 
-Os arquivos de `src/` **não são módulos ES**: são pedaços de um mesmo escopo, e a ordem dos nomes importa. Foi uma escolha para dividir o código sem mudar nenhum comportamento. Funções novas sem dependência de DOM devem ir em `05-pure.js` para poderem ser testadas.
+Os fragmentos numerados de `src/` **não são módulos ES**: são pedaços de um mesmo escopo, e a ordem dos nomes importa. Foi uma escolha para dividir o código sem mudar nenhum comportamento. Funções novas sem dependência de DOM devem ir em `05-pure.js` para poderem ser testadas.
 
 ## Desenvolver
 
@@ -87,3 +89,5 @@ Para ver o resultado antes: `POKEBOT_UPDATE_CHANNEL=release npm run build`.
 
 - Os testes usam um DOM falso baseado no do jogo (conferido em 20/11/2026). Se o jogo mudar ids/classes, o smoke test continua passando: confira o HUD no jogo depois de atualizações do Pokeidle.
 - Mapa, captura e demais módulos não têm teste automatizado; foram só reorganizados, sem mudança de lógica.
+
+**Migração em andamento (Fase 2):** automação nova ou migrada vai para `src/modules/` com o contrato `{ id, everyMs, tick(ctx), dispose?(ctx) }`. O módulo só usa o que vem em `ctx` (config, estado, leitores do DOM, storage), então é testável sem o resto. Para migrar um fragmento: mover a lógica para um módulo, registrá-lo em `89-runtime.js`, tirar o `setInterval` correspondente de `90-init.js` e apagar o fragmento antigo.

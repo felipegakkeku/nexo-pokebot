@@ -207,3 +207,14 @@ test('ficha: se o jogo não copiar a ficha, avisa em vez de fingir que deu certo
         w.PokeBot?.stop();
     }
 });
+
+test('módulos: checarPasse roda pelo runtime sem travar e o stop() libera o agendador', async () => {
+    const w = boot();
+    try {
+        await w.PokeBot.checarPasse(); // sem botão de Passe no DOM falso: volta sem erro
+        assert.ok(w.document.getElementById('pokebot-hud'), 'HUD continua montado');
+    } finally {
+        w.PokeBot?.stop();
+    }
+    assert.equal(w.document.getElementById('pokebot-hud'), null);
+});

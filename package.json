@@ -11,6 +11,7 @@
     "check-tag": "node build.mjs --check-tag"
   },
   "devDependencies": {
+    "esbuild": "^0.28.2",
     "jsdom": "^24.1.3"
   }
 }

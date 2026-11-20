@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
+import { buildSync } from 'esbuild';
 
 const root = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
@@ -62,7 +63,22 @@ const files = readdirSync(join(root, 'src'))
     .sort();
 
 const body = files.map((f) => readFileSync(join(root, 'src', f), 'utf8').replace(/\s+$/, '')).join('\n\n');
-const out = header + body.replaceAll('__VERSION__', version) + '\n';
+// Módulos ES (src/modules) -> um bloco IIFE que vira `PokeBotModules` dentro do escopo do userscript
+const modules = buildSync({
+    entryPoints: [join(root, 'src', 'modules', 'index.js')],
+    bundle: true,
+    write: false,
+    format: 'iife',
+    globalName: 'PokeBotModules',
+    target: 'es2020',
+    legalComments: 'none',
+}).outputFiles[0].text.trim();
+const MARK = '/*__MODULES_BUNDLE__*/';
+if (!body.includes(MARK)) {
+    console.error(`ERRO: marcador ${MARK} não encontrado em src/00-core.js`);
+    process.exit(1);
+}
+const out = header + body.replace(MARK, () => modules).replaceAll('__VERSION__', version) + '\n';
 
 mkdirSync(join(root, 'dist'), { recursive: true });
 const target = join(root, 'dist', 'pokebot.user.js');
@@ -70,4 +86,4 @@ writeFileSync(target, out);
 
 // Falha o build se o resultado não for JavaScript válido
 execFileSync(process.execPath, ['--check', target], { stdio: 'inherit' });
-console.log(`OK  dist/pokebot.user.js  v${version}  (${files.length} arquivos, ${out.split('\n').length} linhas)`);
+console.log(`OK  dist/pokebot.user.js  v${version}  (${files.length} arquivos + módulos, ${out.split('\n').length} linhas)`);
