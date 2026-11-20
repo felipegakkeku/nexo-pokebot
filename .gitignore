@@ -1,0 +1,6 @@
+# Arquivos de sistema e logs
+.DS_Store
+Thumbs.db
+*.log
+.env
+node_modules/
