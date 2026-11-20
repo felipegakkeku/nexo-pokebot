@@ -95,7 +95,7 @@
         proximaHuntGuia: () => irProximaHuntGuia(true),
         definirFilaHunt,
         carregarFilaManual: loadManualQueue,
-        verificarEvolucao: autoEvolveCheck,
+        verificarEvolucao: () => autoEvolveCheck(),
         limparFilaHunt,
         copiarFichaHunt,
         copiarFichaAtivo: copyActiveSheet,

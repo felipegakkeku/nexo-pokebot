@@ -7,6 +7,7 @@
         sleep,
         randomDelay,
         withModalLock,
+        updateHud,
         keys: { passNext: STORAGE_PASS_NEXT_KEY },
         storage: {
             get: (key) => localStorage.getItem(key),
@@ -21,10 +22,14 @@
             waitFor,
             isInteractable,
             getTrainerHeaderInfo,
+            isInSpecialArena,
+            getActivePokemon,
         },
     };
     const runtime = PokeBotModules.createRuntime(moduleCtx);
     runtime.register(PokeBotModules.dailyPass);
+    runtime.register(PokeBotModules.autoEvolve);
 
     const checkDailyPass = (force = false) => runtime.call('dailyPass', 'claim', { force });
+    const autoEvolveCheck = () => runtime.call('autoEvolve', 'tick');
 

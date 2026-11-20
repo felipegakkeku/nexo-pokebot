@@ -58,18 +58,3 @@
 
     const looksLikeSheet = (text) => /ficha do poke\s*idle/i.test(text || '') && (text || '').length > 300;
 
-    // Decide se vale confirmar a evolução a partir das linhas de requisito da confirmação do jogo.
-    // rows: [{ ok: boolean, text: string }] — ok=false quando a linha vem marcada como "falta".
-    // Sem requisito legível, sem confirmar (melhor não evoluir do que gastar pedra sem querer).
-    const evaluateEvolveRequirements = (rows) => {
-        const list = Array.isArray(rows) ? rows : [];
-        if (list.length === 0) return { ok: false, reason: 'requisitos não encontrados' };
-        if (list.some((r) => /shiny/.test(normalizeText(r.text)))) {
-            return { ok: false, reason: 'exige Shiny Stone (ignorado)' };
-        }
-        const missing = list.filter((r) => !r.ok);
-        if (missing.length > 0) {
-            return { ok: false, reason: `falta ${missing.map((r) => r.text).join(' + ')}` };
-        }
-        return { ok: true, reason: '' };
-    };

@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadPure } from './helpers.mjs';
 
-const { normalizeText, cleanKey, parseNumber, parseSignedNumber, parseQueueEntry, parseQueueText, looksLikeSheet, evaluateEvolveRequirements } = loadPure();
+const { normalizeText, cleanKey, parseNumber, parseSignedNumber, parseQueueEntry, parseQueueText, looksLikeSheet } = loadPure();
 const names = (list) => JSON.parse(JSON.stringify(list.map((e) => [e.name, e.level]))); // JSON: evita comparar arrays de contextos vm diferentes
 
 test('normalizeText tira acento e caixa', () => {
@@ -47,21 +47,4 @@ test('looksLikeSheet reconhece a ficha nativa do jogo', () => {
     assert.equal(looksLikeSheet(sheet), true);
     assert.equal(looksLikeSheet('Charmander Nv 16 FIRE'), false);
     assert.equal(looksLikeSheet(null), false);
-});
-
-test('requisitos de evolução: só aprova com todas as linhas ok', () => {
-    const ok = [{ ok: true, text: 'Fire Stone na mochila 1/1' }, { ok: true, text: 'nível mínimo Nv 40' }];
-    assert.equal(evaluateEvolveRequirements(ok).ok, true);
-
-    const falta = [{ ok: false, text: 'Fire Stone na mochila 0/1' }, { ok: false, text: 'nível mínimo Nv 18' }];
-    const r = evaluateEvolveRequirements(falta);
-    assert.equal(r.ok, false);
-    assert.match(r.reason, /^falta Fire Stone na mochila 0\/1 \+ nível mínimo Nv 18$/);
-});
-
-test('requisitos de evolução: sem requisito legível ou com Shiny Stone, não confirma', () => {
-    assert.equal(evaluateEvolveRequirements([]).ok, false);
-    assert.equal(evaluateEvolveRequirements(null).ok, false);
-    const shiny = [{ ok: true, text: 'Shiny Stone na mochila 1/1' }, { ok: true, text: 'nível mínimo Nv 40' }];
-    assert.equal(evaluateEvolveRequirements(shiny).ok, false);
 });

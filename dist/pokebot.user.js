@@ -35,9 +35,12 @@
   __export(index_exports, {
     SEL: () => SEL,
     SEL_ALWAYS_PRESENT: () => SEL_ALWAYS_PRESENT,
+    autoEvolve: () => autoEvolve,
     createRuntime: () => createRuntime,
     createScheduler: () => createScheduler,
-    dailyPass: () => dailyPass
+    dailyPass: () => dailyPass,
+    evaluateEvolveRequirements: () => evaluateEvolveRequirements,
+    normalizeText: () => normalizeText
   });
 
   // src/modules/scheduler.js
@@ -69,7 +72,7 @@
         task.busy = false;
       }
     };
-    const tick = () => {
+    const tick2 = () => {
       if (disposed || paused) return Promise.resolve();
       const t = now();
       const due = [...tasks.values()].filter((task) => !task.busy && task.nextAt <= t).sort((a, b) => b.priority - a.priority || a.nextAt - b.nextAt);
@@ -83,7 +86,7 @@
     };
     const start = () => {
       if (disposed || timer !== null) return;
-      timer = setIntervalFn(tick, tickMs);
+      timer = setIntervalFn(tick2, tickMs);
     };
     const dispose = () => {
       disposed = true;
@@ -94,7 +97,7 @@
     return {
       add,
       remove,
-      tick,
+      tick: tick2,
       start,
       dispose,
       pause: () => {
@@ -205,6 +208,86 @@
     everyMs: (ctx) => ctx.CONFIG.dailyPass.checkIntervalMs,
     tick: (ctx) => claim(ctx, { force: false }),
     claim
+  };
+
+  // src/modules/text.js
+  var normalizeText = (str) => (str || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+
+  // src/modules/auto-evolve.js
+  var evaluateEvolveRequirements = (rows) => {
+    const list = Array.isArray(rows) ? rows : [];
+    if (list.length === 0) return { ok: false, reason: "requisitos n\xE3o encontrados" };
+    if (list.some((r) => /shiny/.test(normalizeText(r.text)))) {
+      return { ok: false, reason: "exige Shiny Stone (ignorado)" };
+    }
+    const missing = list.filter((r) => !r.ok);
+    if (missing.length > 0) {
+      return { ok: false, reason: `falta ${missing.map((r) => r.text).join(" + ")}` };
+    }
+    return { ok: true, reason: "" };
+  };
+  var readRequirements = ({ dom }) => {
+    const dialog = dom.$(SEL.confirmarSim)?.closest(".modal-caixa") || dom.getVisibleModal();
+    if (!dialog) return [];
+    return Array.from(dialog.querySelectorAll(SEL.dlgReq)).map((row) => ({
+      ok: !row.classList.contains("falta"),
+      text: (row.innerText || row.textContent || "").replace(/\s+/g, " ").trim()
+    }));
+  };
+  var dismissDialog = async ({ dom }) => {
+    const cancel = dom.$(SEL.confirmarNao);
+    if (cancel && dom.isInteractable(cancel)) {
+      cancel.click();
+      await dom.waitFor(() => {
+        const sim = dom.$(SEL.confirmarSim);
+        return !sim || !dom.isInteractable(sim);
+      }, 1500);
+    }
+    if (dom.getVisibleModal()) await dom.closeActiveModal();
+  };
+  var tick = async (ctx) => {
+    const { CONFIG, state, dom, sleep, randomDelay, withModalLock, updateHud } = ctx;
+    if (!state.running || state.paused || !CONFIG.evolve.enabled) return;
+    if (CONFIG.shinyGuard.enabled && state.shinyAlertActive) return;
+    if (state.modalLockOwner || dom.getVisibleModal() || dom.isInSpecialArena()) return;
+    if (Date.now() < state.evolveNextAt) return;
+    const evolveBtn = dom.$(SEL.btnEvoluir);
+    if (!evolveBtn || !dom.isInteractable(evolveBtn)) return;
+    if (normalizeText(dom.getActivePokemon()?.name) === "eevee") {
+      state.evolveNextAt = Date.now() + CONFIG.evolve.recheckMs;
+      return;
+    }
+    await withModalLock("Evoluindo", async () => {
+      state.evolveNextAt = Date.now() + CONFIG.evolve.recheckMs;
+      evolveBtn.click();
+      const confirmBtn = await dom.waitFor(() => {
+        const btn = dom.$(SEL.confirmarSim);
+        return btn && dom.isInteractable(btn) ? btn : null;
+      }, 2500);
+      if (!confirmBtn) {
+        state.lastActionNote = "Evolu\xE7\xE3o: confirma\xE7\xE3o n\xE3o abriu";
+        if (dom.getVisibleModal()) await dom.closeActiveModal();
+        updateHud();
+        return;
+      }
+      const verdict = evaluateEvolveRequirements(readRequirements(ctx));
+      if (!verdict.ok) {
+        await dismissDialog(ctx);
+        state.lastActionNote = `Evolu\xE7\xE3o adiada: ${verdict.reason}`;
+        updateHud();
+        return;
+      }
+      confirmBtn.click();
+      await sleep(randomDelay(260, 420));
+      state.evolveNextAt = Date.now() + CONFIG.evolve.cooldownMs;
+      state.lastActionNote = "Pok\xE9mon evolu\xEDdo!";
+      updateHud();
+    });
+  };
+  var autoEvolve = {
+    id: "autoEvolve",
+    everyMs: (ctx) => ctx.CONFIG.evolve.checkIntervalMs,
+    tick
   };
   return __toCommonJS(index_exports);
 })();
@@ -610,22 +693,6 @@
     };
 
     const looksLikeSheet = (text) => /ficha do poke\s*idle/i.test(text || '') && (text || '').length > 300;
-
-    // Decide se vale confirmar a evolução a partir das linhas de requisito da confirmação do jogo.
-    // rows: [{ ok: boolean, text: string }] — ok=false quando a linha vem marcada como "falta".
-    // Sem requisito legível, sem confirmar (melhor não evoluir do que gastar pedra sem querer).
-    const evaluateEvolveRequirements = (rows) => {
-        const list = Array.isArray(rows) ? rows : [];
-        if (list.length === 0) return { ok: false, reason: 'requisitos não encontrados' };
-        if (list.some((r) => /shiny/.test(normalizeText(r.text)))) {
-            return { ok: false, reason: 'exige Shiny Stone (ignorado)' };
-        }
-        const missing = list.filter((r) => !r.ok);
-        if (missing.length > 0) {
-            return { ok: false, reason: `falta ${missing.map((r) => r.text).join(' + ')}` };
-        }
-        return { ok: true, reason: '' };
-    };
 
     // --- Utilitários ---
     const isInsideHud = (el) => Boolean(el && el.closest && el.closest(`#${HUD_ID}`));
@@ -1757,76 +1824,6 @@
         if (chosen && !chosen.isActive) {
             triggerTeamSwap(chosen, `Equipe: ${chosen.name} Nv${chosen.level}`);
         }
-    };
-
-    // --- 8. Auto-Evoluir ---
-    // O botão #btn-evoluir fica sempre clicável, então não diz se dá para evoluir. Quem diz é a confirmação do jogo,
-    // que lista os requisitos em linhas ".dlg-req" (classe "falta" quando não atendido: nível mínimo, pedra na mochila).
-    // Fluxo: abre a confirmação, lê os requisitos, confirma só se todos estiverem ok; senão cancela e espera
-    // CONFIG.evolve.recheckMs antes de olhar de novo.
-    const readEvolveRequirements = () => {
-        const confirmBtn = document.getElementById('confirmar-sim');
-        const dialog = confirmBtn?.closest('.modal-caixa') || getVisibleModal();
-        if (!dialog) return [];
-        return Array.from(dialog.querySelectorAll('.dlg-req')).map((row) => ({
-            ok: !row.classList.contains('falta'),
-            text: (row.innerText || row.textContent || '').replace(/\s+/g, ' ').trim(),
-        }));
-    };
-
-    const dismissEvolveDialog = async () => {
-        const cancel = document.getElementById('confirmar-nao');
-        if (cancel && isInteractable(cancel)) {
-            cancel.click();
-            await waitFor(() => !document.getElementById('confirmar-sim') || !isInteractable(document.getElementById('confirmar-sim')), 1500);
-        }
-        if (getVisibleModal()) await closeActiveModal();
-    };
-
-    const autoEvolveCheck = async () => {
-        if (!state.running || state.paused || !CONFIG.evolve.enabled) return;
-        if (CONFIG.shinyGuard.enabled && state.shinyAlertActive) return;
-        if (state.modalLockOwner || getVisibleModal() || isInSpecialArena()) return;
-        if (Date.now() < state.evolveNextAt) return;
-
-        const evolveBtn = document.getElementById('btn-evoluir');
-        if (!evolveBtn || !isInteractable(evolveBtn)) return;
-
-        // Eevee tem vários destinos: a escolha é do jogador
-        if (normalizeText(getActivePokemon()?.name) === 'eevee') {
-            state.evolveNextAt = Date.now() + CONFIG.evolve.recheckMs;
-            return;
-        }
-
-        await withModalLock('Evoluindo', async () => {
-            state.evolveNextAt = Date.now() + CONFIG.evolve.recheckMs;
-            evolveBtn.click();
-
-            const confirmBtn = await waitFor(() => {
-                const btn = document.getElementById('confirmar-sim');
-                return btn && isInteractable(btn) ? btn : null;
-            }, 2500);
-            if (!confirmBtn) {
-                state.lastActionNote = 'Evolução: confirmação não abriu';
-                if (getVisibleModal()) await closeActiveModal();
-                updateHud();
-                return;
-            }
-
-            const verdict = evaluateEvolveRequirements(readEvolveRequirements());
-            if (!verdict.ok) {
-                await dismissEvolveDialog();
-                state.lastActionNote = `Evolução adiada: ${verdict.reason}`;
-                updateHud();
-                return;
-            }
-
-            confirmBtn.click();
-            await sleep(randomDelay(260, 420));
-            state.evolveNextAt = Date.now() + CONFIG.evolve.cooldownMs;
-            state.lastActionNote = 'Pokémon evoluído!';
-            updateHud();
-        });
     };
 
     // --- 9. Radar RMT ---
@@ -3747,7 +3744,7 @@
         proximaHuntGuia: () => irProximaHuntGuia(true),
         definirFilaHunt,
         carregarFilaManual: loadManualQueue,
-        verificarEvolucao: autoEvolveCheck,
+        verificarEvolucao: () => autoEvolveCheck(),
         limparFilaHunt,
         copiarFichaHunt,
         copiarFichaAtivo: copyActiveSheet,
@@ -3780,6 +3777,7 @@
         sleep,
         randomDelay,
         withModalLock,
+        updateHud,
         keys: { passNext: STORAGE_PASS_NEXT_KEY },
         storage: {
             get: (key) => localStorage.getItem(key),
@@ -3794,12 +3792,16 @@
             waitFor,
             isInteractable,
             getTrainerHeaderInfo,
+            isInSpecialArena,
+            getActivePokemon,
         },
     };
     const runtime = PokeBotModules.createRuntime(moduleCtx);
     runtime.register(PokeBotModules.dailyPass);
+    runtime.register(PokeBotModules.autoEvolve);
 
     const checkDailyPass = (force = false) => runtime.call('dailyPass', 'claim', { force });
+    const autoEvolveCheck = () => runtime.call('autoEvolve', 'tick');
 
     // --- Inicialização ---
     state.lastOptimizedTrainerLevel = getTrainerHeaderInfo().level;
@@ -3827,7 +3829,6 @@
     state.timers.push(setInterval(() => checkIncubator(false), 15000));
     state.timers.push(setInterval(() => checkBosses(false), 60000));
     state.timers.push(setInterval(dismissBossLoot, 3000));
-    state.timers.push(setInterval(autoEvolveCheck, CONFIG.evolve.checkIntervalMs));
     state.timers.push(setInterval(scanMarketRadar, CONFIG.radar.checkIntervalMs));
     state.timers.push(setInterval(updateMiniGameHelper, CONFIG.minigame.checkIntervalMs));
     state.timers.push(setInterval(() => scheduleIdle(updateHud), CONFIG.hud.refreshMs));
