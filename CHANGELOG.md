@@ -5,7 +5,7 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 ## Unreleased
 
 - Auto-Evoluir só confirma quando os requisitos (nível e pedra) estão ✓; desligado por padrão e sem trava de HP (Fase 0).
-- Fase 2, passo 1: `src/modules/` com agendador central, contrato de módulo, `selectors.js` e o Auto-Passe Diário e o Auto-Evoluir migrados; build agora usa esbuild para os módulos.
+- Fase 2: todas as automações viraram módulos ES em `src/modules/` (agendador central, contrato de módulo, funções puras e `selectors.js`), com ESLint e 200+ testes; o `dist` agora é empacotado com esbuild. Comportamento mantido; os períodos passam a rodar no laço do agendador (100 ms de resolução).
 
 ## 6.5.0
 

@@ -6,7 +6,7 @@ export const createScheduler = ({
     now = () => Date.now(),
     setIntervalFn = (fn, ms) => setInterval(fn, ms),
     clearIntervalFn = (id) => clearInterval(id),
-    tickMs = 500,
+    tickMs = 100,
     onError = (id, err) => console.error(`[PokeBot] tarefa "${id}" falhou:`, err),
 } = {}) => {
     const tasks = new Map();

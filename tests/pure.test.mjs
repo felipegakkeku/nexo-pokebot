@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { loadPure } from './helpers.mjs';
+import * as pure from '../src/modules/pure.js';
 
-const { normalizeText, cleanKey, parseNumber, parseSignedNumber, parseQueueEntry, parseQueueText, looksLikeSheet } = loadPure();
+const { normalizeText, cleanKey, parseNumber, parseSignedNumber, parseQueueEntry, parseQueueText, looksLikeSheet } = pure;
 const names = (list) => JSON.parse(JSON.stringify(list.map((e) => [e.name, e.level]))); // JSON: evita comparar arrays de contextos vm diferentes
 
 test('normalizeText tira acento e caixa', () => {

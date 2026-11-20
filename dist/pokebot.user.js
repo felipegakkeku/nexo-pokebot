@@ -36,11 +36,29 @@
     SEL: () => SEL,
     SEL_ALWAYS_PRESENT: () => SEL_ALWAYS_PRESENT,
     autoEvolve: () => autoEvolve,
+    bossLoot: () => bossLoot,
+    bosses: () => bosses,
+    capture: () => capture,
     createRuntime: () => createRuntime,
     createScheduler: () => createScheduler,
     dailyPass: () => dailyPass,
+    depot: () => depot,
+    dexNumberToRegion: () => dexNumberToRegion,
     evaluateEvolveRequirements: () => evaluateEvolveRequirements,
-    normalizeText: () => normalizeText
+    getTeamCards: () => getTeamCards,
+    hatchery: () => hatchery,
+    hubSheet: () => hubSheet,
+    huntQueue: () => huntQueue,
+    mapHop: () => mapHop,
+    miniGames: () => miniGames,
+    normalizeText: () => normalizeText,
+    parseRmtPriceEl: () => parseRmtPriceEl,
+    pure: () => pure_exports,
+    restock: () => restock,
+    rmtRadar: () => rmtRadar,
+    teamSeason: () => teamSeason,
+    telemetry: () => telemetry,
+    triggerTeamSwap: () => triggerTeamSwap
   });
 
   // src/modules/scheduler.js
@@ -48,7 +66,7 @@
     now = () => Date.now(),
     setIntervalFn = (fn, ms) => setInterval(fn, ms),
     clearIntervalFn = (id) => clearInterval(id),
-    tickMs = 500,
+    tickMs = 100,
     onError = (id, err) => console.error(`[PokeBot] tarefa "${id}" falhou:`, err)
   } = {}) => {
     const tasks = /* @__PURE__ */ new Map();
@@ -72,7 +90,7 @@
         task.busy = false;
       }
     };
-    const tick2 = () => {
+    const tick4 = () => {
       if (disposed || paused) return Promise.resolve();
       const t = now();
       const due = [...tasks.values()].filter((task) => !task.busy && task.nextAt <= t).sort((a, b) => b.priority - a.priority || a.nextAt - b.nextAt);
@@ -86,9 +104,9 @@
     };
     const start = () => {
       if (disposed || timer !== null) return;
-      timer = setIntervalFn(tick2, tickMs);
+      timer = setIntervalFn(tick4, tickMs);
     };
-    const dispose = () => {
+    const dispose2 = () => {
       disposed = true;
       if (timer !== null) clearIntervalFn(timer);
       timer = null;
@@ -97,9 +115,9 @@
     return {
       add,
       remove,
-      tick: tick2,
+      tick: tick4,
       start,
-      dispose,
+      dispose: dispose2,
       pause: () => {
         paused = true;
       },
@@ -129,7 +147,7 @@
       if (!mod || typeof mod[method] !== "function") return void 0;
       return mod[method](ctx, ...args);
     };
-    const dispose = () => {
+    const dispose2 = () => {
       scheduler.dispose();
       for (const mod of mods.values()) {
         try {
@@ -140,7 +158,7 @@
       }
       mods.clear();
     };
-    return { register, call, start: () => scheduler.start(), dispose, scheduler, has: (id) => mods.has(id) };
+    return { register, call, start: () => scheduler.start(), dispose: dispose2, scheduler, has: (id) => mods.has(id) };
   };
 
   // src/modules/selectors.js
@@ -288,6 +306,1974 @@
     id: "autoEvolve",
     everyMs: (ctx) => ctx.CONFIG.evolve.checkIntervalMs,
     tick
+  };
+
+  // src/modules/pure.js
+  var pure_exports = {};
+  __export(pure_exports, {
+    cleanKey: () => cleanKey,
+    looksLikeSheet: () => looksLikeSheet,
+    normalizeText: () => normalizeText2,
+    parseNumber: () => parseNumber,
+    parseQueueEntry: () => parseQueueEntry,
+    parseQueueText: () => parseQueueText,
+    parseSignedNumber: () => parseSignedNumber
+  });
+  var normalizeText2 = (str) => (str || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  var cleanKey = (str) => normalizeText2(str).replace(/[^a-z0-9]/g, "");
+  var parseNumber = (text) => {
+    const digits = (text || "").replace(/\D/g, "");
+    if (!digits) return null;
+    const n = parseInt(digits, 10);
+    return Number.isNaN(n) ? null : n;
+  };
+  var parseSignedNumber = (text) => {
+    const raw = (text || "").trim();
+    const negative = raw.startsWith("-") || raw.startsWith("\u2212");
+    const n = parseNumber(raw);
+    if (n === null) return null;
+    return negative ? -n : n;
+  };
+  var parseQueueEntry = (rawText, mode = null) => {
+    const raw = String(rawText || "").trim();
+    const m = raw.match(/^(.*?)\s+(?:n[ií]vel|nv\.?|lv\.?)\s*(\d+)\b/i);
+    const name = (m ? m[1] : raw).trim();
+    const level = m ? parseInt(m[2], 10) : null;
+    return { name, level, raw, mode };
+  };
+  var parseQueueText = (rawText, mode = null) => {
+    const seen = /* @__PURE__ */ new Set();
+    const out = [];
+    String(rawText || "").split(/[\n>|]+/).flatMap((chunk) => chunk.split(/,(?!\d)/)).forEach((piece) => {
+      const cleaned = piece.replace(/[✓✗✔✘⚠☠]/g, "").replace(/^[\s\d.)\-•*]+/, "").replace(/\s+/g, " ").trim();
+      if (cleaned.length < 3) return;
+      const entry = parseQueueEntry(cleaned, mode);
+      if (!/[a-zà-ÿ]{3,}/i.test(entry.name)) return;
+      const key = `${normalizeText2(entry.name)}|${entry.level ?? ""}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(entry);
+    });
+    return out;
+  };
+  var looksLikeSheet = (text) => /ficha do poke\s*idle/i.test(text || "") && (text || "").length > 300;
+
+  // src/modules/restock.js
+  var SEL_LOCAL = {
+    marketCards: "#mk-corpo .mk-card",
+    marketModes: "#mk-modos",
+    cardName: ".mk-nome",
+    cardOwned: ".mk-tem",
+    cardShortcuts: ".mk-atalhos button",
+    categoryBtns: "#mk-corpo .mk-lado button.mk-cat",
+    categoryText: ".mk-cat-txt",
+    marketTab: (abaKey) => `#mk-modos .cmp-op[data-aba="${abaKey}"]`
+  };
+  var getVisibleMarketCards = ({ dom }) => dom.$$(SEL_LOCAL.marketCards).filter(dom.isInteractable);
+  var isMarketOpen = ({ dom }) => Boolean(dom.$(SEL_LOCAL.marketModes) && dom.isVisible(dom.$(SEL_LOCAL.marketModes)));
+  var findMarketCard = (ctx, itemName) => {
+    const target = normalizeText2(itemName);
+    return getVisibleMarketCards(ctx).find((card) => {
+      const nameEl = card.querySelector(SEL_LOCAL.cardName);
+      return nameEl && normalizeText2(nameEl.textContent) === target;
+    }) || getVisibleMarketCards(ctx).find((card) => {
+      const nameEl = card.querySelector(SEL_LOCAL.cardName);
+      return nameEl && normalizeText2(nameEl.textContent).includes(target);
+    }) || null;
+  };
+  var findCardBuyButton = ({ dom }, card) => {
+    if (!card) return null;
+    return Array.from(card.querySelectorAll("button")).find(
+      (btn) => normalizeText2(btn.textContent).includes("comprar") && dom.isInteractable(btn)
+    ) || null;
+  };
+  var selectBatchShortcut = async ({ dom, sleep, randomDelay }, card, batchLabel) => {
+    if (!card || !batchLabel) return;
+    const target = normalizeText2(batchLabel).replace("\xD7", "x");
+    const shortcutBtn = Array.from(card.querySelectorAll(SEL_LOCAL.cardShortcuts)).find((btn) => {
+      const txt = normalizeText2(btn.textContent).replace("\xD7", "x");
+      return txt === target && dom.isInteractable(btn);
+    });
+    if (shortcutBtn) {
+      shortcutBtn.click();
+      await sleep(randomDelay(120, 220));
+    }
+  };
+  var ensureMarketTab = async ({ CONFIG, dom, sleep, randomDelay }, abaKey) => {
+    const tab = dom.$(SEL_LOCAL.marketTab(abaKey));
+    if (tab && !tab.classList.contains("on") && dom.isInteractable(tab)) {
+      tab.click();
+      await sleep(randomDelay(CONFIG.delays.uiMinMs, CONFIG.delays.uiMaxMs));
+    }
+  };
+  var switchMarketCategory = async ({ CONFIG, dom, sleep, randomDelay }, categoryName) => {
+    const target = normalizeText2(categoryName);
+    const catBtn = dom.$$(SEL_LOCAL.categoryBtns).find((btn) => {
+      if (!dom.isInteractable(btn)) return false;
+      const txt = normalizeText2(btn.querySelector(SEL_LOCAL.categoryText)?.textContent || btn.textContent);
+      return txt.startsWith(target) || txt === target;
+    });
+    if (catBtn && !catBtn.classList.contains("on")) {
+      catBtn.click();
+      await sleep(randomDelay(CONFIG.delays.uiMinMs, CONFIG.delays.uiMaxMs));
+    }
+  };
+  var smartRestock = async (ctx, { force = false } = {}) => {
+    const { CONFIG, state, dom, sleep, randomDelay, withModalLock } = ctx;
+    if (!CONFIG.restock.enabled && !force) return;
+    const ballTier = dom.getTargetBallTier();
+    const inv = dom.getInventorySnapshot();
+    const toBuy = [];
+    const currentTierBalls = inv.balls ? inv.balls[ballTier.chipIndex] : null;
+    if (force || currentTierBalls !== null && currentTierBalls < CONFIG.restock.minBalls) {
+      toBuy.push({
+        itemName: ballTier.itemName,
+        categoryName: "Pokebolas",
+        targetAmount: CONFIG.restock.targetBalls
+      });
+    }
+    if (CONFIG.restock.restockSmallPotion && (force || inv.smallPotions !== null && inv.smallPotions < CONFIG.restock.minPotions)) {
+      toBuy.push({
+        itemName: "Small Potion",
+        categoryName: "Po\xE7\xF5es",
+        targetAmount: CONFIG.restock.targetPotions
+      });
+    }
+    if (CONFIG.restock.restockRevive && (force || inv.totalRevives !== null && inv.totalRevives < CONFIG.restock.minRevives)) {
+      toBuy.push({
+        itemName: "Revive",
+        categoryName: "Revives",
+        targetAmount: CONFIG.restock.targetRevives
+      });
+    }
+    if (toBuy.length === 0) return;
+    await withModalLock(
+      "Restock",
+      async () => {
+        let openedByBot = false;
+        try {
+          if (!isMarketOpen(ctx)) {
+            if (dom.getVisibleModal()) await dom.closeActiveModal();
+            const marketBtn = dom.findMenuButtonByImg("menu-market") || dom.findClickableByText("Market");
+            if (!marketBtn) return;
+            marketBtn.click();
+            openedByBot = true;
+            const loaded = await dom.waitFor(() => isMarketOpen(ctx), 3500);
+            if (!loaded) return;
+            await sleep(randomDelay(CONFIG.delays.uiMinMs, CONFIG.delays.uiMaxMs));
+          }
+          await ensureMarketTab(ctx, "compra");
+          for (const item of toBuy) {
+            if (!state.running) break;
+            let card = findMarketCard(ctx, item.itemName);
+            if (!card) {
+              await switchMarketCategory(ctx, item.categoryName);
+              card = await dom.waitFor(() => findMarketCard(ctx, item.itemName), 2800);
+            }
+            if (!card) continue;
+            for (let i = 0; i < CONFIG.restock.maxPurchases; i++) {
+              if (!state.running) break;
+              const currCard = findMarketCard(ctx, item.itemName);
+              if (!currCard) break;
+              const countBefore = parseNumber(currCard.querySelector(SEL_LOCAL.cardOwned)?.textContent);
+              if (countBefore !== null && countBefore >= item.targetAmount) break;
+              await selectBatchShortcut(ctx, currCard, CONFIG.restock.batchButton);
+              const buyBtn = findCardBuyButton(ctx, currCard);
+              if (!buyBtn) break;
+              buyBtn.click();
+              state.stats.purchases++;
+              const countAfter = await dom.waitFor(() => {
+                const upd = findMarketCard(ctx, item.itemName);
+                const val = parseNumber(upd?.querySelector(SEL_LOCAL.cardOwned)?.textContent);
+                return val !== null && countBefore !== null && val > countBefore ? val : null;
+              }, CONFIG.restock.buyConfirmTimeoutMs, 100);
+              if (countAfter === null) break;
+              state.lastActionNote = `${item.itemName}: ${countAfter}`;
+              await sleep(randomDelay(160, 280));
+            }
+          }
+        } finally {
+          if (openedByBot && CONFIG.restock.closeMarketAfter && state.running) {
+            await dom.closeActiveModal();
+          }
+        }
+      },
+      { force }
+    );
+  };
+  var restock = {
+    id: "restock",
+    everyMs: (ctx) => ctx.CONFIG.restock.checkIntervalMs,
+    tick: (ctx) => smartRestock(ctx, { force: false }),
+    run: smartRestock
+  };
+
+  // src/modules/capture.js
+  var SEL_LOCAL2 = {
+    ballOpts: "#auto-ball-opts",
+    ballChip: ".auto-chip",
+    chipQty: ".q",
+    caidoWho: ".caido-quem"
+  };
+  var isShinyCaidoButton = (btn) => {
+    if (!btn) return false;
+    const cls = (btn.className || "").toLowerCase();
+    const txt = btn.textContent || "";
+    return cls.includes("shiny") || btn.dataset.shiny === "1" || btn.dataset.shiny === "true" || txt.includes("\u2728") || normalizeText2(txt).includes("shiny");
+  };
+  var ensureBestBallSelected = (ctx, targetBtn) => {
+    const { CONFIG, dom } = ctx;
+    const container = dom.$(SEL_LOCAL2.ballOpts);
+    if (!container) return;
+    const chips = Array.from(container.querySelectorAll(SEL_LOCAL2.ballChip));
+    if (chips.length === 0) return;
+    const counts = chips.map((c) => parseNumber(c.querySelector(SEL_LOCAL2.chipQty)?.textContent ?? c.textContent) ?? 0);
+    const currentIdx = chips.findIndex((c) => c.classList.contains("on"));
+    const isShiny = isShinyCaidoButton(targetBtn);
+    let desiredIdx = currentIdx;
+    if (isShiny) {
+      for (const idx of [4, 3, 2, 1, 0]) {
+        if (chips[idx] && counts[idx] > 0) {
+          desiredIdx = idx;
+          break;
+        }
+      }
+    } else if (CONFIG.caidos.smartBallSelect) {
+      const targetLv = parseNumber(targetBtn?.textContent) ?? dom.getCurrentHunt()?.targetLevel ?? 1;
+      const order = targetLv >= CONFIG.caidos.highLevelUltraThreshold ? [3, 2, 1, 0] : [0, 1, 2, 3];
+      for (const idx of order) {
+        if (chips[idx] && counts[idx] > 0) {
+          desiredIdx = idx;
+          break;
+        }
+      }
+    } else if (currentIdx === -1 || counts[currentIdx] <= 0) {
+      const firstAvailable = counts.findIndex((n) => n > 0);
+      if (firstAvailable !== -1) desiredIdx = firstAvailable;
+    }
+    if (desiredIdx !== -1 && desiredIdx !== currentIdx && chips[desiredIdx] && dom.isInteractable(chips[desiredIdx])) {
+      chips[desiredIdx].click();
+    }
+  };
+  var processCaidos = (ctx, container) => {
+    const { CONFIG, state, dom, randomDelay, playBeep, updateHud } = ctx;
+    if (!state.running || state.paused || !container) return;
+    const allButtons = Array.from(container.querySelectorAll(CONFIG.caidos.buttonSelector)).filter(dom.isInteractable);
+    const shinyButtons = allButtons.filter(isShinyCaidoButton);
+    if (shinyButtons.length > 0) {
+      state.shinyAlertActive = true;
+      shinyButtons.forEach((b) => {
+        const slot = b.dataset.slot || b.textContent;
+        if (!state.shinyNotifiedSlots.has(slot)) {
+          state.shinyNotifiedSlots.add(slot);
+          state.stats.shiniesSpotted++;
+          if (CONFIG.shinyGuard.soundAlert) playBeep(1180, 0.25);
+          state.lastActionNote = `\u2728 SHINY DETECTADO: ${(b.querySelector(SEL_LOCAL2.caidoWho)?.textContent || "Alvo").trim()}`;
+          updateHud();
+        }
+      });
+    } else {
+      state.shinyAlertActive = false;
+    }
+    if (!CONFIG.caidos.enabled) return;
+    if (state.modalLockOwner && !(CONFIG.shinyGuard.enabled && shinyButtons.length > 0)) return;
+    if (state.throwPending) return;
+    const inv = dom.getInventorySnapshot();
+    if (inv.totalBalls === 0) {
+      smartRestock(ctx, { force: false });
+      return;
+    }
+    const now = Date.now();
+    const ordered = shinyButtons.length > 0 ? [...shinyButtons, ...allButtons] : allButtons;
+    const nextBtn = ordered.find((btn) => {
+      const lastTry = parseInt(btn.dataset.pbTriedAt || "0", 10);
+      const retryMs = isShinyCaidoButton(btn) ? 1400 : CONFIG.caidos.retryAfterMs;
+      return now - lastTry >= retryMs;
+    });
+    if (!nextBtn) return;
+    const elapsed = now - state.lastThrowAt;
+    const baseWait = Math.max(0, CONFIG.caidos.minThrowIntervalMs - elapsed);
+    const jitter = randomDelay(CONFIG.delays.clickMinMs, CONFIG.delays.clickMaxMs);
+    state.throwPending = true;
+    setTimeout(() => {
+      window.requestAnimationFrame(() => {
+        state.throwPending = false;
+        if (!state.running || state.paused) return;
+        if (state.modalLockOwner && !isShinyCaidoButton(nextBtn)) return;
+        if (dom.getInventorySnapshot().totalBalls === 0) {
+          smartRestock(ctx, { force: false });
+          return;
+        }
+        if (dom.isInteractable(nextBtn)) {
+          ensureBestBallSelected(ctx, nextBtn);
+          nextBtn.dataset.pbTriedAt = String(Date.now());
+          state.lastThrowAt = Date.now();
+          nextBtn.click();
+          state.stats.caidosClicked++;
+        }
+        if (state.observedCaidosNode) {
+          processCaidos(ctx, state.observedCaidosNode);
+        }
+      });
+    }, baseWait + jitter);
+  };
+  var ensureCaidosObserver = (ctx) => {
+    const { CONFIG, state, dom } = ctx;
+    if (!state.running || state.paused) return;
+    const targetNode = dom.$(CONFIG.caidos.containerSelector);
+    if (targetNode !== state.observedCaidosNode) {
+      if (state.caidosObserver) {
+        state.caidosObserver.disconnect();
+        state.caidosObserver = null;
+        state.observedCaidosNode = null;
+      }
+      if (targetNode) {
+        state.observedCaidosNode = targetNode;
+        state.caidosObserver = new MutationObserver(() => processCaidos(ctx, targetNode));
+        state.caidosObserver.observe(targetNode, { childList: true });
+      }
+    }
+    if (state.observedCaidosNode) {
+      processCaidos(ctx, state.observedCaidosNode);
+    }
+  };
+  var capture = {
+    id: "capture",
+    everyMs: (ctx) => ctx.CONFIG.caidos.reattachIntervalMs,
+    tick: (ctx) => ensureCaidosObserver(ctx),
+    process: processCaidos,
+    ensureObserver: ensureCaidosObserver,
+    dispose: ({ state }) => {
+      if (state.caidosObserver) {
+        state.caidosObserver.disconnect();
+        state.caidosObserver = null;
+        state.observedCaidosNode = null;
+      }
+    }
+  };
+
+  // src/modules/depot.js
+  var SEL_LOCAL3 = {
+    bagBtn: "#btn-bolsa",
+    pocket: (abaKey) => `.mochila-bolso[data-aba="${abaKey}"]`,
+    bagBody: "#bolsa-corpo",
+    sellInfo: ".mk-vt-info",
+    sellAllBtn: ".mk-vender-tudo button.mk-acao",
+    offerAll: "#ofr-tudo",
+    offerAuto: "#ofr-auto",
+    offerFast: "#ofr-rapida",
+    offerSpin: "#ofr-girar",
+    sacSelectAll: "#sac-todos",
+    sacDo: "#sac-sacrificar",
+    sacClaim: "#sac-resgatar"
+  };
+  var openBackpackPocket = async ({ dom, sleep, randomDelay }, abaKey) => {
+    if (dom.getVisibleModal()) await dom.closeActiveModal();
+    const bagBtn = dom.$(SEL_LOCAL3.bagBtn);
+    if (!bagBtn || !dom.isInteractable(bagBtn)) return null;
+    bagBtn.click();
+    const bolsoBtn = await dom.waitFor(() => dom.$(SEL_LOCAL3.pocket(abaKey)), 3500);
+    if (!bolsoBtn || !dom.isInteractable(bolsoBtn)) {
+      await dom.closeActiveModal();
+      return null;
+    }
+    bolsoBtn.click();
+    await sleep(randomDelay(320, 480));
+    return dom.$(SEL_LOCAL3.bagBody);
+  };
+  var runDepotManager = async (ctx, { force = false } = {}) => {
+    const { CONFIG, state, dom, sleep, randomDelay, withModalLock } = ctx;
+    const mode = CONFIG.depot.mode;
+    if (mode === "off") return;
+    if (!force && Date.now() - state.lastDepotRunAt < CONFIG.depot.intervalMs) return;
+    await withModalLock(
+      `Depot:${mode}`,
+      async () => {
+        state.lastDepotRunAt = Date.now();
+        try {
+          if (mode === "venda") {
+            if (dom.getVisibleModal()) await dom.closeActiveModal();
+            const marketBtn = dom.findMenuButtonByImg("menu-market") || dom.findClickableByText("Market");
+            if (!marketBtn) return;
+            marketBtn.click();
+            if (!await dom.waitFor(() => isMarketOpen(ctx), 3500)) return;
+            await ensureMarketTab(ctx, "pokemons");
+            await sleep(randomDelay(250, 400));
+            const infoTxt = dom.$(SEL_LOCAL3.sellInfo)?.textContent || "";
+            const countToSell = parseNumber(infoTxt.split("para vender")[0]);
+            const sellAllBtn = dom.$(SEL_LOCAL3.sellAllBtn);
+            if (sellAllBtn && dom.isInteractable(sellAllBtn) && (countToSell === null || countToSell > 0)) {
+              sellAllBtn.click();
+              await dom.confirmModalDialog(["confirmar", "vender", "sim"]);
+              state.stats.depotRuns++;
+              state.lastActionNote = `Depot vendido (${countToSell ?? "?"} pkm)`;
+            } else {
+              state.lastActionNote = "Depot sem Pok\xE9mon para vender";
+            }
+          } else if (mode === "oferenda") {
+            const corpo = await openBackpackPocket(ctx, "oferenda");
+            if (!corpo) return;
+            const allBtn = dom.$(SEL_LOCAL3.offerAll);
+            if (allBtn && dom.isInteractable(allBtn)) {
+              allBtn.click();
+              await dom.confirmModalDialog(["confirmar", "oferendar", "sim"]);
+              state.stats.depotRuns++;
+              state.lastActionNote = "Oferenda em lote executada";
+            } else {
+              const autoBtn = dom.$(SEL_LOCAL3.offerAuto);
+              if (autoBtn && dom.isInteractable(autoBtn)) {
+                autoBtn.click();
+                await sleep(randomDelay(260, 400));
+              }
+              const fastBtn = dom.$(SEL_LOCAL3.offerFast) || dom.$(SEL_LOCAL3.offerSpin);
+              if (fastBtn && dom.isInteractable(fastBtn)) {
+                fastBtn.click();
+                await dom.confirmModalDialog(["confirmar", "oferendar", "sim"]);
+                state.stats.depotRuns++;
+                state.lastActionNote = "Oferenda r\xE1pida executada";
+              } else {
+                state.lastActionNote = "Oferenda: sem Pok\xE9mon eleg\xEDveis";
+              }
+            }
+          } else if (mode === "sacrificio") {
+            const corpo = await openBackpackPocket(ctx, "sacrificio");
+            if (!corpo) return;
+            const selBtn = dom.$(SEL_LOCAL3.sacSelectAll);
+            if (selBtn && dom.isInteractable(selBtn)) {
+              selBtn.click();
+              await sleep(randomDelay(260, 400));
+            }
+            const sacBtn = dom.$(SEL_LOCAL3.sacDo);
+            if (sacBtn && dom.isInteractable(sacBtn)) {
+              sacBtn.click();
+              await dom.confirmModalDialog(["confirmar", "sacrificar", "sim"]);
+              state.stats.depotRuns++;
+              state.lastActionNote = "Sacrif\xEDcio conclu\xEDdo";
+              await sleep(randomDelay(300, 450));
+            }
+            const native = dom.readNativeSessionPanel();
+            const boostOn = Boolean(native?.boosts?.sacrificio);
+            const claimBtn = dom.$(SEL_LOCAL3.sacClaim);
+            if (claimBtn && dom.isInteractable(claimBtn) && (!boostOn || force)) {
+              claimBtn.click();
+              await dom.confirmModalDialog(["confirmar", "resgatar", "sim"]);
+              state.lastActionNote = "Boost +20% XP resgatado!";
+            }
+          }
+        } finally {
+          await dom.closeActiveModal();
+        }
+      },
+      { force }
+    );
+  };
+  var depot = {
+    id: "depot",
+    everyMs: 6e4,
+    tick: (ctx) => runDepotManager(ctx, { force: false }),
+    run: runDepotManager
+  };
+
+  // src/modules/hatchery.js
+  var EGG_PRIORITY_KEYWORDS = ["ovo shiny", "shiny", "p4", "p3", "p2", "mystery egg"];
+  var SEL_LOCAL4 = {
+    slotButtons: ".chc-slot button",
+    release: "chc-liberar",
+    // classe do botão "liberar" (nunca clicar)
+    freeSlot: ".chc-slot.livre",
+    slots: ".chc-slot"
+  };
+  var checkIncubator = async (ctx, { force = false } = {}) => {
+    const { CONFIG, state, dom, sleep, randomDelay, withModalLock } = ctx;
+    if (!CONFIG.incubator.enabled && !force) return;
+    if (!force && Date.now() < state.nextIncubatorCheckAt) return;
+    await withModalLock(
+      "Chocadeira",
+      async () => {
+        let hasActiveOrEgg = false;
+        try {
+          const corpo = await openBackpackPocket(ctx, "chocadeira");
+          if (!corpo) return;
+          const readyBtns = Array.from(corpo.querySelectorAll(SEL_LOCAL4.slotButtons)).filter((b) => {
+            if (!dom.isInteractable(b) || b.classList.contains(SEL_LOCAL4.release)) return false;
+            const t = normalizeText2(b.textContent);
+            return t.includes("chocar") || t.includes("recolher") || t.includes("abrir") || t.includes("nascer");
+          });
+          for (const btn of readyBtns) {
+            btn.click();
+            state.stats.eggsHandled++;
+            state.lastActionNote = "Ovo chocado!";
+            hasActiveOrEgg = true;
+            await sleep(randomDelay(400, 650));
+          }
+          const freeSlot = corpo.querySelector(SEL_LOCAL4.freeSlot);
+          if (freeSlot) {
+            const slotBtns = Array.from(freeSlot.querySelectorAll("button")).filter(
+              (b) => dom.isInteractable(b) && !b.classList.contains(SEL_LOCAL4.release)
+            );
+            if (slotBtns.length > 0) {
+              let chosenBtn = null;
+              for (const kw of EGG_PRIORITY_KEYWORDS) {
+                chosenBtn = slotBtns.find((b) => normalizeText2(b.textContent).includes(kw));
+                if (chosenBtn) break;
+              }
+              chosenBtn = chosenBtn || slotBtns[0];
+              chosenBtn.click();
+              await dom.confirmModalDialog(["confirmar", "colocar", "incubar", "sim"]);
+              state.stats.eggsHandled++;
+              state.lastActionNote = `Ovo incubado: ${chosenBtn.textContent.trim().slice(0, 24)}`;
+              hasActiveOrEgg = true;
+            }
+          }
+          const occupied = Array.from(corpo.querySelectorAll(SEL_LOCAL4.slots)).some(
+            (s) => !s.classList.contains("livre") && !s.classList.contains("trancado")
+          );
+          if (occupied) hasActiveOrEgg = true;
+        } finally {
+          state.nextIncubatorCheckAt = Date.now() + (hasActiveOrEgg ? CONFIG.incubator.activeIntervalMs : CONFIG.incubator.emptyBackoffMs);
+          await dom.closeActiveModal();
+        }
+      },
+      { force }
+    );
+  };
+  var hatchery = {
+    id: "hatchery",
+    everyMs: 15e3,
+    tick: (ctx) => checkIncubator(ctx, { force: false }),
+    check: checkIncubator
+  };
+
+  // src/modules/boss-loot.js
+  var SEL_LOCAL5 = {
+    lootOk: "#boss-loot-ok",
+    bossList: "#boss-lista",
+    bossItems: 'button.boss-item:not([data-key="@raid"])',
+    modalBody: "#modal-corpo",
+    challengeBtn: "button.boss-desafiar",
+    bossName: ".boss-nome"
+  };
+  var dismissBossLoot = ({ CONFIG, state, dom }) => {
+    if (!state.running || !CONFIG.boss.autoDismissLoot) return;
+    const okBtn = dom.$(SEL_LOCAL5.lootOk);
+    if (okBtn && dom.isInteractable(okBtn)) {
+      okBtn.click();
+      state.lastActionNote = "Loot de Boss coletado!";
+    }
+  };
+  var bossMatchesPriority = (detailEl, priority) => {
+    if (priority === "qualquer") return true;
+    const html = (detailEl?.innerHTML || "").toLowerCase();
+    const txt = normalizeText2(detailEl?.textContent || "");
+    if (priority === "mega") return html.includes("fragmento-mega") || txt.includes("mega");
+    if (priority === "tm") return html.includes("tm_disk") || html.includes("zmove") || txt.includes("tm ");
+    if (priority === "tickets") return html.includes("mystic-ticket") || html.includes("safari-ticket") || txt.includes("ticket");
+    return true;
+  };
+  var checkBosses = async (ctx, { force = false } = {}) => {
+    const { CONFIG, state, dom, sleep, randomDelay, withModalLock } = ctx;
+    const prio = CONFIG.boss.priority;
+    if (prio === "off" && !force) return;
+    if (!force && Date.now() - state.lastBossCheckAt < CONFIG.boss.checkIntervalMs) return;
+    await withModalLock(
+      "Bosses",
+      async () => {
+        state.lastBossCheckAt = Date.now();
+        let entered = false;
+        try {
+          if (dom.getVisibleModal()) await dom.closeActiveModal();
+          const bossBtn = dom.findMenuButtonByImg("boss-cabeca") || dom.findMenuButtonByImg("menu-bosses");
+          if (!bossBtn) return;
+          bossBtn.click();
+          const listEl = await dom.waitFor(() => dom.$(SEL_LOCAL5.bossList), 3500);
+          if (!listEl) return;
+          await sleep(randomDelay(240, 380));
+          const items = Array.from(listEl.querySelectorAll(SEL_LOCAL5.bossItems)).filter(dom.isInteractable);
+          for (const item of items) {
+            if (!state.running) break;
+            item.click();
+            await sleep(randomDelay(220, 340));
+            const modalBody = dom.$(SEL_LOCAL5.modalBody);
+            const challengeBtn = modalBody?.querySelector(SEL_LOCAL5.challengeBtn);
+            if (!challengeBtn || challengeBtn.disabled || !dom.isInteractable(challengeBtn)) continue;
+            if (!bossMatchesPriority(modalBody, prio === "off" ? "qualquer" : prio)) continue;
+            const bossName = modalBody.querySelector(SEL_LOCAL5.bossName)?.textContent?.trim() || "Boss";
+            challengeBtn.click();
+            await dom.confirmModalDialog(["desafiar", "entrar", "confirmar", "sim"]);
+            state.stats.bossEntries++;
+            state.lastActionNote = `Entrou no Boss: ${bossName}`;
+            entered = true;
+            break;
+          }
+          if (!entered) {
+            state.lastActionNote = `Bosses (${prio}): nenhum dispon\xEDvel agora`;
+          }
+        } finally {
+          if (!entered) await dom.closeActiveModal();
+        }
+      },
+      { force }
+    );
+  };
+  var bosses = {
+    id: "bosses",
+    everyMs: 6e4,
+    tick: (ctx) => checkBosses(ctx, { force: false }),
+    check: checkBosses
+  };
+  var bossLoot = {
+    id: "bossLoot",
+    everyMs: 3e3,
+    tick: (ctx) => dismissBossLoot(ctx),
+    dismiss: dismissBossLoot
+  };
+
+  // src/modules/map-benchmark.js
+  var SEL_LOCAL6 = {
+    mapBar: ".mapa-barra",
+    mapWorld: ".mapa-mundi",
+    viewModeButtons: ".mapa-modo button.mapa-modo-bt",
+    regionTabsUnlocked: "button.mapa-reg-bt:not(.mapa-area-travada)",
+    markersUnlocked: "button.marcador:not(.travado)",
+    checkbox: 'input[type="checkbox"]',
+    checkboxHolder: "label, div"
+  };
+  var computeMaxAreaLevel = (trainerLevel, pokeLevel, maxLevelAbovePokemon) => Math.min(trainerLevel ?? pokeLevel, pokeLevel + maxLevelAbovePokemon);
+  var sortCandidates = (candidates, ascending = false) => candidates.sort((a, b) => ascending ? a.areaLevel - b.areaLevel : b.areaLevel - a.areaLevel);
+  var isTravelConfirmText = (text) => {
+    const t = normalizeText2(text);
+    return t === "ir" || t.includes("viajar") || t.includes("cacar") || t.includes("entrar");
+  };
+  var getMarkerSignature = (btn, regionName) => {
+    const left = btn.style.left || "";
+    const top = btn.style.top || "";
+    const title = btn.getAttribute("title") || btn.getAttribute("aria-label") || "";
+    const level = parseNumber(btn.textContent) ?? 0;
+    return `${regionName}::${level}::${left},${top}::${title}`;
+  };
+  var isMapModalOpen = ({ dom }) => {
+    const modal = dom.getVisibleModal();
+    return Boolean(modal && modal.querySelector(SEL_LOCAL6.mapBar));
+  };
+  var openMapModal = async (ctx) => {
+    const { dom, sleep, randomDelay } = ctx;
+    if (isMapModalOpen(ctx)) return dom.getVisibleModal();
+    if (dom.getVisibleModal()) await dom.closeActiveModal();
+    const mapBtn = dom.findMenuButtonByImg("menu-mapa") || dom.findClickableByText("Mapa");
+    if (!mapBtn) return null;
+    mapBtn.click();
+    const modal = await dom.waitFor(() => isMapModalOpen(ctx) ? dom.getVisibleModal() : null, 3800);
+    if (modal) await sleep(randomDelay(240, 380));
+    return modal;
+  };
+  var ensureMapViewMode = async ({ dom, sleep, randomDelay }, modal, modeLabel = "MAPA") => {
+    const btns = Array.from(modal.querySelectorAll(SEL_LOCAL6.viewModeButtons));
+    const target = btns.find((b) => normalizeText2(b.textContent) === normalizeText2(modeLabel));
+    if (target && !target.classList.contains("on") && dom.isInteractable(target)) {
+      target.click();
+      await sleep(randomDelay(200, 340));
+    }
+  };
+  var applyMapFilters = async ({ dom, sleep }, modal, { pokemonTypes = [], useTypeAdvantage = true, onlyUnlocked = true, pokedexFilter = null } = {}) => {
+    const bar = modal.querySelector(SEL_LOCAL6.mapBar);
+    if (!bar) return;
+    const tipoTrigger = Array.from(bar.querySelectorAll("button")).find(
+      (b) => normalizeText2(b.textContent).startsWith("tipo")
+    );
+    if (tipoTrigger && dom.isInteractable(tipoTrigger)) {
+      const ensureTipoOpen = async () => {
+        if (!dom.findClickableByText("todos os tipos", modal, true)) {
+          tipoTrigger.click();
+          await dom.waitFor(() => dom.findClickableByText("todos os tipos", modal, true), 1400);
+          await sleep(120);
+        }
+      };
+      await ensureTipoOpen();
+      const resetBtn = dom.findClickableByText("todos os tipos", modal, true);
+      if (resetBtn) {
+        resetBtn.click();
+        await sleep(150);
+      }
+      if (useTypeAdvantage && pokemonTypes.length > 0) {
+        await ensureTipoOpen();
+        for (const type of pokemonTypes) {
+          const typeBtn = dom.findClickableByText(type, modal, true);
+          if (typeBtn) {
+            typeBtn.click();
+            await sleep(120);
+          }
+        }
+        const weakBtn = dom.findClickableByText("Fraco contra", modal, true);
+        if (weakBtn) {
+          weakBtn.click();
+          await sleep(150);
+        }
+      }
+      if (dom.findClickableByText("todos os tipos", modal, true)) {
+        tipoTrigger.click();
+        await sleep(120);
+      }
+    }
+    const dexTrigger = Array.from(bar.querySelectorAll("button")).find(
+      (b) => normalizeText2(b.textContent).startsWith("pokedex")
+    );
+    if (dexTrigger && dom.isInteractable(dexTrigger)) {
+      const desiredLabel = pokedexFilter || "Todos";
+      if (!normalizeText2(dexTrigger.textContent).includes(normalizeText2(desiredLabel))) {
+        dexTrigger.click();
+        const option = await dom.waitFor(
+          () => dom.findClickableByText(desiredLabel, modal, desiredLabel === "Todos"),
+          1400
+        );
+        if (option) {
+          option.click();
+          await sleep(150);
+        } else {
+          dexTrigger.click();
+          await sleep(120);
+        }
+      }
+    }
+    if (onlyUnlocked) {
+      const nivelTrigger = Array.from(bar.querySelectorAll("button")).find(
+        (b) => normalizeText2(b.textContent).startsWith("nivel")
+      );
+      if (nivelTrigger && dom.isInteractable(nivelTrigger)) {
+        const findUnlockedCb = () => Array.from(modal.querySelectorAll(SEL_LOCAL6.checkbox)).find((cb2) => {
+          const parentTxt = normalizeText2(cb2.closest(SEL_LOCAL6.checkboxHolder)?.textContent);
+          return parentTxt.includes("liberadas") && dom.isVisible(cb2);
+        });
+        if (!findUnlockedCb()) {
+          nivelTrigger.click();
+          await dom.waitFor(findUnlockedCb, 1400);
+          await sleep(120);
+        }
+        const cb = findUnlockedCb();
+        if (cb && !cb.checked) {
+          cb.click();
+          await sleep(150);
+        }
+        if (findUnlockedCb()) {
+          nivelTrigger.click();
+          await sleep(120);
+        }
+      }
+    }
+  };
+  var selectMapRegionTab = async ({ dom, sleep, randomDelay }, modal, regionName) => {
+    const regBtn = Array.from(modal.querySelectorAll(SEL_LOCAL6.regionTabsUnlocked)).find(
+      (b) => normalizeText2(b.textContent).startsWith(normalizeText2(regionName))
+    );
+    if (!regBtn) return false;
+    if (!regBtn.classList.contains("on")) {
+      regBtn.click();
+      await sleep(randomDelay(220, 340));
+    }
+    return true;
+  };
+  var collectCandidatesFromOpenMap = async (ctx, modal, poke, useTypeAdvantage, pokedexFilter, ascending = false) => {
+    const { CONFIG, dom, sleep, randomDelay } = ctx;
+    await ensureMapViewMode(ctx, modal, "MAPA");
+    await applyMapFilters(ctx, modal, {
+      pokemonTypes: poke?.types || [],
+      useTypeAdvantage,
+      onlyUnlocked: CONFIG.map.onlyUnlocked,
+      pokedexFilter
+    });
+    const unlockedRegions = Array.from(modal.querySelectorAll(SEL_LOCAL6.regionTabsUnlocked));
+    const candidates = [];
+    const pokeLevel = poke?.level ?? 1;
+    const trainerLevel = dom.getTrainerHeaderInfo().level ?? pokeLevel;
+    const maxLevel = computeMaxAreaLevel(trainerLevel, pokeLevel, CONFIG.map.maxLevelAbovePokemon);
+    for (const regBtn of unlockedRegions) {
+      const regionName = (regBtn.textContent || "").split("\n")[0].trim();
+      if (!regBtn.classList.contains("on")) {
+        regBtn.click();
+        await sleep(randomDelay(220, 340));
+      }
+      const markers = Array.from(modal.querySelectorAll(SEL_LOCAL6.markersUnlocked)).filter(dom.isInteractable);
+      markers.forEach((btn, idx) => {
+        const areaLevel = parseNumber(btn.textContent) ?? 1;
+        if (areaLevel > maxLevel) return;
+        candidates.push({
+          regionName,
+          areaLevel,
+          title: btn.getAttribute("title") || btn.getAttribute("aria-label") || "",
+          indexInRegion: idx,
+          signature: getMarkerSignature(btn, regionName),
+          isCurrent: btn.classList.contains("on")
+        });
+      });
+    }
+    return sortCandidates(candidates, ascending);
+  };
+  var waitForAreaSwitchCooldown = async ({ CONFIG, state, updateHud, sleep }) => {
+    const remaining = CONFIG.map.switchCooldownMs - (Date.now() - state.lastAreaSwitchAt);
+    if (remaining > 0) {
+      state.lastActionNote = `Trava de \xE1rea (${(remaining / 1e3).toFixed(1)}s)`;
+      updateHud();
+      await sleep(remaining);
+    }
+  };
+  var travelToMarkerMeta = async (ctx, meta) => {
+    const { CONFIG, state, dom, sleep, randomDelay } = ctx;
+    if (CONFIG.shinyGuard.enabled && state.shinyAlertActive) return false;
+    await waitForAreaSwitchCooldown(ctx);
+    if (CONFIG.shinyGuard.enabled && state.shinyAlertActive) return false;
+    const modal = await openMapModal(ctx);
+    if (!modal) return false;
+    await ensureMapViewMode(ctx, modal, "MAPA");
+    await applyMapFilters(ctx, modal, {
+      pokemonTypes: [],
+      useTypeAdvantage: false,
+      onlyUnlocked: CONFIG.map.onlyUnlocked,
+      pokedexFilter: null
+    });
+    const switched = await selectMapRegionTab(ctx, modal, meta.regionName);
+    if (!switched) {
+      await dom.closeActiveModal();
+      return false;
+    }
+    const markers = Array.from(modal.querySelectorAll(SEL_LOCAL6.markersUnlocked)).filter(dom.isInteractable);
+    let targetBtn = markers.find((b) => getMarkerSignature(b, meta.regionName) === meta.signature);
+    if (!targetBtn && markers[meta.indexInRegion]) targetBtn = markers[meta.indexInRegion];
+    if (!targetBtn) {
+      await dom.closeActiveModal();
+      return false;
+    }
+    if (targetBtn.classList.contains("on")) {
+      await dom.closeActiveModal();
+      state.lastMarkerMeta = meta;
+      return true;
+    }
+    const prevHuntKey = dom.getCurrentHunt()?.key || null;
+    targetBtn.click();
+    const traveled = await dom.waitFor(() => {
+      if (!dom.getVisibleModal()) return true;
+      const currKey = dom.getCurrentHunt()?.key || null;
+      if (prevHuntKey && currKey && currKey !== prevHuntKey) return true;
+      const activeModal = dom.getVisibleModal();
+      if (activeModal) {
+        const confirmBtn = dom.$(SEL.confirmarSim) || Array.from(activeModal.querySelectorAll("button")).find((b) => {
+          if (!dom.isInteractable(b) || b.closest(SEL_LOCAL6.mapBar) || b.closest(SEL_LOCAL6.mapWorld)) return false;
+          return isTravelConfirmText(b.textContent);
+        });
+        if (confirmBtn && dom.isInteractable(confirmBtn)) confirmBtn.click();
+      }
+      return false;
+    }, 2800, 140);
+    if (dom.getVisibleModal()) await dom.closeActiveModal();
+    if (traveled) {
+      state.lastAreaSwitchAt = Date.now();
+      state.lastMarkerMeta = meta;
+      state.stats.regionSwitches++;
+      await sleep(randomDelay(300, 480));
+    }
+    return Boolean(traveled);
+  };
+  var saveHuntQueueState = ({ CONFIG, state, storage, keys }) => {
+    storage.saveJson(keys.huntQueue, {
+      mode: CONFIG.mode,
+      updatedAt: Date.now(),
+      index: state.huntQueueIndex,
+      items: state.huntQueue
+    });
+  };
+
+  // src/modules/hunt-queue.js
+  var SEL_LOCAL7 = {
+    manualQueueBox: "#pb-manual-queue"
+  };
+  var normalizeQueueList = (list, mode) => list.map(
+    (entry) => typeof entry === "string" ? parseQueueEntry(entry, mode) : { ...entry, name: String(entry?.name || "").trim() }
+  ).filter((x) => x.name.length > 0);
+  var findQueueMatch = (entry, candidates) => {
+    if (entry.markerMeta) return entry.markerMeta;
+    const needle = normalizeText2(entry.regionName || entry.name);
+    if (!needle) return null;
+    const byName = candidates.filter((c) => {
+      const region = normalizeText2(c.regionName);
+      const title = normalizeText2(c.title);
+      return region && (region.includes(needle) || needle.includes(region)) || title && title.includes(needle);
+    });
+    return entry.level && byName.find((c) => c.areaLevel === entry.level) || byName[0] || null;
+  };
+  var pickSafeFallback = (entry, candidates, poke) => {
+    const pokeLevel = poke?.level ?? null;
+    const pool = candidates.filter((c) => !c.isCurrent && (pokeLevel === null || c.areaLevel <= pokeLevel));
+    if (pool.length === 0) return null;
+    return entry?.level && pool.find((c) => c.areaLevel === entry.level) || pool[0];
+  };
+  var definirFilaHunt = (ctx, list) => {
+    const { CONFIG, state, updateHud } = ctx;
+    if (!Array.isArray(list)) return [];
+    state.huntQueue = normalizeQueueList(list, CONFIG.mode);
+    state.huntQueueIndex = 0;
+    saveHuntQueueState(ctx);
+    state.lastActionNote = `Fila /hunt: ${state.huntQueue.length} \xE1reas`;
+    updateHud();
+    return state.huntQueue;
+  };
+  var loadManualQueue = async (ctx, irAgora = false) => {
+    const { CONFIG, state, updateHud } = ctx;
+    const raw = state.hudEl?.querySelector(SEL_LOCAL7.manualQueueBox)?.value || "";
+    const entries = parseQueueText(raw, CONFIG.mode);
+    if (entries.length === 0) {
+      if (irAgora && state.huntQueue.length > 0) {
+        return irProximaHuntGuia(ctx, true);
+      }
+      state.lastActionNote = "Cole ao menos 1 \xE1rea v\xE1lida";
+      updateHud();
+      return false;
+    }
+    definirFilaHunt(ctx, entries);
+    state.lastActionNote = `Fila /hunt: ${state.huntQueue.length} itens (pr\xF3x: ${state.huntQueue[0].name})`;
+    updateHud();
+    if (irAgora) {
+      return irProximaHuntGuia(ctx, true);
+    }
+    return true;
+  };
+  var limparFilaHunt = (ctx) => {
+    const { state, updateHud } = ctx;
+    state.huntQueue = [];
+    state.huntQueueIndex = 0;
+    saveHuntQueueState(ctx);
+    state.lastActionNote = "Fila /hunt limpa";
+    updateHud();
+  };
+  var buildHuntQueueItems = async (ctx) => {
+    const { CONFIG, dom } = ctx;
+    let items = [];
+    if (items.length === 0) {
+      const poke = dom.getActivePokemon();
+      const modal = await openMapModal(ctx);
+      if (modal) {
+        const candidates = await collectCandidatesFromOpenMap(
+          ctx,
+          modal,
+          poke,
+          CONFIG.map.preferTypeAdvantage,
+          CONFIG.mode === "topcatch" ? "Top Catch" : null,
+          CONFIG.mode === "topcatch"
+        );
+        await dom.closeActiveModal();
+        items = candidates.slice(0, 8).map((c) => ({
+          name: c.regionName,
+          regionName: c.regionName,
+          areaLevel: c.areaLevel,
+          markerMeta: c,
+          mode: CONFIG.mode
+        }));
+      }
+    }
+    return items;
+  };
+  var adoptHuntQueue = (ctx, items) => {
+    const { state } = ctx;
+    state.huntQueue = items;
+    state.huntQueueIndex = 0;
+    saveHuntQueueState(ctx);
+    state.lastActionNote = `Fila /hunt pronta (${items.length} \xE1reas)`;
+  };
+  var syncHuntGuideQueue = async (ctx, force = false) => {
+    const { state, withModalLock } = ctx;
+    return withModalLock(
+      "Montando fila",
+      async () => {
+        const items = await buildHuntQueueItems(ctx);
+        if (items.length > 0) {
+          adoptHuntQueue(ctx, items);
+        } else if (!state.lastActionNote.startsWith("Guia /hunt:")) {
+          state.lastActionNote = "Nenhuma \xE1rea encontrada para a fila";
+        }
+        return state.huntQueue;
+      },
+      { force }
+    );
+  };
+  var irProximaHuntGuia = async (ctx, force = false) => {
+    const { CONFIG, state, dom, withModalLock } = ctx;
+    return withModalLock(
+      "Fila /hunt",
+      async () => {
+        if (state.huntQueue.length === 0) {
+          const built = await buildHuntQueueItems(ctx);
+          if (built.length > 0) adoptHuntQueue(ctx, built);
+        }
+        if (state.huntQueue.length === 0) {
+          state.lastActionNote = "Fila /hunt vazia";
+          return false;
+        }
+        const poke = dom.getActivePokemon();
+        const modal = await openMapModal(ctx);
+        if (!modal) return false;
+        const liveCandidates = await collectCandidatesFromOpenMap(
+          ctx,
+          modal,
+          poke,
+          false,
+          null,
+          CONFIG.mode === "topcatch"
+        );
+        await dom.closeActiveModal();
+        for (let attempt = 0; attempt < state.huntQueue.length; attempt++) {
+          const idx = (state.huntQueueIndex + attempt) % state.huntQueue.length;
+          const entry = state.huntQueue[idx];
+          const matchedMeta = findQueueMatch(entry, liveCandidates);
+          if (!matchedMeta) continue;
+          state.huntQueueIndex = (idx + 1) % state.huntQueue.length;
+          saveHuntQueueState(ctx);
+          state.lastActionNote = `Fila -> ${matchedMeta.regionName} Nv${matchedMeta.areaLevel}`;
+          const ok = await travelToMarkerMeta(ctx, matchedMeta);
+          if (ok) {
+            state.session = createSession(ctx, dom.getCurrentHunt(), dom.getActivePokemon(), matchedMeta);
+            return true;
+          }
+        }
+        if (CONFIG.huntQueue.fallbackToSafeArea) {
+          const entry = state.huntQueue[state.huntQueueIndex % state.huntQueue.length];
+          const fallback = pickSafeFallback(entry, liveCandidates, poke);
+          if (fallback) {
+            state.huntQueueIndex = (state.huntQueueIndex + 1) % state.huntQueue.length;
+            saveHuntQueueState(ctx);
+            state.lastActionNote = `Fila sem match (${entry.name}) -> fallback ${fallback.regionName} Nv${fallback.areaLevel}`;
+            const ok = await travelToMarkerMeta(ctx, fallback);
+            if (ok) {
+              state.session = createSession(ctx, dom.getCurrentHunt(), dom.getActivePokemon(), fallback);
+              return true;
+            }
+          }
+        }
+        state.lastActionNote = "Fila /hunt: sem \xE1rea eleg\xEDvel agora";
+        return false;
+      },
+      { force }
+    );
+  };
+  var huntQueue = {
+    id: "huntQueue",
+    definirFilaHunt,
+    loadManualQueue,
+    limparFilaHunt,
+    syncHuntGuideQueue,
+    irProximaHuntGuia
+  };
+
+  // src/modules/map-hop-optimize.js
+  var shouldAbortWarmup = (livePoke, preWarm, nowSnap, hpThreshold) => livePoke?.hpPercent !== null && livePoke.hpPercent < hpThreshold || Boolean(preWarm && nowSnap && nowSnap.revivesUsados > preWarm.revivesUsados);
+  var warmupDone = (preWarm, nowSnap) => Boolean(preWarm && nowSnap && nowSnap.abates > preWarm.abates);
+  var shouldAbortMeasure = (livePoke, metrics, hpThreshold) => livePoke?.hpPercent !== null && livePoke.hpPercent < hpThreshold || metrics.revivesMin > 0;
+  var buildBenchmarkResult = (metrics, { aborted, cand, modo }) => {
+    const isSafe = !aborted && metrics.segura && metrics.abates > 0;
+    return {
+      ...metrics,
+      segura: isSafe,
+      markerMeta: cand,
+      score: Math.round(scoreRecord({ ...metrics, segura: isSafe }, modo))
+    };
+  };
+  var rankResults = (results) => [...results].sort((a, b) => b.score - a.score);
+  var trainerLevelReached = (trainerLv, lastOptimizedLv, levelStep) => trainerLv !== null && lastOptimizedLv !== null && trainerLv >= lastOptimizedLv + levelStep;
+  var sessionIsDangerous = (metrics, maxPotionsPerMinSafe) => metrics.abates >= 3 && (metrics.revivesMin > 0 || metrics.pocoesMin > maxPotionsPerMinSafe);
+  var hopNextTopCatchArea = async (ctx, force = false) => {
+    const { state, dom, withModalLock } = ctx;
+    return withModalLock(
+      "TopCatch Hop",
+      async () => {
+        const poke = dom.getActivePokemon();
+        const modal = await openMapModal(ctx);
+        if (!modal) return false;
+        let candidates = await collectCandidatesFromOpenMap(ctx, modal, poke, false, "Top Catch", true);
+        candidates = candidates.filter((c) => !c.isCurrent);
+        await dom.closeActiveModal();
+        if (candidates.length === 0) {
+          state.lastActionNote = "Top Catch: todas as \xE1reas liberadas capturadas!";
+          return false;
+        }
+        const nextArea = candidates[0];
+        state.lastActionNote = `Top Catch -> ${nextArea.regionName} Nv${nextArea.areaLevel}`;
+        const ok = await travelToMarkerMeta(ctx, nextArea);
+        if (ok) {
+          state.session = createSession(ctx, dom.getCurrentHunt(), dom.getActivePokemon(), nextArea);
+        }
+        return ok;
+      },
+      { force }
+    );
+  };
+  var otimizarRegiao = async (ctx, options = {}) => {
+    const { CONFIG, state, dom, sleep, updateHud, withModalLock } = ctx;
+    const {
+      modo = CONFIG.mode,
+      tempoPorRegiaoSeg = CONFIG.map.benchmarkSecPerArea,
+      maxRegioes = CONFIG.map.maxAreasToTest,
+      usarVantagemTipo = CONFIG.map.preferTypeAdvantage,
+      force = false
+    } = options;
+    return withModalLock(
+      "Otimizando",
+      async () => {
+        state.lastOptimizeAt = Date.now();
+        const poke = dom.getActivePokemon();
+        const trainerLv = dom.getTrainerHeaderInfo().level;
+        if (trainerLv !== null) state.lastOptimizedTrainerLevel = trainerLv;
+        const dexFilter = modo === "topcatch" ? "Top Catch" : null;
+        const modal = await openMapModal(ctx);
+        if (!modal) return null;
+        let candidates = await collectCandidatesFromOpenMap(
+          ctx,
+          modal,
+          poke,
+          usarVantagemTipo,
+          dexFilter,
+          modo === "topcatch"
+        );
+        if (candidates.length === 0 && usarVantagemTipo) {
+          candidates = await collectCandidatesFromOpenMap(ctx, modal, poke, false, dexFilter, modo === "topcatch");
+        }
+        if (candidates.length === 0 && dexFilter) {
+          candidates = await collectCandidatesFromOpenMap(ctx, modal, poke, false, null, false);
+        }
+        await dom.closeActiveModal();
+        if (candidates.length === 0) return null;
+        const toTest = candidates.slice(0, maxRegioes);
+        const results = [];
+        for (let i = 0; i < toTest.length; i++) {
+          if (!state.running || state.paused && !force) break;
+          if (CONFIG.shinyGuard.enabled && state.shinyAlertActive) {
+            state.lastActionNote = "Benchmark pausado: Shiny em campo!";
+            return null;
+          }
+          const cand = toTest[i];
+          state.lastActionNote = `Testando ${i + 1}/${toTest.length} (${cand.regionName} Nv${cand.areaLevel})`;
+          updateHud();
+          const ok = await travelToMarkerMeta(ctx, cand);
+          if (!ok) continue;
+          const preWarm = dom.readNativeSessionPanel();
+          let aborted = false;
+          const warmupEnd = Date.now() + CONFIG.map.warmupMaxSec * 1e3;
+          while (Date.now() < warmupEnd && state.running) {
+            await sleep(450);
+            if (CONFIG.shinyGuard.enabled && state.shinyAlertActive) return null;
+            const livePoke = dom.getActivePokemon();
+            const nowSnap = dom.readNativeSessionPanel();
+            if (shouldAbortWarmup(livePoke, preWarm, nowSnap, CONFIG.map.abortHpThreshold)) {
+              aborted = true;
+              break;
+            }
+            if (warmupDone(preWarm, nowSnap)) break;
+          }
+          state.session = createSession(ctx, dom.getCurrentHunt(), dom.getActivePokemon(), cand);
+          if (!aborted && state.running) {
+            const measureEnd = Date.now() + tempoPorRegiaoSeg * 1e3;
+            while (Date.now() < measureEnd && state.running) {
+              await sleep(1e3);
+              if (CONFIG.shinyGuard.enabled && state.shinyAlertActive) return null;
+              updateFarmTelemetry(ctx);
+              updateHud();
+              const livePoke = dom.getActivePokemon();
+              const m = computeSessionMetrics(ctx, state.session);
+              if (shouldAbortMeasure(livePoke, m, CONFIG.map.abortHpThreshold)) {
+                aborted = true;
+                break;
+              }
+            }
+          }
+          const saved = persistCurrentSession(ctx, true);
+          const metrics = saved || computeSessionMetrics(ctx, state.session);
+          results.push(buildBenchmarkResult(metrics, { aborted, cand, modo }));
+        }
+        if (results.length === 0) return null;
+        const ranked = rankResults(results);
+        console.table(
+          ranked.map((r) => ({
+            regiao: r.regiao,
+            abatesMin: r.abatesMin,
+            xpPokeMin: r.xpPokeMin,
+            lucroLiqMin: r.lucroLiqMin,
+            pocoesMin: r.pocoesMin,
+            segura: r.segura,
+            score: r.score
+          }))
+        );
+        const winner = ranked[0];
+        await travelToMarkerMeta(ctx, winner.markerMeta);
+        state.session = createSession(ctx, dom.getCurrentHunt(), dom.getActivePokemon(), winner.markerMeta);
+        state.lastActionNote = `Melhor (${modo}): ${winner.regiao}`;
+        return winner;
+      },
+      { force }
+    );
+  };
+  var changeArea = async (ctx) => {
+    if (ctx.state.huntQueue.length > 0) {
+      await irProximaHuntGuia(ctx, false);
+    } else {
+      await otimizarRegiao(ctx, { modo: ctx.CONFIG.mode });
+    }
+  };
+  var checkAutoRegionProgression = async (ctx) => {
+    const { CONFIG, state, dom } = ctx;
+    if (!state.running || state.paused || !CONFIG.autoRegion.enabled) return;
+    if (state.modalLockOwner || dom.isInSpecialArena() || dom.getVisibleModal() || state.shinyAlertActive) return;
+    const { level: trainerLv } = dom.getTrainerHeaderInfo();
+    if (trainerLv !== null && state.lastOptimizedTrainerLevel === null) {
+      state.lastOptimizedTrainerLevel = trainerLv;
+    }
+    if (Date.now() - state.lastOptimizeAt < CONFIG.autoRegion.minIntervalMs) return;
+    if (trainerLevelReached(trainerLv, state.lastOptimizedTrainerLevel, CONFIG.autoRegion.levelStep)) {
+      await changeArea(ctx);
+      return;
+    }
+    if (state.session && dom.getCurrentHunt()) {
+      const m = computeSessionMetrics(ctx, state.session);
+      if (sessionIsDangerous(m, CONFIG.farm.maxPotionsPerMinSafe)) {
+        await changeArea(ctx);
+      }
+    }
+  };
+  var mapHop = {
+    id: "mapHop",
+    everyMs: (ctx) => ctx.CONFIG.autoRegion.checkIntervalMs,
+    tick: (ctx) => checkAutoRegionProgression(ctx),
+    hopNextTopCatchArea,
+    otimizarRegiao,
+    checkAutoRegionProgression
+  };
+
+  // src/modules/telemetry.js
+  var SEL_LOCAL8 = {
+    hudLog: "#hud-log",
+    avisoVersao: "#aviso-versao"
+  };
+  var ELEMENT_NODE = 1;
+  var computeMetrics = (s, farm, now = Date.now()) => {
+    const elapsedSec = Math.max(1, Math.floor((now - s.startedAt) / 1e3));
+    const minutes = elapsedSec / 60;
+    const a = s.startSnap;
+    const b = s.latestSnap || a;
+    const useNative = Boolean(a && b);
+    const dKills = useNative ? Math.max(0, b.abates - a.abates) : s.logKills;
+    const dXpPoke = useNative ? Math.max(0, b.xpPokemon - a.xpPokemon) : s.logXpPoke;
+    const dGold = useNative ? Math.max(0, b.gold - a.gold) : s.logGold;
+    const dLucro = useNative ? b.lucro - a.lucro : s.logGold;
+    const dPotions = useNative ? Math.max(0, b.pocoesUsadas - a.pocoesUsadas) : 0;
+    const dRevives = useNative ? Math.max(0, b.revivesUsados - a.revivesUsados) : 0;
+    const killsPerMin = +(dKills / minutes).toFixed(2);
+    const xpPokePerMin = Math.round(dXpPoke / minutes);
+    const goldGrossPerMin = Math.round(dGold / minutes);
+    const lucroPerMin = Math.round(dLucro / minutes);
+    const potionsPerMin = +(dPotions / minutes).toFixed(2);
+    const revivesPerMin = +(dRevives / minutes).toFixed(2);
+    const safe = revivesPerMin === 0 && potionsPerMin <= farm.maxPotionsPerMinSafe && s.minHpPercent >= farm.minHpPercentSafe;
+    return {
+      regiao: s.regionKey,
+      pokemon: `${s.pokemonName} Nv${s.pokemonLevel ?? "?"}`,
+      tempoSeg: elapsedSec,
+      abates: dKills,
+      abatesMin: killsPerMin,
+      xpPokeMin: xpPokePerMin,
+      ouroBrutoMin: goldGrossPerMin,
+      lucroLiqMin: lucroPerMin,
+      pocoesMin: potionsPerMin,
+      revivesMin: revivesPerMin,
+      minHpPct: s.minHpPercent,
+      segura: safe
+    };
+  };
+  var scoreRecord = (r, modo) => {
+    const safetyWeight = r.segura ? 1 : 0.25;
+    if (modo === "xp") return r.xpPokeMin * safetyWeight;
+    if (modo === "ouro") return Math.max(0, r.lucroLiqMin) * safetyWeight;
+    if (modo === "topcatch") return (r.abatesMin * 100 + r.xpPokeMin * 0.2) * safetyWeight;
+    return (r.xpPokeMin * 0.65 + Math.max(0, r.lucroLiqMin) * 0.35) * safetyWeight;
+  };
+  var shouldSaveMetrics = (metrics, farm, forceSave = false) => forceSave || !(metrics.tempoSeg < farm.minSampleSec || metrics.abates < farm.minKillsToSave);
+  var trackCounter = (last, current) => ({
+    next: current,
+    delta: last === null ? 0 : Math.max(0, current - last)
+  });
+  var planSessionStep = (session, hunt, poke) => {
+    if (!session) return "create";
+    if (hunt && hunt.key !== session.regionKey) return "rotate";
+    if (poke && poke.name !== session.pokemonName) return "rotate";
+    return "update";
+  };
+  var updateSessionReadings = (session, poke, snap, now = Date.now()) => {
+    if (poke) {
+      session.pokemonLevel = poke.level;
+      if (poke.hpPercent !== null && poke.hpPercent < session.minHpPercent) {
+        session.minHpPercent = poke.hpPercent;
+      }
+    }
+    if (snap) {
+      if (session.startSnap && snap.abates < session.startSnap.abates) {
+        session.startSnap = snap;
+        session.startedAt = now;
+      }
+      if (!session.startSnap) session.startSnap = snap;
+      session.latestSnap = snap;
+    }
+  };
+  var shouldTopCatchHop = (topCatchHop, state, now = Date.now()) => Boolean(
+    topCatchHop.enabled && !state.modalLockOwner && !state.shinyAlertActive && now - state.lastHopAt >= topCatchHop.hopCooldownMs
+  );
+  var parseCombatLogText = (txt) => {
+    if (txt.includes("derrotado!")) {
+      const xpMatch = txt.match(/\+([\d.]+)\s*xp\s*pok[eé]mon/i);
+      const goldMatch = txt.match(/\+([\d.]+)\s*ouro/i);
+      return {
+        kind: "kill",
+        xp: xpMatch ? parseNumber(xpMatch[1]) ?? 0 : 0,
+        gold: goldMatch ? parseNumber(goldMatch[1]) ?? 0 : 0
+      };
+    }
+    if (normalizeText2(txt).includes("capturado")) return { kind: "capture" };
+    return null;
+  };
+  var createSession = (ctx, hunt, pokemon, markerMeta = null) => ({
+    regionKey: hunt ? hunt.key : "Centro / Fora",
+    targetName: hunt ? hunt.targetName : "Nenhum",
+    targetLevel: hunt ? hunt.targetLevel : null,
+    markerMeta,
+    pokemonName: pokemon ? pokemon.name : "Desconhecido",
+    pokemonLevel: pokemon ? pokemon.level : null,
+    pokemonTypes: pokemon ? pokemon.types : [],
+    startedAt: Date.now(),
+    startSnap: ctx.dom.readNativeSessionPanel(),
+    latestSnap: ctx.dom.readNativeSessionPanel(),
+    logKills: 0,
+    logXpPoke: 0,
+    logGold: 0,
+    minHpPercent: pokemon?.hpPercent ?? 100
+  });
+  var handleCombatLogNode = ({ state }, node) => {
+    if (!state.running || !state.session || node.nodeType !== ELEMENT_NODE) return;
+    const parsed = parseCombatLogText(node.textContent || "");
+    if (!parsed) return;
+    if (parsed.kind === "kill") {
+      state.session.logKills++;
+      state.session.logXpPoke += parsed.xp;
+      state.session.logGold += parsed.gold;
+    } else {
+      state.stats.captures++;
+    }
+  };
+  var ensureCombatLogObserver = (ctx) => {
+    const { state, dom } = ctx;
+    const logNode = dom.$(SEL_LOCAL8.hudLog);
+    if (logNode === state.observedLogNode) return;
+    if (state.logObserver) {
+      state.logObserver.disconnect();
+      state.logObserver = null;
+      state.observedLogNode = null;
+    }
+    if (logNode) {
+      state.observedLogNode = logNode;
+      state.logObserver = new MutationObserver((mutations) => {
+        for (const m of mutations) {
+          for (const added of m.addedNodes) {
+            handleCombatLogNode(ctx, added);
+          }
+        }
+      });
+      state.logObserver.observe(logNode, { childList: true });
+    }
+  };
+  var computeSessionMetrics = ({ CONFIG }, s, now = Date.now()) => computeMetrics(s, CONFIG.farm, now);
+  var persistCurrentSession = (ctx, forceSave = false) => {
+    const { CONFIG, state, storage, keys } = ctx;
+    const s = state.session;
+    if (!s || !s.regionKey || s.regionKey === "Centro / Fora") return null;
+    const metrics = computeSessionMetrics(ctx, s);
+    if (!shouldSaveMetrics(metrics, CONFIG.farm, forceSave)) return null;
+    const recordKey = `${s.pokemonName}__${s.regionKey}`;
+    const prev = state.history[recordKey];
+    const record = {
+      ...metrics,
+      pokemonName: s.pokemonName,
+      pokemonLevel: s.pokemonLevel,
+      targetLevel: s.targetLevel,
+      markerMeta: s.markerMeta || prev?.markerMeta || null,
+      updatedAt: (/* @__PURE__ */ new Date()).toISOString()
+    };
+    state.history[recordKey] = record;
+    storage.saveJson(keys.history, state.history);
+    return record;
+  };
+  var checkVersionAlert = ({ state, dom, setStatus, playBeep }) => {
+    const aviso = dom.$(SEL_LOCAL8.avisoVersao);
+    if (aviso && dom.isVisible(aviso) && !state.paused) {
+      state.paused = true;
+      setStatus("Atualiza\xE7\xE3o!", "Nova vers\xE3o detectada \u2014 recarregue o jogo");
+      playBeep(520, 0.25);
+    }
+  };
+  var updateFarmTelemetry = (ctx) => {
+    const { CONFIG, state, dom, playBeep } = ctx;
+    if (!state.running || !CONFIG.farm.enabled) return;
+    ensureCombatLogObserver(ctx);
+    checkVersionAlert(ctx);
+    const hunt = dom.getCurrentHunt();
+    const poke = dom.getActivePokemon();
+    const snap = dom.readNativeSessionPanel();
+    if (snap) {
+      const shiny = trackCounter(state.lastShiniesVistos, snap.shiniesVistos);
+      if (shiny.delta > 0) {
+        state.stats.shiniesSpotted++;
+        if (CONFIG.shinyGuard.soundAlert) playBeep(1180, 0.25);
+        state.lastActionNote = "\u2728 Shiny apareceu na sess\xE3o!";
+      }
+      state.lastShiniesVistos = shiny.next;
+      const caps = trackCounter(state.lastSessionCaptures, snap.capturas);
+      state.lastSessionCaptures = caps.next;
+      if (caps.delta > 0) {
+        state.stats.captures += caps.delta;
+        if (shouldTopCatchHop(CONFIG.topCatchHop, state)) {
+          state.lastHopAt = Date.now();
+          setTimeout(() => {
+            if (state.running && !state.shinyAlertActive) hopNextTopCatchArea(ctx, false);
+          }, 1e3);
+        }
+      }
+    }
+    const step = planSessionStep(state.session, hunt, poke);
+    if (step === "create") {
+      state.session = createSession(ctx, hunt, poke, state.lastMarkerMeta);
+    } else if (step === "rotate") {
+      persistCurrentSession(ctx, false);
+      state.session = createSession(ctx, hunt, poke, state.lastMarkerMeta);
+    } else {
+      updateSessionReadings(state.session, poke, snap);
+    }
+    persistCurrentSession(ctx, false);
+  };
+  var dispose = ({ state }) => {
+    if (state.logObserver) {
+      state.logObserver.disconnect();
+      state.logObserver = null;
+      state.observedLogNode = null;
+    }
+  };
+  var telemetry = {
+    id: "telemetry",
+    everyMs: (ctx) => ctx.CONFIG.farm.tickIntervalMs,
+    init: (ctx) => ensureCombatLogObserver(ctx),
+    tick: (ctx) => updateFarmTelemetry(ctx),
+    dispose,
+    createSession,
+    ensureCombatLogObserver,
+    computeSessionMetrics,
+    persistCurrentSession,
+    updateFarmTelemetry
+  };
+
+  // src/modules/hub-sheet.js
+  var evaluateSheetCopy = ({ hooked, captured }) => {
+    const valid = hooked ? looksLikeSheet(captured) : true;
+    return valid ? { ok: true, text: captured, reason: "" } : { ok: false, text: captured, reason: "O jogo n\xE3o copiou a ficha (clipboard bloqueado?)" };
+  };
+  var describeSheetResult = (res, openSite = false) => {
+    if (!res) return "Ficha: bot ocupado, tente de novo";
+    if (res.ok) {
+      const size = res.text ? ` (${res.text.length} car.)` : "";
+      return openSite ? `Ficha copiada${size} \u2014 cole no Hub` : `Ficha copiada${size}!`;
+    }
+    return `Ficha: ${res.reason}`;
+  };
+  var closeSheetModal = async ({ dom, sleep, randomDelay }) => {
+    const closeBtn = dom.$(SEL.fichaFechar);
+    if (closeBtn && dom.isInteractable(closeBtn)) {
+      closeBtn.click();
+      await dom.waitFor(() => !dom.$(SEL.fichaGpt) || !dom.isInteractable(dom.$(SEL.fichaGpt)), 1400);
+      await sleep(randomDelay(120, 200));
+    } else {
+      await dom.closeActiveModal();
+    }
+  };
+  var copyNativeSheet = async (ctx) => {
+    const { dom, sleep } = ctx;
+    const card = dom.$(SEL.ativoCard);
+    if (!card) return { ok: false, reason: "Pok\xE9mon ativo n\xE3o encontrado" };
+    const clip = navigator.clipboard;
+    const originalWrite = clip && typeof clip.writeText === "function" ? clip.writeText.bind(clip) : null;
+    const hadOwnWrite = Boolean(clip) && Object.prototype.hasOwnProperty.call(clip, "writeText");
+    let captured = null;
+    let hooked = false;
+    if (originalWrite) {
+      try {
+        clip.writeText = (t) => {
+          captured = String(t ?? "");
+          return originalWrite(t);
+        };
+        hooked = true;
+      } catch {
+      }
+    }
+    try {
+      let btn = dom.$(SEL.fichaGpt);
+      if (!btn || !dom.isInteractable(btn)) {
+        card.click();
+        btn = await dom.waitFor(() => {
+          const el = dom.$(SEL.fichaGpt);
+          return el && dom.isInteractable(el) ? el : null;
+        }, 2500);
+      }
+      if (!btn) return { ok: false, reason: 'Bot\xE3o "Copiar p/ ChatGPT" n\xE3o apareceu' };
+      btn.click();
+      if (hooked) await dom.waitFor(() => captured, 1500);
+      else await sleep(300);
+      return evaluateSheetCopy({ hooked, captured });
+    } finally {
+      if (hooked) {
+        try {
+          if (hadOwnWrite) clip.writeText = originalWrite;
+          else delete clip.writeText;
+        } catch {
+        }
+      }
+      await closeSheetModal(ctx);
+    }
+  };
+  var copyActiveSheet = async (ctx, { openSite = false } = {}) => {
+    const { state, updateHud, withModalLock, consts } = ctx;
+    const res = await withModalLock("Copiando ficha", () => copyNativeSheet(ctx), { force: true });
+    state.lastActionNote = describeSheetResult(res, openSite);
+    if (res?.ok && openSite) window.open(consts.HUNT_GUIDE_URL, "_blank", "noopener,noreferrer");
+    updateHud();
+    return res?.text ?? null;
+  };
+  var copiarFichaHunt = (ctx, abrirSite = false) => copyActiveSheet(ctx, { openSite: abrirSite });
+  var hubSheet = {
+    id: "hubSheet",
+    copyActiveSheet,
+    copiarFichaHunt
+  };
+
+  // src/modules/team-season.js
+  var SEL_LOCAL9 = {
+    timeList: "#time",
+    teamRow: ".poke-linha",
+    activeRow: "#time .poke-linha.ativo",
+    rowName: ".pl-nome",
+    rowLevel: ".pl-lv",
+    rowHp: ".mini-hp i",
+    rowInfo: ".pl-info"
+  };
+  var getTeamCards = ({ dom, consts }) => {
+    const list = dom.$(SEL_LOCAL9.timeList);
+    if (!list) return [];
+    return Array.from(list.querySelectorAll(SEL_LOCAL9.teamRow)).map((el) => {
+      const id = el.getAttribute("data-id") || "";
+      const isActive = el.classList.contains("ativo");
+      const nomeEl = el.querySelector(SEL_LOCAL9.rowName);
+      const lvEl = el.querySelector(SEL_LOCAL9.rowLevel);
+      const level = parseNumber(lvEl?.textContent) ?? 1;
+      const name = dom.getDirectText(nomeEl);
+      const titleAttr = el.getAttribute("title") || "";
+      const powerMatch = titleAttr.match(/poder\s+([\d.]+)/i);
+      const power = powerMatch ? parseNumber(powerMatch[1]) : null;
+      const types = [];
+      titleAttr.toUpperCase().split(/[\s/·,]+/).forEach((tok) => {
+        if (consts.VALID_TYPES.has(tok) && !types.includes(tok)) types.push(tok);
+      });
+      const hpStyle = el.querySelector(SEL_LOCAL9.rowHp)?.style?.width || "";
+      const hpPercent = hpStyle.endsWith("%") ? Math.round(parseFloat(hpStyle)) : 100;
+      return { el, id, key: id || `${name}_${level}`, name, level, power, types, hpPercent, isActive };
+    });
+  };
+  var triggerTeamSwap = (ctx, chosen, noteLabel) => {
+    const { CONFIG, state, dom } = ctx;
+    const clickTarget = chosen.el.querySelector(SEL_LOCAL9.rowInfo) || chosen.el;
+    if (!dom.isVisible(clickTarget)) return;
+    const snap = dom.readNativeSessionPanel();
+    state.teamSwapPotionSnap = snap ? { pocoes: snap.pocoesUsadas, revives: snap.revivesUsados } : null;
+    clickTarget.click();
+    state.lastTeamSwapAt = Date.now();
+    setTimeout(() => {
+      if (!state.running) return;
+      const currentActiveRow = dom.$(SEL_LOCAL9.activeRow);
+      const swapped = chosen.id && currentActiveRow?.getAttribute("data-id") === chosen.id || dom.getActivePokemon()?.name.toLowerCase() === chosen.name.toLowerCase();
+      if (swapped) {
+        state.stats.teamSwaps++;
+        state.lastActionNote = noteLabel || `Equipe: ${chosen.name} Nv${chosen.level}`;
+      } else {
+        state.failedSwapUntil[chosen.key] = Date.now() + CONFIG.team.failedSwapBackoffMs;
+      }
+    }, 1600);
+  };
+  var tick2 = (ctx) => {
+    const { CONFIG, state, dom, consts } = ctx;
+    if (!state.running || state.paused || CONFIG.team.mode === "off") return;
+    if (state.modalLockOwner || dom.isInSpecialArena()) return;
+    const now = Date.now();
+    const active = dom.getActivePokemon();
+    const hunt = dom.getCurrentHunt();
+    const { level: trainerLv } = dom.getTrainerHeaderInfo();
+    const team = getTeamCards(ctx);
+    if (!active || team.length < 2) return;
+    const eligible = team.filter((p) => {
+      if (trainerLv !== null && p.level > trainerLv + 5) return false;
+      if (p.hpPercent <= 0) return false;
+      if ((state.failedSwapUntil[p.key] || 0) > now) return false;
+      return true;
+    });
+    if (eligible.length < 2) return;
+    const activeRow = team.find((p) => p.isActive) || null;
+    const strongest = [...eligible].sort(
+      (a, b) => b.level - a.level || (b.power ?? 0) - (a.power ?? 0)
+    )[0];
+    if (CONFIG.team.mode === "equilibrar" && activeRow && strongest && activeRow.key !== strongest.key) {
+      const snap = dom.readNativeSessionPanel();
+      const spentSupply = Boolean(
+        snap && state.teamSwapPotionSnap && (snap.pocoesUsadas > state.teamSwapPotionSnap.pocoes || snap.revivesUsados > state.teamSwapPotionSnap.revives)
+      );
+      const lowHp = active.hpPercent !== null && active.hpPercent < CONFIG.team.rescueHpPercent;
+      const tooWeak = active.power !== null && active.power < CONFIG.team.minTrainPower;
+      if (spentSupply || lowHp || tooWeak) {
+        if (now - state.lastTeamSwapAt >= consts.ESPERA_TROCA_ATIVO_MS) {
+          state.unsafeTrainUntil[activeRow.key] = now + CONFIG.team.unsafeBackoffMs;
+          triggerTeamSwap(ctx, strongest, `Resgate: ${strongest.name} (${activeRow.name} fr\xE1gil)`);
+        }
+        return;
+      }
+    }
+    const cooldown = Math.max(CONFIG.team.swapCooldownMs, consts.ESPERA_TROCA_ATIVO_MS);
+    if (now - state.lastTeamSwapAt < cooldown) return;
+    let chosen = null;
+    if (CONFIG.team.mode === "sazonal") {
+      const dayType = dom.getSeasonalDayType();
+      if (dayType && !active.types.includes(dayType)) {
+        const matching = eligible.filter((p) => p.types.includes(dayType) && !p.isActive).sort((a, b) => b.level - a.level || (b.power ?? 0) - (a.power ?? 0));
+        if (matching.length > 0) chosen = matching[0];
+      }
+    } else if (CONFIG.team.mode === "equilibrar") {
+      const minSafeLevel = hunt ? Math.max(1, hunt.targetLevel - CONFIG.team.maxGapBelowHunt) : 1;
+      const safeToTrain = eligible.filter((p) => {
+        if (p.level < minSafeLevel) return false;
+        if (p.hpPercent < CONFIG.team.minTrainHpPercent) return false;
+        if (p.power !== null && p.power < CONFIG.team.minTrainPower) return false;
+        if ((state.unsafeTrainUntil[p.key] || 0) > now) return false;
+        return true;
+      }).sort((a, b) => a.level - b.level || (b.power ?? 0) - (a.power ?? 0));
+      if (safeToTrain.length > 0 && !safeToTrain[0].isActive && safeToTrain[0].level + 1 < (active.level ?? 1)) {
+        chosen = safeToTrain[0];
+      }
+    }
+    if (chosen && !chosen.isActive) {
+      triggerTeamSwap(ctx, chosen, `Equipe: ${chosen.name} Nv${chosen.level}`);
+    }
+  };
+  var teamSeason = {
+    id: "teamSeason",
+    everyMs: (ctx) => ctx.CONFIG.team.checkIntervalMs,
+    tick: tick2
+  };
+
+  // src/modules/rmt-radar.js
+  var SEL_LOCAL10 = {
+    modalTitulo: "#modal-titulo",
+    modalCorpo: "#modal-corpo",
+    card: ".cm-card",
+    cardNome: ".cm-nome-txt",
+    cardPreco: ".cm-rodape .cm-preco",
+    cardComprar: "button.cm-btn.comprar",
+    itemLinha: "button.cmi-linha",
+    itemNome: ".cmi-nome b",
+    itemPrecos: ".cmi-precos .cmi-de:not(.nada) .cm-preco",
+    gemaImg: 'img[src*="moeda-gema"]'
+  };
+  var parseRmtPriceEl = (priceEl) => {
+    if (!priceEl) return null;
+    const isGems = priceEl.classList.contains("orb") || Boolean(priceEl.querySelector(SEL_LOCAL10.gemaImg));
+    const value = parseNumber(priceEl.textContent);
+    if (!value || value <= 0) return null;
+    return { value, currency: isGems ? "gemas" : "coins" };
+  };
+  var scan = (ctx) => {
+    const { CONFIG, state, dom } = ctx;
+    if (!state.running || !CONFIG.radar.enabled || CONFIG.radar.alerts.length === 0) return;
+    const title = normalizeText2(dom.$(SEL_LOCAL10.modalTitulo)?.textContent);
+    if (!title.includes("mercado da comunidade")) return;
+    const corpo = dom.$(SEL_LOCAL10.modalCorpo);
+    if (!corpo || !dom.isVisible(corpo)) return;
+    const hits = [];
+    corpo.querySelectorAll(SEL_LOCAL10.card).forEach((card) => {
+      if (!dom.isVisible(card)) return;
+      const nameText = card.querySelector(SEL_LOCAL10.cardNome)?.textContent?.trim() || "";
+      const priceInfo = parseRmtPriceEl(card.querySelector(SEL_LOCAL10.cardPreco));
+      if (!nameText || !priceInfo) return;
+      const normName = normalizeText2(nameText);
+      for (const rule of CONFIG.radar.alerts) {
+        if (!normName.includes(normalizeText2(rule.nome))) continue;
+        if (rule.moeda !== "todas" && rule.moeda !== priceInfo.currency) continue;
+        if (priceInfo.value > rule.maxPreco) continue;
+        card.style.outline = "2px solid #22c55e";
+        card.style.boxShadow = "0 0 12px rgba(34,197,94,0.55)";
+        const hitKey = `pk_${normName}_${priceInfo.value}_${priceInfo.currency}`;
+        hits.push({ nome: nameText, preco: priceInfo.value, moeda: priceInfo.currency });
+        if (!state.radarNotifiedKeys.has(hitKey)) {
+          state.radarNotifiedKeys.add(hitKey);
+          if (CONFIG.radar.soundAlert) dom.playBeep(960, 0.18);
+          state.lastActionNote = `RMT! ${nameText} por ${priceInfo.value.toLocaleString("pt-BR")} ${priceInfo.currency}`;
+        }
+        if (rule.autoComprar) {
+          const buyBtn = card.querySelector(SEL_LOCAL10.cardComprar);
+          if (buyBtn && dom.isInteractable(buyBtn) && !buyBtn.classList.contains("cm-retido")) {
+            buyBtn.click();
+            state.lastActionNote = `Compra RMT: ${nameText}`;
+          }
+        }
+      }
+    });
+    corpo.querySelectorAll(SEL_LOCAL10.itemLinha).forEach((row) => {
+      if (!dom.isVisible(row)) return;
+      const itemName = row.querySelector(SEL_LOCAL10.itemNome)?.textContent?.trim() || "";
+      if (!itemName) return;
+      const normName = normalizeText2(itemName);
+      const priceNodes = Array.from(row.querySelectorAll(SEL_LOCAL10.itemPrecos));
+      for (const pNode of priceNodes) {
+        const priceInfo = parseRmtPriceEl(pNode);
+        if (!priceInfo) continue;
+        for (const rule of CONFIG.radar.alerts) {
+          if (!normName.includes(normalizeText2(rule.nome))) continue;
+          if (rule.moeda !== "todas" && rule.moeda !== priceInfo.currency) continue;
+          if (priceInfo.value > rule.maxPreco) continue;
+          row.style.outline = "2px solid #22c55e";
+          row.style.boxShadow = "0 0 12px rgba(34,197,94,0.55)";
+          const hitKey = `it_${normName}_${priceInfo.value}_${priceInfo.currency}`;
+          hits.push({ nome: itemName, preco: priceInfo.value, moeda: priceInfo.currency });
+          if (!state.radarNotifiedKeys.has(hitKey)) {
+            state.radarNotifiedKeys.add(hitKey);
+            if (CONFIG.radar.soundAlert) dom.playBeep(960, 0.18);
+            state.lastActionNote = `RMT Item! ${itemName} por ${priceInfo.value.toLocaleString("pt-BR")} ${priceInfo.currency}`;
+          }
+        }
+      }
+    });
+    state.radarHits = hits;
+  };
+  var addAlert = ({ CONFIG, storage, hud }, { nome, maxPreco, moeda = "coins", autoComprar = false }) => {
+    if (!nome || !maxPreco) return false;
+    CONFIG.radar.alerts.push({
+      nome: String(nome).trim(),
+      maxPreco: Number(maxPreco),
+      moeda: normalizeText2(moeda),
+      autoComprar: Boolean(autoComprar)
+    });
+    storage.persistPrefs();
+    hud.renderAlertList();
+    return true;
+  };
+  var removeAlert = ({ CONFIG, storage, hud }, index) => {
+    if (index < 0 || index >= CONFIG.radar.alerts.length) return;
+    CONFIG.radar.alerts.splice(index, 1);
+    storage.persistPrefs();
+    hud.renderAlertList();
+  };
+  var rmtRadar = {
+    id: "rmtRadar",
+    everyMs: (ctx) => ctx.CONFIG.radar.checkIntervalMs,
+    tick: scan,
+    addAlert,
+    removeAlert
+  };
+
+  // src/modules/minigames.js
+  var SEL_LOCAL11 = {
+    mgInput: "#mg-input",
+    mgEnviar: "#mg-enviar",
+    mgTela: "#mg-tela",
+    mgBarra: "#mg-barra",
+    pistas: ".mg-pistas",
+    tipoSel: ".mg-tipo-sel",
+    parLivre: ".mg-par:not(.trava)",
+    pistaRot: ".mg-pista-rot",
+    pistaVal: ".mg-pista-val",
+    pistaLetras: ".mg-pista-letras"
+  };
+  var dexNumberToRegion = (num) => {
+    if (!num || num <= 0) return "";
+    if (num <= 151) return "kanto";
+    if (num <= 251) return "johto";
+    if (num <= 386) return "hoenn";
+    if (num <= 493) return "sinnoh";
+    if (num <= 649) return "unova";
+    if (num <= 721) return "kalos";
+    if (num <= 809) return "alola";
+    if (num <= 905) return "galar";
+    if (num <= 1025) return "paldea";
+    return "";
+  };
+  var parsePokedexCsv = ({ state, keys, storage, consts, updateHud }, csvText) => {
+    const lines = (csvText || "").split(/\r?\n/).filter((l) => l.trim().length > 0);
+    if (lines.length < 2) return [];
+    const sep = lines[0].includes(";") ? ";" : ",";
+    const headers = lines[0].split(sep).map((h) => normalizeText2(h.replace(/^"|"$/g, "")));
+    const col = (candidates) => headers.findIndex((h) => candidates.some((c) => h.includes(c)));
+    const idIdx = col(["#", "id", "num", "dex"]);
+    const nameIdx = col(["nome", "name", "especie", "pokemon"]);
+    const type1Idx = col(["tipo1", "tipo 1", "type1", "tipo", "type"]);
+    const type2Idx = col(["tipo2", "tipo 2", "type2"]);
+    const regIdx = col(["regiao", "region", "geracao", "gen"]);
+    if (nameIdx === -1) return [];
+    const map = /* @__PURE__ */ new Map();
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].split(sep).map((v) => v.replace(/^"|"$/g, "").trim());
+      const name = cols[nameIdx];
+      if (!name || map.has(name)) continue;
+      const types = [];
+      const rawTypes = `${cols[type1Idx] || ""} ${type2Idx !== -1 ? cols[type2Idx] || "" : ""}`;
+      rawTypes.split(/[\s/|,]+/).forEach((rawTok) => {
+        const canonical = consts.TYPE_ALIASES[normalizeText2(rawTok)];
+        if (canonical && !types.includes(canonical)) types.push(canonical);
+      });
+      const dexId = idIdx !== -1 ? parseNumber(cols[idIdx]) : null;
+      const region = regIdx !== -1 && cols[regIdx] ? normalizeText2(cols[regIdx]) : dexNumberToRegion(dexId);
+      map.set(name, {
+        id: dexId,
+        name,
+        cleanName: cleanKey(name),
+        types,
+        region
+      });
+    }
+    const list = Array.from(map.values());
+    state.dexCatalog = list;
+    storage.saveJson(keys.dex, list);
+    state.lastActionNote = `Pokedex importada: ${list.length} esp\xE9cies`;
+    updateHud();
+    return list;
+  };
+  var openCsvPicker = (ctx) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".csv,.txt";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      const text = await file.text();
+      parsePokedexCsv(ctx, text);
+    };
+    input.click();
+  };
+  var applyGuess = ({ dom }, pokemonName, submit = false) => {
+    const input = dom.$(SEL_LOCAL11.mgInput);
+    if (!input || !dom.isInteractable(input)) return false;
+    input.value = pokemonName;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.focus();
+    if (submit) {
+      const sendBtn = dom.$(SEL_LOCAL11.mgEnviar);
+      if (sendBtn && dom.isInteractable(sendBtn)) {
+        sendBtn.click();
+        return true;
+      }
+      const form = input.closest("form");
+      if (form) {
+        form.requestSubmit ? form.requestSubmit() : form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+        return true;
+      }
+      return false;
+    }
+    return true;
+  };
+  var tick3 = (ctx) => {
+    const { CONFIG, state, dom, consts, hud } = ctx;
+    if (!state.running || !CONFIG.minigame.enabled || state.dexCatalog.length === 0) return;
+    const tela = dom.$(SEL_LOCAL11.mgTela);
+    if (!tela || !dom.isVisible(tela) || tela.getAttribute("data-fase") !== "palpites") {
+      if (state.miniGameMatches.length > 0) {
+        state.miniGameMatches = [];
+        hud.renderQuizCandidates();
+      }
+      return;
+    }
+    const barraSig = dom.$(SEL_LOCAL11.mgBarra)?.getAttribute("data-sig") || "";
+    const roundId = barraSig.split("|")[0] || "";
+    if (roundId && roundId !== state.currentMiniGameRoundId) {
+      state.currentMiniGameRoundId = roundId;
+      state.roundTriedNames.clear();
+      state.lastGuessedStageKey = "";
+    }
+    const pistasEl = tela.querySelector(SEL_LOCAL11.pistas);
+    if (!pistasEl) return;
+    const clueTypes = [];
+    pistasEl.querySelectorAll(SEL_LOCAL11.tipoSel).forEach((badge) => {
+      for (const cls of badge.classList) {
+        const up = cls.toUpperCase();
+        if (consts.VALID_TYPES.has(up) && !clueTypes.includes(up)) clueTypes.push(up);
+      }
+    });
+    let clueRegion = null;
+    const regions = ["kanto", "johto", "hoenn", "sinnoh", "unova", "kalos", "alola", "galar", "paldea"];
+    pistasEl.querySelectorAll(SEL_LOCAL11.parLivre).forEach((par) => {
+      const rot = normalizeText2(par.querySelector(SEL_LOCAL11.pistaRot)?.textContent);
+      const val = normalizeText2(par.querySelector(SEL_LOCAL11.pistaVal)?.textContent);
+      if (rot.includes("regiao")) {
+        const found = regions.find((r) => val.includes(r));
+        if (found) clueRegion = found;
+      }
+    });
+    let letterPattern = null;
+    const letrasEl = pistasEl.querySelector(SEL_LOCAL11.pistaLetras);
+    if (letrasEl) {
+      const cells = Array.from(letrasEl.querySelectorAll("span, i, b")).filter((c) => {
+        const t = (c.textContent || "").trim();
+        return c.children.length === 0 && t.length <= 2;
+      });
+      if (cells.length >= 3) {
+        const chars = cells.map((c) => {
+          const ch = cleanKey(c.textContent);
+          return ch.length === 1 ? ch : ".";
+        });
+        letterPattern = new RegExp(`^${chars.join("")}$`);
+      }
+    }
+    if (clueTypes.length === 0 && !clueRegion && !letterPattern) {
+      if (state.miniGameMatches.length > 0) {
+        state.miniGameMatches = [];
+        hud.renderQuizCandidates();
+      }
+      return;
+    }
+    let matches = state.dexCatalog;
+    if (clueTypes.length > 0) {
+      matches = matches.filter((p) => clueTypes.every((t) => p.types.includes(t)));
+      if (clueTypes.length === 1) {
+        matches = [...matches].sort((a, b) => a.types.length - b.types.length);
+      }
+    }
+    if (clueRegion) {
+      matches = matches.filter((p) => !p.region || p.region.includes(clueRegion));
+    }
+    if (letterPattern) {
+      matches = matches.filter((p) => letterPattern.test(p.cleanName));
+    }
+    const untried = matches.filter((p) => !state.roundTriedNames.has(p.cleanName));
+    state.miniGameMatches = untried.slice(0, 8).map((p) => p.name);
+    hud.renderQuizCandidates();
+    if (CONFIG.minigame.autoGuess && untried.length >= 1 && untried.length <= CONFIG.minigame.autoGuessMaxCandidates) {
+      const stageKey = `${roundId || "mg"}_${tela.getAttribute("data-estagio") || "0"}`;
+      if (state.lastGuessedStageKey !== stageKey) {
+        const pick = untried[0];
+        if (applyGuess(ctx, pick.name, true)) {
+          state.lastGuessedStageKey = stageKey;
+          state.roundTriedNames.add(pick.cleanName);
+          state.lastActionNote = `Quiz auto (${untried.length} op\xE7.): ${pick.name}`;
+          hud.renderQuizCandidates();
+        }
+      }
+    }
+  };
+  var miniGames = {
+    id: "miniGames",
+    everyMs: (ctx) => ctx.CONFIG.minigame.checkIntervalMs,
+    tick: tick3,
+    applyGuess,
+    openCsvPicker,
+    parsePokedexCsv
   };
   return __toCommonJS(index_exports);
 })();
@@ -634,65 +2620,11 @@
         },
     };
 
-    // --- Funções puras (sem DOM): testadas em tests/ ---
-    const normalizeText = (str) =>
-        (str || '')
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .toLowerCase()
-            .trim();
-
-    const cleanKey = (str) => normalizeText(str).replace(/[^a-z0-9]/g, '');
-
-    const parseNumber = (text) => {
-        const digits = (text || '').replace(/\D/g, '');
-        if (!digits) return null;
-        const n = parseInt(digits, 10);
-        return Number.isNaN(n) ? null : n;
-    };
-
-    const parseSignedNumber = (text) => {
-        const raw = (text || '').trim();
-        const negative = raw.startsWith('-') || raw.startsWith('−');
-        const n = parseNumber(raw);
-        if (n === null) return null;
-        return negative ? -n : n;
-    };
-
-    // "Kakuna Nv 10 38,1 mil XP/h ✓ 6%" -> { name: 'Kakuna', level: 10 }; "Viridian Forest" -> { name: 'Viridian Forest', level: null }
-    const parseQueueEntry = (rawText) => {
-        const raw = String(rawText || '').trim();
-        const m = raw.match(/^(.*?)\s+(?:n[ií]vel|nv\.?|lv\.?)\s*(\d+)\b/i);
-        const name = (m ? m[1] : raw).trim();
-        const level = m ? parseInt(m[2], 10) : null;
-        return { name, level, raw, mode: CONFIG.mode };
-    };
-
-    // Aceita texto colado do Hub: quebra de linha, ">" ou "|" separam itens; vírgula só separa se não for decimal (38,1 / 1,600)
-    const parseQueueText = (rawText) => {
-        const seen = new Set();
-        const out = [];
-        String(rawText || '')
-            .split(/[\n>|]+/)
-            .flatMap((chunk) => chunk.split(/,(?!\d)/))
-            .forEach((piece) => {
-                const cleaned = piece
-                    .replace(/[✓✗✔✘⚠☠]/g, '')
-                    .replace(/^[\s\d.)\-•*]+/, '')
-                    .replace(/\s+/g, ' ')
-                    .trim();
-                if (cleaned.length < 3) return;
-                const entry = parseQueueEntry(cleaned);
-                if (!/[a-zà-ÿ]{3,}/i.test(entry.name)) return;
-                const key = `${normalizeText(entry.name)}|${entry.level ?? ''}`;
-                if (seen.has(key)) return;
-                seen.add(key);
-                out.push(entry);
-            });
-        return out;
-    };
-
-    const looksLikeSheet = (text) => /ficha do poke\s*idle/i.test(text || '') && (text || '').length > 300;
+    // --- Funções puras: a fonte única é src/modules/pure.js (testada em tests/pure.test.mjs) ---
+    const { normalizeText, cleanKey, parseNumber, parseSignedNumber, looksLikeSheet } = PokeBotModules.pure;
+    // As de fila carregam o modo atual da CONFIG
+    const parseQueueEntry = (rawText) => PokeBotModules.pure.parseQueueEntry(rawText, CONFIG.mode);
+    const parseQueueText = (rawText) => PokeBotModules.pure.parseQueueText(rawText, CONFIG.mode);
 
     // --- Utilitários ---
     const isInsideHud = (el) => Boolean(el && el.closest && el.closest(`#${HUD_ID}`));
@@ -1118,1986 +3050,6 @@
             if (available >= tier.minGold) chosen = tier;
         }
         return chosen;
-    };
-
-    // --- 1. Captura Automática em Fila (#caidos-lista) + Seleção Inteligente de Bola + Guardião de Shiny ---
-    const isShinyCaidoButton = (btn) => {
-        if (!btn) return false;
-        const cls = (btn.className || '').toLowerCase();
-        const txt = btn.textContent || '';
-        return (
-            cls.includes('shiny') ||
-            btn.dataset.shiny === '1' ||
-            btn.dataset.shiny === 'true' ||
-            txt.includes('✨') ||
-            normalizeText(txt).includes('shiny')
-        );
-    };
-
-    const ensureBestBallSelected = (targetBtn) => {
-        const container = document.getElementById('auto-ball-opts');
-        if (!container) return;
-
-        const chips = Array.from(container.querySelectorAll('.auto-chip'));
-        if (chips.length === 0) return;
-
-        const counts = chips.map((c) => parseNumber(c.querySelector('.q')?.textContent ?? c.textContent) ?? 0);
-        const currentIdx = chips.findIndex((c) => c.classList.contains('on'));
-        const isShiny = isShinyCaidoButton(targetBtn);
-
-        let desiredIdx = currentIdx;
-
-        if (isShiny) {
-            for (const idx of [4, 3, 2, 1, 0]) {
-                if (chips[idx] && counts[idx] > 0) {
-                    desiredIdx = idx;
-                    break;
-                }
-            }
-        } else if (CONFIG.caidos.smartBallSelect) {
-            const targetLv = parseNumber(targetBtn?.textContent) ?? getCurrentHunt()?.targetLevel ?? 1;
-            const order =
-                targetLv >= CONFIG.caidos.highLevelUltraThreshold
-                    ? [3, 2, 1, 0]
-                    : [0, 1, 2, 3];
-            for (const idx of order) {
-                if (chips[idx] && counts[idx] > 0) {
-                    desiredIdx = idx;
-                    break;
-                }
-            }
-        } else if (currentIdx === -1 || counts[currentIdx] <= 0) {
-            const firstAvailable = counts.findIndex((n) => n > 0);
-            if (firstAvailable !== -1) desiredIdx = firstAvailable;
-        }
-
-        if (desiredIdx !== -1 && desiredIdx !== currentIdx && chips[desiredIdx] && isInteractable(chips[desiredIdx])) {
-            chips[desiredIdx].click();
-        }
-    };
-
-    const processCaidos = (container) => {
-        if (!state.running || state.paused || !container) return;
-
-        const allButtons = Array.from(container.querySelectorAll(CONFIG.caidos.buttonSelector)).filter(isInteractable);
-        const shinyButtons = allButtons.filter(isShinyCaidoButton);
-
-        if (shinyButtons.length > 0) {
-            state.shinyAlertActive = true;
-            shinyButtons.forEach((b) => {
-                const slot = b.dataset.slot || b.textContent;
-                if (!state.shinyNotifiedSlots.has(slot)) {
-                    state.shinyNotifiedSlots.add(slot);
-                    state.stats.shiniesSpotted++;
-                    if (CONFIG.shinyGuard.soundAlert) playBeep(1180, 0.25);
-                    state.lastActionNote = `✨ SHINY DETECTADO: ${(b.querySelector('.caido-quem')?.textContent || 'Alvo').trim()}`;
-                    updateHud();
-                }
-            });
-        } else {
-            state.shinyAlertActive = false;
-        }
-
-        if (!CONFIG.caidos.enabled) return;
-        if (state.modalLockOwner && !(CONFIG.shinyGuard.enabled && shinyButtons.length > 0)) return;
-        if (state.throwPending) return;
-
-        const inv = getInventorySnapshot();
-        if (inv.totalBalls === 0) {
-            smartRestock(false);
-            return;
-        }
-
-        const now = Date.now();
-        const ordered = shinyButtons.length > 0 ? [...shinyButtons, ...allButtons] : allButtons;
-        const nextBtn = ordered.find((btn) => {
-            const lastTry = parseInt(btn.dataset.pbTriedAt || '0', 10);
-            const retryMs = isShinyCaidoButton(btn) ? 1400 : CONFIG.caidos.retryAfterMs;
-            return now - lastTry >= retryMs;
-        });
-
-        if (!nextBtn) return;
-
-        const elapsed = now - state.lastThrowAt;
-        const baseWait = Math.max(0, CONFIG.caidos.minThrowIntervalMs - elapsed);
-        const jitter = randomDelay(CONFIG.delays.clickMinMs, CONFIG.delays.clickMaxMs);
-
-        state.throwPending = true;
-        setTimeout(() => {
-            window.requestAnimationFrame(() => {
-                state.throwPending = false;
-                if (!state.running || state.paused) return;
-                if (state.modalLockOwner && !isShinyCaidoButton(nextBtn)) return;
-
-                if (getInventorySnapshot().totalBalls === 0) {
-                    smartRestock(false);
-                    return;
-                }
-
-                if (isInteractable(nextBtn)) {
-                    ensureBestBallSelected(nextBtn);
-                    nextBtn.dataset.pbTriedAt = String(Date.now());
-                    state.lastThrowAt = Date.now();
-                    nextBtn.click();
-                    state.stats.caidosClicked++;
-                }
-
-                if (state.observedCaidosNode) {
-                    processCaidos(state.observedCaidosNode);
-                }
-            });
-        }, baseWait + jitter);
-    };
-
-    const ensureCaidosObserver = () => {
-        if (!state.running || state.paused) return;
-
-        const targetNode = document.querySelector(CONFIG.caidos.containerSelector);
-        if (targetNode !== state.observedCaidosNode) {
-            if (state.caidosObserver) {
-                state.caidosObserver.disconnect();
-                state.caidosObserver = null;
-                state.observedCaidosNode = null;
-            }
-            if (targetNode) {
-                state.observedCaidosNode = targetNode;
-                state.caidosObserver = new MutationObserver(() => processCaidos(targetNode));
-                state.caidosObserver.observe(targetNode, { childList: true });
-            }
-        }
-
-        if (state.observedCaidosNode) {
-            processCaidos(state.observedCaidosNode);
-        }
-    };
-
-    // --- 2. Restock ---
-    const getVisibleMarketCards = () =>
-        Array.from(document.querySelectorAll('#mk-corpo .mk-card')).filter(isInteractable);
-
-    const isMarketOpen = () => Boolean(document.getElementById('mk-modos') && isVisible(document.getElementById('mk-modos')));
-
-    const findMarketCard = (itemName) => {
-        const target = normalizeText(itemName);
-        return (
-            getVisibleMarketCards().find((card) => {
-                const nameEl = card.querySelector('.mk-nome');
-                return nameEl && normalizeText(nameEl.textContent) === target;
-            }) ||
-            getVisibleMarketCards().find((card) => {
-                const nameEl = card.querySelector('.mk-nome');
-                return nameEl && normalizeText(nameEl.textContent).includes(target);
-            }) ||
-            null
-        );
-    };
-
-    const findCardBuyButton = (card) => {
-        if (!card) return null;
-        return (
-            Array.from(card.querySelectorAll('button')).find(
-                (btn) => normalizeText(btn.textContent).includes('comprar') && isInteractable(btn)
-            ) || null
-        );
-    };
-
-    const selectBatchShortcut = async (card, batchLabel) => {
-        if (!card || !batchLabel) return;
-        const target = normalizeText(batchLabel).replace('×', 'x');
-        const shortcutBtn = Array.from(card.querySelectorAll('.mk-atalhos button')).find((btn) => {
-            const txt = normalizeText(btn.textContent).replace('×', 'x');
-            return txt === target && isInteractable(btn);
-        });
-        if (shortcutBtn) {
-            shortcutBtn.click();
-            await sleep(randomDelay(120, 220));
-        }
-    };
-
-    const ensureMarketTab = async (abaKey) => {
-        const tab = document.querySelector(`#mk-modos .cmp-op[data-aba="${abaKey}"]`);
-        if (tab && !tab.classList.contains('on') && isInteractable(tab)) {
-            tab.click();
-            await sleep(randomDelay(CONFIG.delays.uiMinMs, CONFIG.delays.uiMaxMs));
-        }
-    };
-
-    const switchMarketCategory = async (categoryName) => {
-        const target = normalizeText(categoryName);
-        const catBtn = Array.from(document.querySelectorAll('#mk-corpo .mk-lado button.mk-cat')).find((btn) => {
-            if (!isInteractable(btn)) return false;
-            const txt = normalizeText(btn.querySelector('.mk-cat-txt')?.textContent || btn.textContent);
-            return txt.startsWith(target) || txt === target;
-        });
-        if (catBtn && !catBtn.classList.contains('on')) {
-            catBtn.click();
-            await sleep(randomDelay(CONFIG.delays.uiMinMs, CONFIG.delays.uiMaxMs));
-        }
-    };
-
-    const smartRestock = async (force = false) => {
-        if (!CONFIG.restock.enabled && !force) return;
-
-        const ballTier = getTargetBallTier();
-        const inv = getInventorySnapshot();
-        const toBuy = [];
-
-        const currentTierBalls = inv.balls ? inv.balls[ballTier.chipIndex] : null;
-        if (force || (currentTierBalls !== null && currentTierBalls < CONFIG.restock.minBalls)) {
-            toBuy.push({
-                itemName: ballTier.itemName,
-                categoryName: 'Pokebolas',
-                targetAmount: CONFIG.restock.targetBalls,
-            });
-        }
-
-        if (
-            CONFIG.restock.restockSmallPotion &&
-            (force || (inv.smallPotions !== null && inv.smallPotions < CONFIG.restock.minPotions))
-        ) {
-            toBuy.push({
-                itemName: 'Small Potion',
-                categoryName: 'Poções',
-                targetAmount: CONFIG.restock.targetPotions,
-            });
-        }
-
-        if (
-            CONFIG.restock.restockRevive &&
-            (force || (inv.totalRevives !== null && inv.totalRevives < CONFIG.restock.minRevives))
-        ) {
-            toBuy.push({
-                itemName: 'Revive',
-                categoryName: 'Revives',
-                targetAmount: CONFIG.restock.targetRevives,
-            });
-        }
-
-        if (toBuy.length === 0) return;
-
-        await withModalLock(
-            'Restock',
-            async () => {
-                let openedByBot = false;
-                try {
-                    if (!isMarketOpen()) {
-                        if (getVisibleModal()) await closeActiveModal();
-                        const marketBtn = findMenuButtonByImg('menu-market') || findClickableByText('Market');
-                        if (!marketBtn) return;
-                        marketBtn.click();
-                        openedByBot = true;
-                        const loaded = await waitFor(isMarketOpen, 3500);
-                        if (!loaded) return;
-                        await sleep(randomDelay(CONFIG.delays.uiMinMs, CONFIG.delays.uiMaxMs));
-                    }
-
-                    await ensureMarketTab('compra');
-
-                    for (const item of toBuy) {
-                        if (!state.running) break;
-
-                        let card = findMarketCard(item.itemName);
-                        if (!card) {
-                            await switchMarketCategory(item.categoryName);
-                            card = await waitFor(() => findMarketCard(item.itemName), 2800);
-                        }
-                        if (!card) continue;
-
-                        for (let i = 0; i < CONFIG.restock.maxPurchases; i++) {
-                            if (!state.running) break;
-                            const currCard = findMarketCard(item.itemName);
-                            if (!currCard) break;
-
-                            const countBefore = parseNumber(currCard.querySelector('.mk-tem')?.textContent);
-                            if (countBefore !== null && countBefore >= item.targetAmount) break;
-
-                            await selectBatchShortcut(currCard, CONFIG.restock.batchButton);
-                            const buyBtn = findCardBuyButton(currCard);
-                            if (!buyBtn) break;
-
-                            buyBtn.click();
-                            state.stats.purchases++;
-
-                            const countAfter = await waitFor(() => {
-                                const upd = findMarketCard(item.itemName);
-                                const val = parseNumber(upd?.querySelector('.mk-tem')?.textContent);
-                                return val !== null && countBefore !== null && val > countBefore ? val : null;
-                            }, CONFIG.restock.buyConfirmTimeoutMs, 100);
-
-                            if (countAfter === null) break;
-                            state.lastActionNote = `${item.itemName}: ${countAfter}`;
-                            await sleep(randomDelay(160, 280));
-                        }
-                    }
-                } finally {
-                    if (openedByBot && CONFIG.restock.closeMarketAfter && state.running) {
-                        await closeActiveModal();
-                    }
-                }
-            },
-            { force }
-        );
-    };
-
-    // --- 4. Gestor de Depot ---
-    const openBackpackPocket = async (abaKey) => {
-        if (getVisibleModal()) await closeActiveModal();
-        const bagBtn = document.getElementById('btn-bolsa');
-        if (!bagBtn || !isInteractable(bagBtn)) return null;
-
-        bagBtn.click();
-        const bolsoBtn = await waitFor(
-            () => document.querySelector(`.mochila-bolso[data-aba="${abaKey}"]`),
-            3500
-        );
-        if (!bolsoBtn || !isInteractable(bolsoBtn)) {
-            await closeActiveModal();
-            return null;
-        }
-        bolsoBtn.click();
-        await sleep(randomDelay(320, 480));
-        return document.getElementById('bolsa-corpo');
-    };
-
-    const runDepotManager = async (force = false) => {
-        const mode = CONFIG.depot.mode;
-        if (mode === 'off') return;
-        if (!force && Date.now() - state.lastDepotRunAt < CONFIG.depot.intervalMs) return;
-
-        await withModalLock(
-            `Depot:${mode}`,
-            async () => {
-                state.lastDepotRunAt = Date.now();
-                try {
-                    if (mode === 'venda') {
-                        if (getVisibleModal()) await closeActiveModal();
-                        const marketBtn = findMenuButtonByImg('menu-market') || findClickableByText('Market');
-                        if (!marketBtn) return;
-                        marketBtn.click();
-                        if (!(await waitFor(isMarketOpen, 3500))) return;
-
-                        await ensureMarketTab('pokemons');
-                        await sleep(randomDelay(250, 400));
-
-                        const infoTxt = document.querySelector('.mk-vt-info')?.textContent || '';
-                        const countToSell = parseNumber(infoTxt.split('para vender')[0]);
-                        const sellAllBtn = document.querySelector('.mk-vender-tudo button.mk-acao');
-
-                        if (sellAllBtn && isInteractable(sellAllBtn) && (countToSell === null || countToSell > 0)) {
-                            sellAllBtn.click();
-                            await confirmModalDialog(['confirmar', 'vender', 'sim']);
-                            state.stats.depotRuns++;
-                            state.lastActionNote = `Depot vendido (${countToSell ?? '?'} pkm)`;
-                        } else {
-                            state.lastActionNote = 'Depot sem Pokémon para vender';
-                        }
-                    } else if (mode === 'oferenda') {
-                        const corpo = await openBackpackPocket('oferenda');
-                        if (!corpo) return;
-
-                        const allBtn = document.getElementById('ofr-tudo');
-                        if (allBtn && isInteractable(allBtn)) {
-                            allBtn.click();
-                            await confirmModalDialog(['confirmar', 'oferendar', 'sim']);
-                            state.stats.depotRuns++;
-                            state.lastActionNote = 'Oferenda em lote executada';
-                        } else {
-                            const autoBtn = document.getElementById('ofr-auto');
-                            if (autoBtn && isInteractable(autoBtn)) {
-                                autoBtn.click();
-                                await sleep(randomDelay(260, 400));
-                            }
-                            const fastBtn = document.getElementById('ofr-rapida') || document.getElementById('ofr-girar');
-                            if (fastBtn && isInteractable(fastBtn)) {
-                                fastBtn.click();
-                                await confirmModalDialog(['confirmar', 'oferendar', 'sim']);
-                                state.stats.depotRuns++;
-                                state.lastActionNote = 'Oferenda rápida executada';
-                            } else {
-                                state.lastActionNote = 'Oferenda: sem Pokémon elegíveis';
-                            }
-                        }
-                    } else if (mode === 'sacrificio') {
-                        const corpo = await openBackpackPocket('sacrificio');
-                        if (!corpo) return;
-
-                        const selBtn = document.getElementById('sac-todos');
-                        if (selBtn && isInteractable(selBtn)) {
-                            selBtn.click();
-                            await sleep(randomDelay(260, 400));
-                        }
-
-                        const sacBtn = document.getElementById('sac-sacrificar');
-                        if (sacBtn && isInteractable(sacBtn)) {
-                            sacBtn.click();
-                            await confirmModalDialog(['confirmar', 'sacrificar', 'sim']);
-                            state.stats.depotRuns++;
-                            state.lastActionNote = 'Sacrifício concluído';
-                            await sleep(randomDelay(300, 450));
-                        }
-
-                        const native = readNativeSessionPanel();
-                        const boostOn = Boolean(native?.boosts?.sacrificio);
-                        const claimBtn = document.getElementById('sac-resgatar');
-                        if (claimBtn && isInteractable(claimBtn) && (!boostOn || force)) {
-                            claimBtn.click();
-                            await confirmModalDialog(['confirmar', 'resgatar', 'sim']);
-                            state.lastActionNote = 'Boost +20% XP resgatado!';
-                        }
-                    }
-                } finally {
-                    await closeActiveModal();
-                }
-            },
-            { force }
-        );
-    };
-
-    // --- 5. Auto-Chocadeira ---
-    const EGG_PRIORITY_KEYWORDS = ['ovo shiny', 'shiny', 'p4', 'p3', 'p2', 'mystery egg'];
-
-    const checkIncubator = async (force = false) => {
-        if (!CONFIG.incubator.enabled && !force) return;
-        if (!force && Date.now() < state.nextIncubatorCheckAt) return;
-
-        await withModalLock(
-            'Chocadeira',
-            async () => {
-                let hasActiveOrEgg = false;
-                try {
-                    const corpo = await openBackpackPocket('chocadeira');
-                    if (!corpo) return;
-
-                    const readyBtns = Array.from(corpo.querySelectorAll('.chc-slot button')).filter((b) => {
-                        if (!isInteractable(b) || b.classList.contains('chc-liberar')) return false;
-                        const t = normalizeText(b.textContent);
-                        return t.includes('chocar') || t.includes('recolher') || t.includes('abrir') || t.includes('nascer');
-                    });
-
-                    for (const btn of readyBtns) {
-                        btn.click();
-                        state.stats.eggsHandled++;
-                        state.lastActionNote = 'Ovo chocado!';
-                        hasActiveOrEgg = true;
-                        await sleep(randomDelay(400, 650));
-                    }
-
-                    const freeSlot = corpo.querySelector('.chc-slot.livre');
-                    if (freeSlot) {
-                        const slotBtns = Array.from(freeSlot.querySelectorAll('button')).filter(
-                            (b) => isInteractable(b) && !b.classList.contains('chc-liberar')
-                        );
-                        if (slotBtns.length > 0) {
-                            let chosenBtn = null;
-                            for (const kw of EGG_PRIORITY_KEYWORDS) {
-                                chosenBtn = slotBtns.find((b) => normalizeText(b.textContent).includes(kw));
-                                if (chosenBtn) break;
-                            }
-                            chosenBtn = chosenBtn || slotBtns[0];
-                            chosenBtn.click();
-                            await confirmModalDialog(['confirmar', 'colocar', 'incubar', 'sim']);
-                            state.stats.eggsHandled++;
-                            state.lastActionNote = `Ovo incubado: ${chosenBtn.textContent.trim().slice(0, 24)}`;
-                            hasActiveOrEgg = true;
-                        }
-                    }
-
-                    const occupied = Array.from(corpo.querySelectorAll('.chc-slot')).some(
-                        (s) => !s.classList.contains('livre') && !s.classList.contains('trancado')
-                    );
-                    if (occupied) hasActiveOrEgg = true;
-                } finally {
-                    state.nextIncubatorCheckAt =
-                        Date.now() + (hasActiveOrEgg ? CONFIG.incubator.activeIntervalMs : CONFIG.incubator.emptyBackoffMs);
-                    await closeActiveModal();
-                }
-            },
-            { force }
-        );
-    };
-
-    // --- 6. Bosses + Auto-Loot ---
-    const dismissBossLoot = () => {
-        if (!state.running || !CONFIG.boss.autoDismissLoot) return;
-        const okBtn = document.getElementById('boss-loot-ok');
-        if (okBtn && isInteractable(okBtn)) {
-            okBtn.click();
-            state.lastActionNote = 'Loot de Boss coletado!';
-        }
-    };
-
-    const bossMatchesPriority = (detailEl, priority) => {
-        if (priority === 'qualquer') return true;
-        const html = (detailEl?.innerHTML || '').toLowerCase();
-        const txt = normalizeText(detailEl?.textContent || '');
-        if (priority === 'mega') return html.includes('fragmento-mega') || txt.includes('mega');
-        if (priority === 'tm') return html.includes('tm_disk') || html.includes('zmove') || txt.includes('tm ');
-        if (priority === 'tickets') return html.includes('mystic-ticket') || html.includes('safari-ticket') || txt.includes('ticket');
-        return true;
-    };
-
-    const checkBosses = async (force = false) => {
-        const prio = CONFIG.boss.priority;
-        if (prio === 'off' && !force) return;
-        if (!force && Date.now() - state.lastBossCheckAt < CONFIG.boss.checkIntervalMs) return;
-
-        await withModalLock(
-            'Bosses',
-            async () => {
-                state.lastBossCheckAt = Date.now();
-                let entered = false;
-                try {
-                    if (getVisibleModal()) await closeActiveModal();
-                    const bossBtn = findMenuButtonByImg('boss-cabeca') || findMenuButtonByImg('menu-bosses');
-                    if (!bossBtn) return;
-                    bossBtn.click();
-
-                    const listEl = await waitFor(() => document.getElementById('boss-lista'), 3500);
-                    if (!listEl) return;
-                    await sleep(randomDelay(240, 380));
-
-                    const items = Array.from(listEl.querySelectorAll('button.boss-item:not([data-key="@raid"])')).filter(isInteractable);
-                    for (const item of items) {
-                        if (!state.running) break;
-                        item.click();
-                        await sleep(randomDelay(220, 340));
-
-                        const modalBody = document.getElementById('modal-corpo');
-                        const challengeBtn = modalBody?.querySelector('button.boss-desafiar');
-                        if (!challengeBtn || challengeBtn.disabled || !isInteractable(challengeBtn)) continue;
-
-                        if (!bossMatchesPriority(modalBody, prio === 'off' ? 'qualquer' : prio)) continue;
-
-                        const bossName = modalBody.querySelector('.boss-nome')?.textContent?.trim() || 'Boss';
-                        challengeBtn.click();
-                        await confirmModalDialog(['desafiar', 'entrar', 'confirmar', 'sim']);
-                        state.stats.bossEntries++;
-                        state.lastActionNote = `Entrou no Boss: ${bossName}`;
-                        entered = true;
-                        break;
-                    }
-
-                    if (!entered) {
-                        state.lastActionNote = `Bosses (${prio}): nenhum disponível agora`;
-                    }
-                } finally {
-                    if (!entered) await closeActiveModal();
-                }
-            },
-            { force }
-        );
-    };
-
-    // --- 7. Equipe + Dia Sazonal ---
-    const getTeamCards = () => {
-        const list = document.getElementById('time');
-        if (!list) return [];
-
-        return Array.from(list.querySelectorAll('.poke-linha')).map((el) => {
-            const id = el.getAttribute('data-id') || '';
-            const isActive = el.classList.contains('ativo');
-            const nomeEl = el.querySelector('.pl-nome');
-            const lvEl = el.querySelector('.pl-lv');
-            const level = parseNumber(lvEl?.textContent) ?? 1;
-            const name = getDirectText(nomeEl);
-
-            const titleAttr = el.getAttribute('title') || '';
-            const powerMatch = titleAttr.match(/poder\s+([\d.]+)/i);
-            const power = powerMatch ? parseNumber(powerMatch[1]) : null;
-
-            const types = [];
-            titleAttr
-                .toUpperCase()
-                .split(/[\s/·,]+/)
-                .forEach((tok) => {
-                    if (VALID_TYPES.has(tok) && !types.includes(tok)) types.push(tok);
-                });
-
-            const hpStyle = el.querySelector('.mini-hp i')?.style?.width || '';
-            const hpPercent = hpStyle.endsWith('%') ? Math.round(parseFloat(hpStyle)) : 100;
-
-            return { el, id, key: id || `${name}_${level}`, name, level, power, types, hpPercent, isActive };
-        });
-    };
-
-    const triggerTeamSwap = (chosen, noteLabel) => {
-        const clickTarget = chosen.el.querySelector('.pl-info') || chosen.el;
-        if (!isVisible(clickTarget)) return;
-
-        const snap = readNativeSessionPanel();
-        state.teamSwapPotionSnap = snap
-            ? { pocoes: snap.pocoesUsadas, revives: snap.revivesUsados }
-            : null;
-
-        clickTarget.click();
-        state.lastTeamSwapAt = Date.now();
-
-        setTimeout(() => {
-            if (!state.running) return;
-            const currentActiveRow = document.querySelector('#time .poke-linha.ativo');
-            const swapped =
-                (chosen.id && currentActiveRow?.getAttribute('data-id') === chosen.id) ||
-                getActivePokemon()?.name.toLowerCase() === chosen.name.toLowerCase();
-
-            if (swapped) {
-                state.stats.teamSwaps++;
-                state.lastActionNote = noteLabel || `Equipe: ${chosen.name} Nv${chosen.level}`;
-            } else {
-                state.failedSwapUntil[chosen.key] = Date.now() + CONFIG.team.failedSwapBackoffMs;
-            }
-        }, 1600);
-    };
-
-    const checkTeamRotation = () => {
-        if (!state.running || state.paused || CONFIG.team.mode === 'off') return;
-        if (state.modalLockOwner || isInSpecialArena()) return;
-
-        const now = Date.now();
-        const active = getActivePokemon();
-        const hunt = getCurrentHunt();
-        const { level: trainerLv } = getTrainerHeaderInfo();
-        const team = getTeamCards();
-        if (!active || team.length < 2) return;
-
-        const eligible = team.filter((p) => {
-            if (trainerLv !== null && p.level > trainerLv + 5) return false;
-            if (p.hpPercent <= 0) return false;
-            if ((state.failedSwapUntil[p.key] || 0) > now) return false;
-            return true;
-        });
-        if (eligible.length < 2) return;
-
-        const activeRow = team.find((p) => p.isActive) || null;
-        const strongest = [...eligible].sort(
-            (a, b) => b.level - a.level || (b.power ?? 0) - (a.power ?? 0)
-        )[0];
-
-        if (CONFIG.team.mode === 'equilibrar' && activeRow && strongest && activeRow.key !== strongest.key) {
-            const snap = readNativeSessionPanel();
-            const spentSupply = Boolean(
-                snap &&
-                    state.teamSwapPotionSnap &&
-                    (snap.pocoesUsadas > state.teamSwapPotionSnap.pocoes ||
-                        snap.revivesUsados > state.teamSwapPotionSnap.revives)
-            );
-            const lowHp = active.hpPercent !== null && active.hpPercent < CONFIG.team.rescueHpPercent;
-            const tooWeak = active.power !== null && active.power < CONFIG.team.minTrainPower;
-
-            if (spentSupply || lowHp || tooWeak) {
-                if (now - state.lastTeamSwapAt >= ESPERA_TROCA_ATIVO_MS) {
-                    state.unsafeTrainUntil[activeRow.key] = now + CONFIG.team.unsafeBackoffMs;
-                    triggerTeamSwap(strongest, `Resgate: ${strongest.name} (${activeRow.name} frágil)`);
-                }
-                return;
-            }
-        }
-
-        const cooldown = Math.max(CONFIG.team.swapCooldownMs, ESPERA_TROCA_ATIVO_MS);
-        if (now - state.lastTeamSwapAt < cooldown) return;
-
-        let chosen = null;
-        if (CONFIG.team.mode === 'sazonal') {
-            const dayType = getSeasonalDayType();
-            if (dayType && !active.types.includes(dayType)) {
-                const matching = eligible
-                    .filter((p) => p.types.includes(dayType) && !p.isActive)
-                    .sort((a, b) => b.level - a.level || (b.power ?? 0) - (a.power ?? 0));
-                if (matching.length > 0) chosen = matching[0];
-            }
-        } else if (CONFIG.team.mode === 'equilibrar') {
-            const minSafeLevel = hunt ? Math.max(1, hunt.targetLevel - CONFIG.team.maxGapBelowHunt) : 1;
-            const safeToTrain = eligible
-                .filter((p) => {
-                    if (p.level < minSafeLevel) return false;
-                    if (p.hpPercent < CONFIG.team.minTrainHpPercent) return false;
-                    if (p.power !== null && p.power < CONFIG.team.minTrainPower) return false;
-                    if ((state.unsafeTrainUntil[p.key] || 0) > now) return false;
-                    return true;
-                })
-                .sort((a, b) => a.level - b.level || (b.power ?? 0) - (a.power ?? 0));
-
-            if (safeToTrain.length > 0 && !safeToTrain[0].isActive && safeToTrain[0].level + 1 < (active.level ?? 1)) {
-                chosen = safeToTrain[0];
-            }
-        }
-
-        if (chosen && !chosen.isActive) {
-            triggerTeamSwap(chosen, `Equipe: ${chosen.name} Nv${chosen.level}`);
-        }
-    };
-
-    // --- 9. Radar RMT ---
-    const parseRmtPriceEl = (priceEl) => {
-        if (!priceEl) return null;
-        const isGems =
-            priceEl.classList.contains('orb') ||
-            Boolean(priceEl.querySelector('img[src*="moeda-gema"]'));
-        const value = parseNumber(priceEl.textContent);
-        if (!value || value <= 0) return null;
-        return { value, currency: isGems ? 'gemas' : 'coins' };
-    };
-
-    const scanMarketRadar = () => {
-        if (!state.running || !CONFIG.radar.enabled || CONFIG.radar.alerts.length === 0) return;
-
-        const title = normalizeText(document.getElementById('modal-titulo')?.textContent);
-        if (!title.includes('mercado da comunidade')) return;
-
-        const corpo = document.getElementById('modal-corpo');
-        if (!corpo || !isVisible(corpo)) return;
-
-        const hits = [];
-
-        corpo.querySelectorAll('.cm-card').forEach((card) => {
-            if (!isVisible(card)) return;
-            const nameText = card.querySelector('.cm-nome-txt')?.textContent?.trim() || '';
-            const priceInfo = parseRmtPriceEl(card.querySelector('.cm-rodape .cm-preco'));
-            if (!nameText || !priceInfo) return;
-
-            const normName = normalizeText(nameText);
-            for (const rule of CONFIG.radar.alerts) {
-                if (!normName.includes(normalizeText(rule.nome))) continue;
-                if (rule.moeda !== 'todas' && rule.moeda !== priceInfo.currency) continue;
-                if (priceInfo.value > rule.maxPreco) continue;
-
-                card.style.outline = '2px solid #22c55e';
-                card.style.boxShadow = '0 0 12px rgba(34,197,94,0.55)';
-
-                const hitKey = `pk_${normName}_${priceInfo.value}_${priceInfo.currency}`;
-                hits.push({ nome: nameText, preco: priceInfo.value, moeda: priceInfo.currency });
-
-                if (!state.radarNotifiedKeys.has(hitKey)) {
-                    state.radarNotifiedKeys.add(hitKey);
-                    if (CONFIG.radar.soundAlert) playBeep(960, 0.18);
-                    state.lastActionNote = `RMT! ${nameText} por ${priceInfo.value.toLocaleString('pt-BR')} ${priceInfo.currency}`;
-                }
-
-                if (rule.autoComprar) {
-                    const buyBtn = card.querySelector('button.cm-btn.comprar');
-                    if (buyBtn && isInteractable(buyBtn) && !buyBtn.classList.contains('cm-retido')) {
-                        buyBtn.click();
-                        state.lastActionNote = `Compra RMT: ${nameText}`;
-                    }
-                }
-            }
-        });
-
-        corpo.querySelectorAll('button.cmi-linha').forEach((row) => {
-            if (!isVisible(row)) return;
-            const itemName = row.querySelector('.cmi-nome b')?.textContent?.trim() || '';
-            if (!itemName) return;
-
-            const normName = normalizeText(itemName);
-            const priceNodes = Array.from(row.querySelectorAll('.cmi-precos .cmi-de:not(.nada) .cm-preco'));
-
-            for (const pNode of priceNodes) {
-                const priceInfo = parseRmtPriceEl(pNode);
-                if (!priceInfo) continue;
-
-                for (const rule of CONFIG.radar.alerts) {
-                    if (!normName.includes(normalizeText(rule.nome))) continue;
-                    if (rule.moeda !== 'todas' && rule.moeda !== priceInfo.currency) continue;
-                    if (priceInfo.value > rule.maxPreco) continue;
-
-                    row.style.outline = '2px solid #22c55e';
-                    row.style.boxShadow = '0 0 12px rgba(34,197,94,0.55)';
-
-                    const hitKey = `it_${normName}_${priceInfo.value}_${priceInfo.currency}`;
-                    hits.push({ nome: itemName, preco: priceInfo.value, moeda: priceInfo.currency });
-
-                    if (!state.radarNotifiedKeys.has(hitKey)) {
-                        state.radarNotifiedKeys.add(hitKey);
-                        if (CONFIG.radar.soundAlert) playBeep(960, 0.18);
-                        state.lastActionNote = `RMT Item! ${itemName} por ${priceInfo.value.toLocaleString('pt-BR')} ${priceInfo.currency}`;
-                    }
-                }
-            }
-        });
-
-        state.radarHits = hits;
-    };
-
-    const adicionarAlertaRadar = ({ nome, maxPreco, moeda = 'coins', autoComprar = false }) => {
-        if (!nome || !maxPreco) return false;
-        CONFIG.radar.alerts.push({
-            nome: String(nome).trim(),
-            maxPreco: Number(maxPreco),
-            moeda: normalizeText(moeda),
-            autoComprar: Boolean(autoComprar),
-        });
-        persistPrefs();
-        renderAlertList();
-        return true;
-    };
-
-    const removerAlertaRadar = (index) => {
-        if (index < 0 || index >= CONFIG.radar.alerts.length) return;
-        CONFIG.radar.alerts.splice(index, 1);
-        persistPrefs();
-        renderAlertList();
-    };
-
-    // --- 10. Assistente de Mini Games ---
-    const dexNumberToRegion = (num) => {
-        if (!num || num <= 0) return '';
-        if (num <= 151) return 'kanto';
-        if (num <= 251) return 'johto';
-        if (num <= 386) return 'hoenn';
-        if (num <= 493) return 'sinnoh';
-        if (num <= 649) return 'unova';
-        if (num <= 721) return 'kalos';
-        if (num <= 809) return 'alola';
-        if (num <= 905) return 'galar';
-        if (num <= 1025) return 'paldea';
-        return '';
-    };
-
-    const parsePokedexCsv = (csvText) => {
-        const lines = (csvText || '').split(/\r?\n/).filter((l) => l.trim().length > 0);
-        if (lines.length < 2) return [];
-
-        const sep = lines[0].includes(';') ? ';' : ',';
-        const headers = lines[0].split(sep).map((h) => normalizeText(h.replace(/^"|"$/g, '')));
-        const col = (candidates) => headers.findIndex((h) => candidates.some((c) => h.includes(c)));
-
-        const idIdx = col(['#', 'id', 'num', 'dex']);
-        const nameIdx = col(['nome', 'name', 'especie', 'pokemon']);
-        const type1Idx = col(['tipo1', 'tipo 1', 'type1', 'tipo', 'type']);
-        const type2Idx = col(['tipo2', 'tipo 2', 'type2']);
-        const regIdx = col(['regiao', 'region', 'geracao', 'gen']);
-
-        if (nameIdx === -1) return [];
-
-        const map = new Map();
-        for (let i = 1; i < lines.length; i++) {
-            const cols = lines[i].split(sep).map((v) => v.replace(/^"|"$/g, '').trim());
-            const name = cols[nameIdx];
-            if (!name || map.has(name)) continue;
-
-            const types = [];
-            const rawTypes = `${cols[type1Idx] || ''} ${type2Idx !== -1 ? cols[type2Idx] || '' : ''}`;
-            rawTypes.split(/[\s/|,]+/).forEach((rawTok) => {
-                const canonical = TYPE_ALIASES[normalizeText(rawTok)];
-                if (canonical && !types.includes(canonical)) types.push(canonical);
-            });
-
-            const dexId = idIdx !== -1 ? parseNumber(cols[idIdx]) : null;
-            const region = regIdx !== -1 && cols[regIdx] ? normalizeText(cols[regIdx]) : dexNumberToRegion(dexId);
-
-            map.set(name, {
-                id: dexId,
-                name,
-                cleanName: cleanKey(name),
-                types,
-                region,
-            });
-        }
-
-        const list = Array.from(map.values());
-        state.dexCatalog = list;
-        saveJson(STORAGE_DEX_KEY, list);
-        state.lastActionNote = `Pokedex importada: ${list.length} espécies`;
-        updateHud();
-        return list;
-    };
-
-    const abrirSeletorCsvPokedex = () => {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = '.csv,.txt';
-        input.onchange = async () => {
-            const file = input.files?.[0];
-            if (!file) return;
-            const text = await file.text();
-            parsePokedexCsv(text);
-        };
-        input.click();
-    };
-
-    const applyMiniGameGuess = (pokemonName, submit = false) => {
-        const input = document.getElementById('mg-input');
-        if (!input || !isInteractable(input)) return false;
-
-        input.value = pokemonName;
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.focus();
-
-        if (submit) {
-            const sendBtn = document.getElementById('mg-enviar');
-            if (sendBtn && isInteractable(sendBtn)) {
-                sendBtn.click();
-                return true;
-            }
-            const form = input.closest('form');
-            if (form) {
-                form.requestSubmit
-                    ? form.requestSubmit()
-                    : form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-                return true;
-            }
-            return false;
-        }
-        return true;
-    };
-
-    const updateMiniGameHelper = () => {
-        if (!state.running || !CONFIG.minigame.enabled || state.dexCatalog.length === 0) return;
-
-        const tela = document.getElementById('mg-tela');
-        if (!tela || !isVisible(tela) || tela.getAttribute('data-fase') !== 'palpites') {
-            if (state.miniGameMatches.length > 0) {
-                state.miniGameMatches = [];
-                renderQuizCandidates();
-            }
-            return;
-        }
-
-        const barraSig = document.getElementById('mg-barra')?.getAttribute('data-sig') || '';
-        const roundId = barraSig.split('|')[0] || '';
-        if (roundId && roundId !== state.currentMiniGameRoundId) {
-            state.currentMiniGameRoundId = roundId;
-            state.roundTriedNames.clear();
-            state.lastGuessedStageKey = '';
-        }
-
-        const pistasEl = tela.querySelector('.mg-pistas');
-        if (!pistasEl) return;
-
-        const clueTypes = [];
-        pistasEl.querySelectorAll('.mg-tipo-sel').forEach((badge) => {
-            for (const cls of badge.classList) {
-                const up = cls.toUpperCase();
-                if (VALID_TYPES.has(up) && !clueTypes.includes(up)) clueTypes.push(up);
-            }
-        });
-
-        let clueRegion = null;
-        const regions = ['kanto', 'johto', 'hoenn', 'sinnoh', 'unova', 'kalos', 'alola', 'galar', 'paldea'];
-        pistasEl.querySelectorAll('.mg-par:not(.trava)').forEach((par) => {
-            const rot = normalizeText(par.querySelector('.mg-pista-rot')?.textContent);
-            const val = normalizeText(par.querySelector('.mg-pista-val')?.textContent);
-            if (rot.includes('regiao')) {
-                const found = regions.find((r) => val.includes(r));
-                if (found) clueRegion = found;
-            }
-        });
-
-        let letterPattern = null;
-        const letrasEl = pistasEl.querySelector('.mg-pista-letras');
-        if (letrasEl) {
-            const cells = Array.from(letrasEl.querySelectorAll('span, i, b')).filter((c) => {
-                const t = (c.textContent || '').trim();
-                return c.children.length === 0 && t.length <= 2;
-            });
-            if (cells.length >= 3) {
-                const chars = cells.map((c) => {
-                    const ch = cleanKey(c.textContent);
-                    return ch.length === 1 ? ch : '.';
-                });
-                letterPattern = new RegExp(`^${chars.join('')}$`);
-            }
-        }
-
-        if (clueTypes.length === 0 && !clueRegion && !letterPattern) {
-            if (state.miniGameMatches.length > 0) {
-                state.miniGameMatches = [];
-                renderQuizCandidates();
-            }
-            return;
-        }
-
-        let matches = state.dexCatalog;
-        if (clueTypes.length > 0) {
-            matches = matches.filter((p) => clueTypes.every((t) => p.types.includes(t)));
-            if (clueTypes.length === 1) {
-                matches = [...matches].sort((a, b) => a.types.length - b.types.length);
-            }
-        }
-        if (clueRegion) {
-            matches = matches.filter((p) => !p.region || p.region.includes(clueRegion));
-        }
-        if (letterPattern) {
-            matches = matches.filter((p) => letterPattern.test(p.cleanName));
-        }
-
-        const untried = matches.filter((p) => !state.roundTriedNames.has(p.cleanName));
-        state.miniGameMatches = untried.slice(0, 8).map((p) => p.name);
-        renderQuizCandidates();
-
-        if (
-            CONFIG.minigame.autoGuess &&
-            untried.length >= 1 &&
-            untried.length <= CONFIG.minigame.autoGuessMaxCandidates
-        ) {
-            const stageKey = `${roundId || 'mg'}_${tela.getAttribute('data-estagio') || '0'}`;
-            if (state.lastGuessedStageKey !== stageKey) {
-                const pick = untried[0];
-                if (applyMiniGameGuess(pick.name, true)) {
-                    state.lastGuessedStageKey = stageKey;
-                    state.roundTriedNames.add(pick.cleanName);
-                    state.lastActionNote = `Quiz auto (${untried.length} opç.): ${pick.name}`;
-                    renderQuizCandidates();
-                }
-            }
-        }
-    };
-
-    // --- 11. Telemetria Híbrida (#sessao-painel + Fallback #hud-log) ---
-    const createSession = (hunt, pokemon, markerMeta = null) => ({
-        regionKey: hunt ? hunt.key : 'Centro / Fora',
-        targetName: hunt ? hunt.targetName : 'Nenhum',
-        targetLevel: hunt ? hunt.targetLevel : null,
-        markerMeta,
-        pokemonName: pokemon ? pokemon.name : 'Desconhecido',
-        pokemonLevel: pokemon ? pokemon.level : null,
-        pokemonTypes: pokemon ? pokemon.types : [],
-        startedAt: Date.now(),
-        startSnap: readNativeSessionPanel(),
-        latestSnap: readNativeSessionPanel(),
-        logKills: 0,
-        logXpPoke: 0,
-        logGold: 0,
-        minHpPercent: pokemon?.hpPercent ?? 100,
-    });
-
-    const handleCombatLogNode = (node) => {
-        if (!state.running || !state.session || node.nodeType !== Node.ELEMENT_NODE) return;
-        const txt = node.textContent || '';
-        if (txt.includes('derrotado!')) {
-            state.session.logKills++;
-            const xpMatch = txt.match(/\+([\d.]+)\s*xp\s*pok[eé]mon/i);
-            const goldMatch = txt.match(/\+([\d.]+)\s*ouro/i);
-            if (xpMatch) state.session.logXpPoke += parseNumber(xpMatch[1]) ?? 0;
-            if (goldMatch) state.session.logGold += parseNumber(goldMatch[1]) ?? 0;
-        } else if (normalizeText(txt).includes('capturado')) {
-            state.stats.captures++;
-        }
-    };
-
-    const ensureCombatLogObserver = () => {
-        const logNode = document.getElementById('hud-log');
-        if (logNode === state.observedLogNode) return;
-
-        if (state.logObserver) {
-            state.logObserver.disconnect();
-            state.logObserver = null;
-            state.observedLogNode = null;
-        }
-        if (logNode) {
-            state.observedLogNode = logNode;
-            state.logObserver = new MutationObserver((mutations) => {
-                for (const m of mutations) {
-                    for (const added of m.addedNodes) {
-                        handleCombatLogNode(added);
-                    }
-                }
-            });
-            state.logObserver.observe(logNode, { childList: true });
-        }
-    };
-
-    const computeSessionMetrics = (s, now = Date.now()) => {
-        const elapsedSec = Math.max(1, Math.floor((now - s.startedAt) / 1000));
-        const minutes = elapsedSec / 60;
-
-        const a = s.startSnap;
-        const b = s.latestSnap || a;
-        const useNative = Boolean(a && b);
-
-        const dKills = useNative ? Math.max(0, b.abates - a.abates) : s.logKills;
-        const dXpPoke = useNative ? Math.max(0, b.xpPokemon - a.xpPokemon) : s.logXpPoke;
-        const dGold = useNative ? Math.max(0, b.gold - a.gold) : s.logGold;
-        const dLucro = useNative ? b.lucro - a.lucro : s.logGold;
-        const dPotions = useNative ? Math.max(0, b.pocoesUsadas - a.pocoesUsadas) : 0;
-        const dRevives = useNative ? Math.max(0, b.revivesUsados - a.revivesUsados) : 0;
-
-        const killsPerMin = +(dKills / minutes).toFixed(2);
-        const xpPokePerMin = Math.round(dXpPoke / minutes);
-        const goldGrossPerMin = Math.round(dGold / minutes);
-        const lucroPerMin = Math.round(dLucro / minutes);
-        const potionsPerMin = +(dPotions / minutes).toFixed(2);
-        const revivesPerMin = +(dRevives / minutes).toFixed(2);
-
-        const safe =
-            revivesPerMin === 0 &&
-            potionsPerMin <= CONFIG.farm.maxPotionsPerMinSafe &&
-            s.minHpPercent >= CONFIG.farm.minHpPercentSafe;
-
-        return {
-            regiao: s.regionKey,
-            pokemon: `${s.pokemonName} Nv${s.pokemonLevel ?? '?'}`,
-            tempoSeg: elapsedSec,
-            abates: dKills,
-            abatesMin: killsPerMin,
-            xpPokeMin: xpPokePerMin,
-            ouroBrutoMin: goldGrossPerMin,
-            lucroLiqMin: lucroPerMin,
-            pocoesMin: potionsPerMin,
-            revivesMin: revivesPerMin,
-            minHpPct: s.minHpPercent,
-            segura: safe,
-        };
-    };
-
-    const scoreRecord = (r, modo = CONFIG.mode) => {
-        const safetyWeight = r.segura ? 1 : 0.25;
-        if (modo === 'xp') return r.xpPokeMin * safetyWeight;
-        if (modo === 'ouro') return Math.max(0, r.lucroLiqMin) * safetyWeight;
-        if (modo === 'topcatch') return (r.abatesMin * 100 + r.xpPokeMin * 0.2) * safetyWeight;
-        return (r.xpPokeMin * 0.65 + Math.max(0, r.lucroLiqMin) * 0.35) * safetyWeight;
-    };
-
-    const persistCurrentSession = (forceSave = false) => {
-        const s = state.session;
-        if (!s || !s.regionKey || s.regionKey === 'Centro / Fora') return null;
-
-        const metrics = computeSessionMetrics(s);
-        if (!forceSave && (metrics.tempoSeg < CONFIG.farm.minSampleSec || metrics.abates < CONFIG.farm.minKillsToSave)) {
-            return null;
-        }
-
-        const recordKey = `${s.pokemonName}__${s.regionKey}`;
-        const prev = state.history[recordKey];
-        const record = {
-            ...metrics,
-            pokemonName: s.pokemonName,
-            pokemonLevel: s.pokemonLevel,
-            targetLevel: s.targetLevel,
-            markerMeta: s.markerMeta || prev?.markerMeta || null,
-            updatedAt: new Date().toISOString(),
-        };
-
-        state.history[recordKey] = record;
-        saveJson(STORAGE_HISTORY_KEY, state.history);
-        return record;
-    };
-
-    const checkVersionAlert = () => {
-        const aviso = document.getElementById('aviso-versao');
-        if (aviso && isVisible(aviso) && !state.paused) {
-            state.paused = true;
-            setStatus('Atualização!', 'Nova versão detectada — recarregue o jogo');
-            playBeep(520, 0.25);
-        }
-    };
-
-    const updateFarmTelemetry = () => {
-        if (!state.running || !CONFIG.farm.enabled) return;
-
-        ensureCombatLogObserver();
-        checkVersionAlert();
-
-        const hunt = getCurrentHunt();
-        const poke = getActivePokemon();
-        const snap = readNativeSessionPanel();
-
-        if (snap) {
-            if (state.lastShiniesVistos === null) {
-                state.lastShiniesVistos = snap.shiniesVistos;
-            } else if (snap.shiniesVistos > state.lastShiniesVistos) {
-                state.lastShiniesVistos = snap.shiniesVistos;
-                state.stats.shiniesSpotted++;
-                if (CONFIG.shinyGuard.soundAlert) playBeep(1180, 0.25);
-                state.lastActionNote = '✨ Shiny apareceu na sessão!';
-            } else if (snap.shiniesVistos < state.lastShiniesVistos) {
-                state.lastShiniesVistos = snap.shiniesVistos;
-            }
-
-            if (state.lastSessionCaptures === null) {
-                state.lastSessionCaptures = snap.capturas;
-            } else if (snap.capturas > state.lastSessionCaptures) {
-                state.stats.captures += snap.capturas - state.lastSessionCaptures;
-                state.lastSessionCaptures = snap.capturas;
-                if (
-                    CONFIG.topCatchHop.enabled &&
-                    !state.modalLockOwner &&
-                    !state.shinyAlertActive &&
-                    Date.now() - state.lastHopAt >= CONFIG.topCatchHop.hopCooldownMs
-                ) {
-                    state.lastHopAt = Date.now();
-                    setTimeout(() => {
-                        if (state.running && !state.shinyAlertActive) hopNextTopCatchArea(false);
-                    }, 1000);
-                }
-            } else if (snap.capturas < state.lastSessionCaptures) {
-                state.lastSessionCaptures = snap.capturas;
-            }
-        }
-
-        if (!state.session) {
-            state.session = createSession(hunt, poke, state.lastMarkerMeta);
-        } else if (hunt && hunt.key !== state.session.regionKey) {
-            persistCurrentSession(false);
-            state.session = createSession(hunt, poke, state.lastMarkerMeta);
-        } else if (poke && poke.name !== state.session.pokemonName) {
-            persistCurrentSession(false);
-            state.session = createSession(hunt, poke, state.lastMarkerMeta);
-        } else {
-            if (poke) {
-                state.session.pokemonLevel = poke.level;
-                if (poke.hpPercent !== null && poke.hpPercent < state.session.minHpPercent) {
-                    state.session.minHpPercent = poke.hpPercent;
-                }
-            }
-            if (snap) {
-                if (state.session.startSnap && snap.abates < state.session.startSnap.abates) {
-                    state.session.startSnap = snap;
-                    state.session.startedAt = Date.now();
-                }
-                if (!state.session.startSnap) state.session.startSnap = snap;
-                state.session.latestSnap = snap;
-            }
-        }
-
-        persistCurrentSession(false);
-    };
-
-    // --- 12. Mapa, Benchmark, Auto-Hop e Fila /hunt ---
-    const isMapModalOpen = () => {
-        const modal = getVisibleModal();
-        return Boolean(modal && modal.querySelector('.mapa-barra'));
-    };
-
-    const openMapModal = async () => {
-        if (isMapModalOpen()) return getVisibleModal();
-        if (getVisibleModal()) await closeActiveModal();
-        const mapBtn = findMenuButtonByImg('menu-mapa') || findClickableByText('Mapa');
-        if (!mapBtn) return null;
-        mapBtn.click();
-        const modal = await waitFor(() => (isMapModalOpen() ? getVisibleModal() : null), 3800);
-        if (modal) await sleep(randomDelay(240, 380));
-        return modal;
-    };
-
-    const ensureMapViewMode = async (modal, modeLabel = 'MAPA') => {
-        const btns = Array.from(modal.querySelectorAll('.mapa-modo button.mapa-modo-bt'));
-        const target = btns.find((b) => normalizeText(b.textContent) === normalizeText(modeLabel));
-        if (target && !target.classList.contains('on') && isInteractable(target)) {
-            target.click();
-            await sleep(randomDelay(200, 340));
-        }
-    };
-
-    const applyMapFilters = async (
-        modal,
-        { pokemonTypes = [], useTypeAdvantage = true, onlyUnlocked = true, pokedexFilter = null } = {}
-    ) => {
-        const bar = modal.querySelector('.mapa-barra');
-        if (!bar) return;
-
-        const tipoTrigger = Array.from(bar.querySelectorAll('button')).find((b) =>
-            normalizeText(b.textContent).startsWith('tipo')
-        );
-        if (tipoTrigger && isInteractable(tipoTrigger)) {
-            const ensureTipoOpen = async () => {
-                if (!findClickableByText('todos os tipos', modal, true)) {
-                    tipoTrigger.click();
-                    await waitFor(() => findClickableByText('todos os tipos', modal, true), 1400);
-                    await sleep(120);
-                }
-            };
-            await ensureTipoOpen();
-            const resetBtn = findClickableByText('todos os tipos', modal, true);
-            if (resetBtn) {
-                resetBtn.click();
-                await sleep(150);
-            }
-            if (useTypeAdvantage && pokemonTypes.length > 0) {
-                await ensureTipoOpen();
-                for (const type of pokemonTypes) {
-                    const typeBtn = findClickableByText(type, modal, true);
-                    if (typeBtn) {
-                        typeBtn.click();
-                        await sleep(120);
-                    }
-                }
-                const weakBtn = findClickableByText('Fraco contra', modal, true);
-                if (weakBtn) {
-                    weakBtn.click();
-                    await sleep(150);
-                }
-            }
-            if (findClickableByText('todos os tipos', modal, true)) {
-                tipoTrigger.click();
-                await sleep(120);
-            }
-        }
-
-        const dexTrigger = Array.from(bar.querySelectorAll('button')).find((b) =>
-            normalizeText(b.textContent).startsWith('pokedex')
-        );
-        if (dexTrigger && isInteractable(dexTrigger)) {
-            const desiredLabel = pokedexFilter || 'Todos';
-            if (!normalizeText(dexTrigger.textContent).includes(normalizeText(desiredLabel))) {
-                dexTrigger.click();
-                const option = await waitFor(
-                    () => findClickableByText(desiredLabel, modal, desiredLabel === 'Todos'),
-                    1400
-                );
-                if (option) {
-                    option.click();
-                    await sleep(150);
-                } else {
-                    dexTrigger.click();
-                    await sleep(120);
-                }
-            }
-        }
-
-        if (onlyUnlocked) {
-            const nivelTrigger = Array.from(bar.querySelectorAll('button')).find((b) =>
-                normalizeText(b.textContent).startsWith('nivel')
-            );
-            if (nivelTrigger && isInteractable(nivelTrigger)) {
-                const findUnlockedCb = () =>
-                    Array.from(modal.querySelectorAll('input[type="checkbox"]')).find((cb) => {
-                        const parentTxt = normalizeText(cb.closest('label, div')?.textContent);
-                        return parentTxt.includes('liberadas') && isVisible(cb);
-                    });
-
-                if (!findUnlockedCb()) {
-                    nivelTrigger.click();
-                    await waitFor(findUnlockedCb, 1400);
-                    await sleep(120);
-                }
-                const cb = findUnlockedCb();
-                if (cb && !cb.checked) {
-                    cb.click();
-                    await sleep(150);
-                }
-                if (findUnlockedCb()) {
-                    nivelTrigger.click();
-                    await sleep(120);
-                }
-            }
-        }
-    };
-
-    const getMarkerSignature = (btn, regionName) => {
-        const left = btn.style.left || '';
-        const top = btn.style.top || '';
-        const title = btn.getAttribute('title') || btn.getAttribute('aria-label') || '';
-        const level = parseNumber(btn.textContent) ?? 0;
-        return `${regionName}::${level}::${left},${top}::${title}`;
-    };
-
-    const selectMapRegionTab = async (modal, regionName) => {
-        const regBtn = Array.from(
-            modal.querySelectorAll('button.mapa-reg-bt:not(.mapa-area-travada)')
-        ).find((b) => normalizeText(b.textContent).startsWith(normalizeText(regionName)));
-        if (!regBtn) return false;
-        if (!regBtn.classList.contains('on')) {
-            regBtn.click();
-            await sleep(randomDelay(220, 340));
-        }
-        return true;
-    };
-
-    const collectCandidatesFromOpenMap = async (modal, poke, useTypeAdvantage, pokedexFilter, ascending = false) => {
-        await ensureMapViewMode(modal, 'MAPA');
-        await applyMapFilters(modal, {
-            pokemonTypes: poke?.types || [],
-            useTypeAdvantage,
-            onlyUnlocked: CONFIG.map.onlyUnlocked,
-            pokedexFilter,
-        });
-
-        const unlockedRegions = Array.from(
-            modal.querySelectorAll('button.mapa-reg-bt:not(.mapa-area-travada)')
-        );
-
-        const candidates = [];
-        const pokeLevel = poke?.level ?? 1;
-        const trainerLevel = getTrainerHeaderInfo().level ?? pokeLevel;
-        const maxLevel = Math.min(trainerLevel, pokeLevel + CONFIG.map.maxLevelAbovePokemon);
-
-        for (const regBtn of unlockedRegions) {
-            const regionName = (regBtn.textContent || '').split('\n')[0].trim();
-            if (!regBtn.classList.contains('on')) {
-                regBtn.click();
-                await sleep(randomDelay(220, 340));
-            }
-            const markers = Array.from(
-                modal.querySelectorAll('button.marcador:not(.travado)')
-            ).filter(isInteractable);
-
-            markers.forEach((btn, idx) => {
-                const areaLevel = parseNumber(btn.textContent) ?? 1;
-                if (areaLevel > maxLevel) return;
-                candidates.push({
-                    regionName,
-                    areaLevel,
-                    title: btn.getAttribute('title') || btn.getAttribute('aria-label') || '',
-                    indexInRegion: idx,
-                    signature: getMarkerSignature(btn, regionName),
-                    isCurrent: btn.classList.contains('on'),
-                });
-            });
-        }
-
-        candidates.sort((a, b) => (ascending ? a.areaLevel - b.areaLevel : b.areaLevel - a.areaLevel));
-        return candidates;
-    };
-
-    const waitForAreaSwitchCooldown = async () => {
-        const remaining = CONFIG.map.switchCooldownMs - (Date.now() - state.lastAreaSwitchAt);
-        if (remaining > 0) {
-            state.lastActionNote = `Trava de área (${(remaining / 1000).toFixed(1)}s)`;
-            updateHud();
-            await sleep(remaining);
-        }
-    };
-
-    const travelToMarkerMeta = async (meta) => {
-        if (CONFIG.shinyGuard.enabled && state.shinyAlertActive) return false;
-        await waitForAreaSwitchCooldown();
-        if (CONFIG.shinyGuard.enabled && state.shinyAlertActive) return false;
-
-        const modal = await openMapModal();
-        if (!modal) return false;
-
-        await ensureMapViewMode(modal, 'MAPA');
-        await applyMapFilters(modal, {
-            pokemonTypes: [],
-            useTypeAdvantage: false,
-            onlyUnlocked: CONFIG.map.onlyUnlocked,
-            pokedexFilter: null,
-        });
-
-        const switched = await selectMapRegionTab(modal, meta.regionName);
-        if (!switched) {
-            await closeActiveModal();
-            return false;
-        }
-
-        const markers = Array.from(
-            modal.querySelectorAll('button.marcador:not(.travado)')
-        ).filter(isInteractable);
-
-        let targetBtn = markers.find((b) => getMarkerSignature(b, meta.regionName) === meta.signature);
-        if (!targetBtn && markers[meta.indexInRegion]) targetBtn = markers[meta.indexInRegion];
-
-        if (!targetBtn) {
-            await closeActiveModal();
-            return false;
-        }
-
-        if (targetBtn.classList.contains('on')) {
-            await closeActiveModal();
-            state.lastMarkerMeta = meta;
-            return true;
-        }
-
-        const prevHuntKey = getCurrentHunt()?.key || null;
-        targetBtn.click();
-
-        const traveled = await waitFor(() => {
-            if (!getVisibleModal()) return true;
-            const currKey = getCurrentHunt()?.key || null;
-            if (prevHuntKey && currKey && currKey !== prevHuntKey) return true;
-            const activeModal = getVisibleModal();
-            if (activeModal) {
-                const confirmBtn =
-                    document.getElementById('confirmar-sim') ||
-                    Array.from(activeModal.querySelectorAll('button')).find((b) => {
-                        if (!isInteractable(b) || b.closest('.mapa-barra') || b.closest('.mapa-mundi')) return false;
-                        const t = normalizeText(b.textContent);
-                        return t === 'ir' || t.includes('viajar') || t.includes('cacar') || t.includes('entrar');
-                    });
-                if (confirmBtn && isInteractable(confirmBtn)) confirmBtn.click();
-            }
-            return false;
-        }, 2800, 140);
-
-        if (getVisibleModal()) await closeActiveModal();
-
-        if (traveled) {
-            state.lastAreaSwitchAt = Date.now();
-            state.lastMarkerMeta = meta;
-            state.stats.regionSwitches++;
-            await sleep(randomDelay(300, 480));
-        }
-        return Boolean(traveled);
-    };
-
-    const saveHuntQueueState = () => {
-        saveJson(STORAGE_HUNT_QUEUE_KEY, {
-            mode: CONFIG.mode,
-            updatedAt: Date.now(),
-            index: state.huntQueueIndex,
-            items: state.huntQueue,
-        });
-    };
-
-    // --- Fila /hunt (v6.5) ---
-    const definirFilaHunt = (list) => {
-        if (!Array.isArray(list)) return [];
-        state.huntQueue = list
-            .map((entry) =>
-                typeof entry === 'string'
-                    ? parseQueueEntry(entry)
-                    : { ...entry, name: String(entry?.name || '').trim() }
-            )
-            .filter((x) => x.name.length > 0);
-        state.huntQueueIndex = 0;
-        saveHuntQueueState();
-        state.lastActionNote = `Fila /hunt: ${state.huntQueue.length} áreas`;
-        updateHud();
-        return state.huntQueue;
-    };
-
-    // Fila manual: lê a caixa de texto do HUD, atualiza state/storage/HUD na hora (sem reload, sem derrubar timers)
-    const loadManualQueue = async (irAgora = false) => {
-        const raw = state.hudEl?.querySelector('#pb-manual-queue')?.value || '';
-        const entries = parseQueueText(raw);
-
-        if (entries.length === 0) {
-            if (irAgora && state.huntQueue.length > 0) {
-                return irProximaHuntGuia(true);
-            }
-            state.lastActionNote = 'Cole ao menos 1 área válida';
-            updateHud();
-            return false;
-        }
-
-        definirFilaHunt(entries);
-        state.lastActionNote = `Fila /hunt: ${state.huntQueue.length} itens (próx: ${state.huntQueue[0].name})`;
-        updateHud();
-
-        if (irAgora) {
-            return irProximaHuntGuia(true);
-        }
-        return true;
-    };
-
-    const limparFilaHunt = () => {
-        state.huntQueue = [];
-        state.huntQueueIndex = 0;
-        saveHuntQueueState();
-        state.lastActionNote = 'Fila /hunt limpa';
-        updateHud();
-    };
-
-    // Monta a fila sem tomar o lock (pode ser chamada de dentro de outra rotina com lock)
-    const buildHuntQueueItems = async () => {
-        let items = [];
-
-        // Monta a fila a partir das áreas seguras/liberadas do mapa (a lista do Hub entra pela caixa "Fila Manual")
-        if (items.length === 0) {
-            const poke = getActivePokemon();
-            const modal = await openMapModal();
-            if (modal) {
-                const candidates = await collectCandidatesFromOpenMap(
-                    modal,
-                    poke,
-                    CONFIG.map.preferTypeAdvantage,
-                    CONFIG.mode === 'topcatch' ? 'Top Catch' : null,
-                    CONFIG.mode === 'topcatch'
-                );
-                await closeActiveModal();
-                items = candidates.slice(0, 8).map((c) => ({
-                    name: c.regionName,
-                    regionName: c.regionName,
-                    areaLevel: c.areaLevel,
-                    markerMeta: c,
-                    mode: CONFIG.mode,
-                }));
-            }
-        }
-        return items;
-    };
-
-    const adoptHuntQueue = (items) => {
-        state.huntQueue = items;
-        state.huntQueueIndex = 0;
-        saveHuntQueueState();
-        state.lastActionNote = `Fila /hunt pronta (${items.length} áreas)`;
-    };
-
-    const syncHuntGuideQueue = async (force = false) => {
-        return withModalLock(
-            'Montando fila',
-            async () => {
-                const items = await buildHuntQueueItems();
-                if (items.length > 0) {
-                    adoptHuntQueue(items);
-                } else if (!state.lastActionNote.startsWith('Guia /hunt:')) {
-                    state.lastActionNote = 'Nenhuma área encontrada para a fila';
-                }
-                return state.huntQueue;
-            },
-            { force }
-        );
-    };
-
-    // Casa uma entrada da fila (espécie/alvo do Hub ou nome de região) com um marcador liberado do mapa
-    const findQueueMatch = (entry, candidates) => {
-        if (entry.markerMeta) return entry.markerMeta;
-        const needle = normalizeText(entry.regionName || entry.name);
-        if (!needle) return null;
-        const byName = candidates.filter((c) => {
-            const region = normalizeText(c.regionName);
-            const title = normalizeText(c.title);
-            return (
-                (region && (region.includes(needle) || needle.includes(region))) ||
-                (title && title.includes(needle))
-            );
-        });
-        // Se a entrada trouxe nível (ex.: "Kakuna Nv 10"), prefere a área com esse nível
-        return (entry.level && byName.find((c) => c.areaLevel === entry.level)) || byName[0] || null;
-    };
-
-    // Fallback seguro: área liberada, diferente da atual e com nível não acima do Pokémon ativo
-    const pickSafeFallback = (entry, candidates, poke) => {
-        const pokeLevel = poke?.level ?? null;
-        const pool = candidates.filter((c) => !c.isCurrent && (pokeLevel === null || c.areaLevel <= pokeLevel));
-        if (pool.length === 0) return null;
-        return (entry?.level && pool.find((c) => c.areaLevel === entry.level)) || pool[0];
-    };
-
-    const irProximaHuntGuia = async (force = false) => {
-        return withModalLock(
-            'Fila /hunt',
-            async () => {
-                if (state.huntQueue.length === 0) {
-                    const built = await buildHuntQueueItems();
-                    if (built.length > 0) adoptHuntQueue(built);
-                }
-                if (state.huntQueue.length === 0) {
-                    state.lastActionNote = 'Fila /hunt vazia';
-                    return false;
-                }
-
-                const poke = getActivePokemon();
-                const modal = await openMapModal();
-                if (!modal) return false;
-                const liveCandidates = await collectCandidatesFromOpenMap(
-                    modal,
-                    poke,
-                    false,
-                    null,
-                    CONFIG.mode === 'topcatch'
-                );
-                await closeActiveModal();
-
-                for (let attempt = 0; attempt < state.huntQueue.length; attempt++) {
-                    const idx = (state.huntQueueIndex + attempt) % state.huntQueue.length;
-                    const entry = state.huntQueue[idx];
-                    const matchedMeta = findQueueMatch(entry, liveCandidates);
-                    if (!matchedMeta) continue;
-
-                    state.huntQueueIndex = (idx + 1) % state.huntQueue.length;
-                    saveHuntQueueState();
-                    state.lastActionNote = `Fila -> ${matchedMeta.regionName} Nv${matchedMeta.areaLevel}`;
-                    const ok = await travelToMarkerMeta(matchedMeta);
-                    if (ok) {
-                        state.session = createSession(getCurrentHunt(), getActivePokemon(), matchedMeta);
-                        return true;
-                    }
-                }
-
-                // Nenhuma entrada casou com marcador do mapa: usa área segura/liberada como fallback
-                if (CONFIG.huntQueue.fallbackToSafeArea) {
-                    const entry = state.huntQueue[state.huntQueueIndex % state.huntQueue.length];
-                    const fallback = pickSafeFallback(entry, liveCandidates, poke);
-                    if (fallback) {
-                        state.huntQueueIndex = (state.huntQueueIndex + 1) % state.huntQueue.length;
-                        saveHuntQueueState();
-                        state.lastActionNote = `Fila sem match (${entry.name}) -> fallback ${fallback.regionName} Nv${fallback.areaLevel}`;
-                        const ok = await travelToMarkerMeta(fallback);
-                        if (ok) {
-                            state.session = createSession(getCurrentHunt(), getActivePokemon(), fallback);
-                            return true;
-                        }
-                    }
-                }
-
-                state.lastActionNote = 'Fila /hunt: sem área elegível agora';
-                return false;
-            },
-            { force }
-        );
-    };
-
-    // --- Ficha para o Hub ---
-    // A ficha que o Hub lê é a MESMA que o jogo gera no botão "Copiar p/ ChatGPT" (#fi-gpt, dentro do modal #ficha-corpo).
-    // O bot abre a ficha do Pokémon ativo, aciona esse botão, confere o texto copiado e fecha o modal.
-    const SHEET_BTN_ID = 'fi-gpt';
-    const SHEET_CLOSE_ID = 'ficha-fechar';
-
-    const closeSheetModal = async () => {
-        const closeBtn = document.getElementById(SHEET_CLOSE_ID);
-        if (closeBtn && isInteractable(closeBtn)) {
-            closeBtn.click();
-            await waitFor(() => !document.getElementById(SHEET_BTN_ID) || !isInteractable(document.getElementById(SHEET_BTN_ID)), 1400);
-            await sleep(randomDelay(120, 200));
-        } else {
-            await closeActiveModal();
-        }
-    };
-
-    // Retorna { ok, text, reason }. Não depende de clipboard.readText (exige permissão): intercepta o writeText do próprio jogo.
-    const copyNativeSheet = async () => {
-        const card = document.getElementById('ativo-card');
-        if (!card) return { ok: false, reason: 'Pokémon ativo não encontrado' };
-
-        const clip = navigator.clipboard;
-        const originalWrite = clip && typeof clip.writeText === 'function' ? clip.writeText.bind(clip) : null;
-        const hadOwnWrite = Boolean(clip) && Object.prototype.hasOwnProperty.call(clip, 'writeText');
-        let captured = null;
-        let hooked = false;
-        if (originalWrite) {
-            try {
-                clip.writeText = (t) => {
-                    captured = String(t ?? '');
-                    return originalWrite(t);
-                };
-                hooked = true;
-            } catch {
-                // clipboard não permite sobrescrever: segue sem conferir o texto
-            }
-        }
-
-        try {
-            let btn = document.getElementById(SHEET_BTN_ID);
-            if (!btn || !isInteractable(btn)) {
-                card.click();
-                btn = await waitFor(() => {
-                    const el = document.getElementById(SHEET_BTN_ID);
-                    return el && isInteractable(el) ? el : null;
-                }, 2500);
-            }
-            if (!btn) return { ok: false, reason: 'Botão "Copiar p/ ChatGPT" não apareceu' };
-
-            btn.click();
-            if (hooked) await waitFor(() => captured, 1500);
-            else await sleep(300);
-
-            const valid = hooked ? looksLikeSheet(captured) : true;
-            return valid
-                ? { ok: true, text: captured, reason: '' }
-                : { ok: false, text: captured, reason: 'O jogo não copiou a ficha (clipboard bloqueado?)' };
-        } finally {
-            if (hooked) {
-                try {
-                    // No navegador writeText vem do protótipo: apagar a cópia própria restaura o original
-                    if (hadOwnWrite) clip.writeText = originalWrite;
-                    else delete clip.writeText;
-                } catch {
-                    // restaurado no próximo reload
-                }
-            }
-            await closeSheetModal();
-        }
-    };
-
-    const copyActiveSheet = async ({ openSite = false } = {}) => {
-        const res = await withModalLock('Copiando ficha', copyNativeSheet, { force: true });
-        if (!res) {
-            state.lastActionNote = 'Ficha: bot ocupado, tente de novo';
-        } else if (res.ok) {
-            const size = res.text ? ` (${res.text.length} car.)` : '';
-            state.lastActionNote = openSite ? `Ficha copiada${size} — cole no Hub` : `Ficha copiada${size}!`;
-            if (openSite) window.open(HUNT_GUIDE_URL, '_blank', 'noopener,noreferrer');
-        } else {
-            state.lastActionNote = `Ficha: ${res.reason}`;
-        }
-        updateHud();
-        return res?.text ?? null;
-    };
-
-    // Nome antigo da API (v6.2/v6.3)
-    const copiarFichaHunt = (abrirSite = false) => copyActiveSheet({ openSite: abrirSite });
-
-    const hopNextTopCatchArea = async (force = false) => {
-        return withModalLock(
-            'TopCatch Hop',
-            async () => {
-                const poke = getActivePokemon();
-                const modal = await openMapModal();
-                if (!modal) return false;
-
-                let candidates = await collectCandidatesFromOpenMap(modal, poke, false, 'Top Catch', true);
-                candidates = candidates.filter((c) => !c.isCurrent);
-                await closeActiveModal();
-
-                if (candidates.length === 0) {
-                    state.lastActionNote = 'Top Catch: todas as áreas liberadas capturadas!';
-                    return false;
-                }
-
-                const nextArea = candidates[0];
-                state.lastActionNote = `Top Catch -> ${nextArea.regionName} Nv${nextArea.areaLevel}`;
-                const ok = await travelToMarkerMeta(nextArea);
-                if (ok) {
-                    state.session = createSession(getCurrentHunt(), getActivePokemon(), nextArea);
-                }
-                return ok;
-            },
-            { force }
-        );
-    };
-
-    const otimizarRegiao = async ({
-        modo = CONFIG.mode,
-        tempoPorRegiaoSeg = CONFIG.map.benchmarkSecPerArea,
-        maxRegioes = CONFIG.map.maxAreasToTest,
-        usarVantagemTipo = CONFIG.map.preferTypeAdvantage,
-        force = false,
-    } = {}) => {
-        return withModalLock(
-            'Otimizando',
-            async () => {
-                state.lastOptimizeAt = Date.now();
-                const poke = getActivePokemon();
-                const trainerLv = getTrainerHeaderInfo().level;
-                if (trainerLv !== null) state.lastOptimizedTrainerLevel = trainerLv;
-
-                const dexFilter = modo === 'topcatch' ? 'Top Catch' : null;
-                const modal = await openMapModal();
-                if (!modal) return null;
-
-                let candidates = await collectCandidatesFromOpenMap(
-                    modal,
-                    poke,
-                    usarVantagemTipo,
-                    dexFilter,
-                    modo === 'topcatch'
-                );
-                if (candidates.length === 0 && usarVantagemTipo) {
-                    candidates = await collectCandidatesFromOpenMap(modal, poke, false, dexFilter, modo === 'topcatch');
-                }
-                if (candidates.length === 0 && dexFilter) {
-                    candidates = await collectCandidatesFromOpenMap(modal, poke, false, null, false);
-                }
-                await closeActiveModal();
-
-                if (candidates.length === 0) return null;
-
-                const toTest = candidates.slice(0, maxRegioes);
-                const results = [];
-
-                for (let i = 0; i < toTest.length; i++) {
-                    if (!state.running || (state.paused && !force)) break;
-                    if (CONFIG.shinyGuard.enabled && state.shinyAlertActive) {
-                        state.lastActionNote = 'Benchmark pausado: Shiny em campo!';
-                        return null;
-                    }
-
-                    const cand = toTest[i];
-                    state.lastActionNote = `Testando ${i + 1}/${toTest.length} (${cand.regionName} Nv${cand.areaLevel})`;
-                    updateHud();
-
-                    const ok = await travelToMarkerMeta(cand);
-                    if (!ok) continue;
-
-                    const preWarm = readNativeSessionPanel();
-                    let aborted = false;
-                    const warmupEnd = Date.now() + CONFIG.map.warmupMaxSec * 1000;
-                    while (Date.now() < warmupEnd && state.running) {
-                        await sleep(450);
-                        if (CONFIG.shinyGuard.enabled && state.shinyAlertActive) return null;
-                        const livePoke = getActivePokemon();
-                        const nowSnap = readNativeSessionPanel();
-                        if (
-                            (livePoke?.hpPercent !== null && livePoke.hpPercent < CONFIG.map.abortHpThreshold) ||
-                            (preWarm && nowSnap && nowSnap.revivesUsados > preWarm.revivesUsados)
-                        ) {
-                            aborted = true;
-                            break;
-                        }
-                        if (preWarm && nowSnap && nowSnap.abates > preWarm.abates) break;
-                    }
-
-                    state.session = createSession(getCurrentHunt(), getActivePokemon(), cand);
-
-                    if (!aborted && state.running) {
-                        const measureEnd = Date.now() + tempoPorRegiaoSeg * 1000;
-                        while (Date.now() < measureEnd && state.running) {
-                            await sleep(1000);
-                            if (CONFIG.shinyGuard.enabled && state.shinyAlertActive) return null;
-                            updateFarmTelemetry();
-                            updateHud();
-                            const livePoke = getActivePokemon();
-                            const m = computeSessionMetrics(state.session);
-                            if (
-                                (livePoke?.hpPercent !== null && livePoke.hpPercent < CONFIG.map.abortHpThreshold) ||
-                                m.revivesMin > 0
-                            ) {
-                                aborted = true;
-                                break;
-                            }
-                        }
-                    }
-
-                    const saved = persistCurrentSession(true);
-                    const metrics = saved || computeSessionMetrics(state.session);
-                    const isSafe = !aborted && metrics.segura && metrics.abates > 0;
-                    results.push({
-                        ...metrics,
-                        segura: isSafe,
-                        markerMeta: cand,
-                        score: Math.round(scoreRecord({ ...metrics, segura: isSafe }, modo)),
-                    });
-                }
-
-                if (results.length === 0) return null;
-                results.sort((a, b) => b.score - a.score);
-                console.table(
-                    results.map((r) => ({
-                        regiao: r.regiao,
-                        abatesMin: r.abatesMin,
-                        xpPokeMin: r.xpPokeMin,
-                        lucroLiqMin: r.lucroLiqMin,
-                        pocoesMin: r.pocoesMin,
-                        segura: r.segura,
-                        score: r.score,
-                    }))
-                );
-
-                const winner = results[0];
-                await travelToMarkerMeta(winner.markerMeta);
-                state.session = createSession(getCurrentHunt(), getActivePokemon(), winner.markerMeta);
-                state.lastActionNote = `Melhor (${modo}): ${winner.regiao}`;
-                return winner;
-            },
-            { force }
-        );
-    };
-
-    const checkAutoRegionProgression = async () => {
-        if (!state.running || state.paused || !CONFIG.autoRegion.enabled) return;
-        if (state.modalLockOwner || isInSpecialArena() || getVisibleModal() || state.shinyAlertActive) return;
-
-        const { level: trainerLv } = getTrainerHeaderInfo();
-        if (trainerLv !== null && state.lastOptimizedTrainerLevel === null) {
-            state.lastOptimizedTrainerLevel = trainerLv;
-        }
-        if (Date.now() - state.lastOptimizeAt < CONFIG.autoRegion.minIntervalMs) return;
-
-        if (
-            trainerLv !== null &&
-            state.lastOptimizedTrainerLevel !== null &&
-            trainerLv >= state.lastOptimizedTrainerLevel + CONFIG.autoRegion.levelStep
-        ) {
-            if (state.huntQueue.length > 0) {
-                await irProximaHuntGuia(false);
-            } else {
-                await otimizarRegiao({ modo: CONFIG.mode });
-            }
-            return;
-        }
-
-        if (state.session && getCurrentHunt()) {
-            const m = computeSessionMetrics(state.session);
-            if (m.abates >= 3 && (m.revivesMin > 0 || m.pocoesMin > CONFIG.farm.maxPotionsPerMinSafe)) {
-                if (state.huntQueue.length > 0) {
-                    await irProximaHuntGuia(false);
-                } else {
-                    await otimizarRegiao({ modo: CONFIG.mode });
-                }
-            }
-        }
     };
 
     // --- 13. HUD 3 Abas (Isolado com CSS contain + Dirty-Checking) ---
@@ -3739,24 +3691,24 @@
         retomar,
         status,
         lerSessaoNativa: readNativeSessionPanel,
-        otimizarRegiao,
+        otimizarRegiao: (options) => otimizarRegiao(options),
         syncHuntGuide: () => syncHuntGuideQueue(true),
         proximaHuntGuia: () => irProximaHuntGuia(true),
-        definirFilaHunt,
-        carregarFilaManual: loadManualQueue,
+        definirFilaHunt: (list) => definirFilaHunt(list),
+        carregarFilaManual: (irAgora) => loadManualQueue(irAgora),
         verificarEvolucao: () => autoEvolveCheck(),
-        limparFilaHunt,
-        copiarFichaHunt,
-        copiarFichaAtivo: copyActiveSheet,
+        limparFilaHunt: () => limparFilaHunt(),
+        copiarFichaHunt: (abrirSite) => copiarFichaHunt(abrirSite),
+        copiarFichaAtivo: (options) => copyActiveSheet(options),
         hopTopCatch: () => hopNextTopCatchArea(true),
         rodarDepot: () => runDepotManager(true),
         checarPasse: () => checkDailyPass(true),
         checarOvos: () => checkIncubator(true),
         checarBoss: () => checkBosses(true),
         restockNow: () => smartRestock(true),
-        adicionarAlertaRadar,
-        removerAlertaRadar,
-        importarPokedexCsv: abrirSeletorCsvPokedex,
+        adicionarAlertaRadar: (alerta) => adicionarAlertaRadar(alerta),
+        removerAlertaRadar: (index) => removerAlertaRadar(index),
+        importarPokedexCsv: () => abrirSeletorCsvPokedex(),
         efetividadeHunt: getHuntTypeMultiplier,
         stop,
     };
@@ -3778,13 +3730,31 @@
         randomDelay,
         withModalLock,
         updateHud,
-        keys: { passNext: STORAGE_PASS_NEXT_KEY },
+        setStatus,
+        playBeep,
+        keys: {
+            passNext: STORAGE_PASS_NEXT_KEY,
+            dex: STORAGE_DEX_KEY,
+            history: STORAGE_HISTORY_KEY,
+            huntQueue: STORAGE_HUNT_QUEUE_KEY,
+        },
         storage: {
             get: (key) => localStorage.getItem(key),
             set: (key, value) => localStorage.setItem(key, value),
+            saveJson,
+            persistPrefs,
         },
+        consts: { VALID_TYPES, TYPE_ALIASES, ESPERA_TROCA_ATIVO_MS, HUNT_GUIDE_URL },
+        hud: { renderAlertList, renderQuizCandidates },
         dom: {
             $: (selector) => document.querySelector(selector),
+            $$: (selector) => Array.from(document.querySelectorAll(selector)),
+            isVisible,
+            confirmModalDialog,
+            getInventorySnapshot,
+            getTargetBallTier,
+            getCurrentHunt,
+            readNativeSessionPanel,
             getVisibleModal,
             closeActiveModal,
             findMenuButtonByImg,
@@ -3794,14 +3764,55 @@
             getTrainerHeaderInfo,
             isInSpecialArena,
             getActivePokemon,
+            getDirectText,
+            playBeep,
+            getSeasonalDayType,
         },
     };
     const runtime = PokeBotModules.createRuntime(moduleCtx);
     runtime.register(PokeBotModules.dailyPass);
     runtime.register(PokeBotModules.autoEvolve);
+    runtime.register(PokeBotModules.capture);
+    runtime.register(PokeBotModules.restock);
+    runtime.register(PokeBotModules.depot);
+    runtime.register(PokeBotModules.hatchery);
+    runtime.register(PokeBotModules.bosses);
+    runtime.register(PokeBotModules.bossLoot);
+    runtime.register(PokeBotModules.teamSeason);
+    runtime.register(PokeBotModules.rmtRadar);
+    runtime.register(PokeBotModules.miniGames);
+    runtime.register(PokeBotModules.telemetry);
+    runtime.register(PokeBotModules.huntQueue);
+    runtime.register(PokeBotModules.hubSheet);
+    runtime.register(PokeBotModules.mapHop);
 
     const checkDailyPass = (force = false) => runtime.call('dailyPass', 'claim', { force });
     const autoEvolveCheck = () => runtime.call('autoEvolve', 'tick');
+    const processCaidos = (container) => runtime.call('capture', 'process', container);
+    const ensureCaidosObserver = () => runtime.call('capture', 'ensureObserver');
+    const smartRestock = (force = false) => runtime.call('restock', 'run', { force });
+    const runDepotManager = (force = false) => runtime.call('depot', 'run', { force });
+    const checkIncubator = (force = false) => runtime.call('hatchery', 'check', { force });
+    const checkBosses = (force = false) => runtime.call('bosses', 'check', { force });
+    const adicionarAlertaRadar = (alerta) => runtime.call('rmtRadar', 'addAlert', alerta);
+    const removerAlertaRadar = (index) => runtime.call('rmtRadar', 'removeAlert', index);
+    const applyMiniGameGuess = (pokemonName, submit = false) => runtime.call('miniGames', 'applyGuess', pokemonName, submit);
+    const abrirSeletorCsvPokedex = () => runtime.call('miniGames', 'openCsvPicker');
+
+    // Telemetria, mapa/hop, fila /hunt e ficha do Hub (lote C): nomes antigos usados por HUD, API pública e init
+    const createSession = (hunt, pokemon, markerMeta) => runtime.call('telemetry', 'createSession', hunt, pokemon, markerMeta);
+    const computeSessionMetrics = (session, now) => runtime.call('telemetry', 'computeSessionMetrics', session, now);
+    const persistCurrentSession = (forceSave) => runtime.call('telemetry', 'persistCurrentSession', forceSave);
+    const updateFarmTelemetry = () => runtime.call('telemetry', 'updateFarmTelemetry');
+    const hopNextTopCatchArea = (force) => runtime.call('mapHop', 'hopNextTopCatchArea', force);
+    const otimizarRegiao = (options) => runtime.call('mapHop', 'otimizarRegiao', options);
+    const definirFilaHunt = (list) => runtime.call('huntQueue', 'definirFilaHunt', list);
+    const loadManualQueue = (irAgora) => runtime.call('huntQueue', 'loadManualQueue', irAgora);
+    const limparFilaHunt = () => runtime.call('huntQueue', 'limparFilaHunt');
+    const syncHuntGuideQueue = (force) => runtime.call('huntQueue', 'syncHuntGuideQueue', force);
+    const irProximaHuntGuia = (force) => runtime.call('huntQueue', 'irProximaHuntGuia', force);
+    const copyActiveSheet = (options) => runtime.call('hubSheet', 'copyActiveSheet', options);
+    const copiarFichaHunt = (abrirSite) => runtime.call('hubSheet', 'copiarFichaHunt', abrirSite);
 
     // --- Inicialização ---
     state.lastOptimizedTrainerLevel = getTrainerHeaderInfo().level;
@@ -3818,19 +3829,7 @@
 
     mountHud();
     ensureCaidosObserver();
-    ensureCombatLogObserver();
 
-    state.timers.push(setInterval(ensureCaidosObserver, CONFIG.caidos.reattachIntervalMs));
-    state.timers.push(setInterval(() => smartRestock(false), CONFIG.restock.checkIntervalMs));
-    state.timers.push(setInterval(updateFarmTelemetry, CONFIG.farm.tickIntervalMs));
-    state.timers.push(setInterval(checkAutoRegionProgression, CONFIG.autoRegion.checkIntervalMs));
-    state.timers.push(setInterval(() => runDepotManager(false), 60000));
-    state.timers.push(setInterval(checkTeamRotation, CONFIG.team.checkIntervalMs));
-    state.timers.push(setInterval(() => checkIncubator(false), 15000));
-    state.timers.push(setInterval(() => checkBosses(false), 60000));
-    state.timers.push(setInterval(dismissBossLoot, 3000));
-    state.timers.push(setInterval(scanMarketRadar, CONFIG.radar.checkIntervalMs));
-    state.timers.push(setInterval(updateMiniGameHelper, CONFIG.minigame.checkIntervalMs));
     state.timers.push(setInterval(() => scheduleIdle(updateHud), CONFIG.hud.refreshMs));
 
     runtime.start();

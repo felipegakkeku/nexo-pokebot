@@ -28,21 +28,25 @@ Não existe mais o loader separado nem o `@require file:///...`: o `dist/` já �
 ## Estrutura
 
 ```
-src/            fragmentos numerados, juntados em ordem pelo build
-  00-core.js      constantes, CONFIG, estado (abre a IIFE)
-  05-pure.js      funções puras, sem DOM (testadas)
-  10-utils.js ... 30-dom-readers.js
-  40..50-*.js     automações (captura, restock, passe, depot, chocadeira, boss, equipe, evoluir, RMT, mini games, telemetria)
-  60..63-*.js     mapa, fila /hunt, ficha do Hub, hop/otimização
+src/modules/    toda a lógica das automações, em módulos ES de verdade (um por automação) + agendador, runtime e funções puras
+  scheduler.js    agendador central (um laço, prioridade, sem sobreposição)
+  runtime.js      contrato de módulo { id, everyMs, tick(ctx), ... } e registro
+  pure.js         funções puras (parse, normalização), fonte única
+  *.js            capture, restock, depot, hatchery, boss-loot, team-season, rmt-radar, minigames,
+                  telemetry, map-benchmark, map-hop-optimize, hunt-queue, hub-sheet, daily-pass, auto-evolve
+src/            núcleo legado, fragmentos numerados juntados em ordem pelo build (uma IIFE)
+  00-core.js      constantes, CONFIG, estado (abre a IIFE; recebe o bundle dos módulos)
+  05-pure.js      ponte para modules/pure.js
+  10-utils.js ... 30-dom-readers.js   utilitários, modal lock, leitores do DOM
   70-hud.js       HUD
-  80-control.js   API pública e stop()
-  89-runtime.js   ponte para os módulos (monta o ctx e registra cada módulo migrado)
+  80-control.js   API pública (window.PokeBot) e stop()
+  89-runtime.js   ponte: monta o ctx, registra os módulos, define os nomes antigos
   90-init.js      inicialização (fecha a IIFE)
-src/modules/    módulos ES de verdade (agendador, runtime, selectors.js, passe diário); empacotados com esbuild
-tests/          testes (node:test + jsdom)
+tests/          testes (node:test + jsdom); cada módulo tem o seu, com ctx falso
 dist/           pokebot.user.js gerado (é este que se instala)
-legacy/         versões antigas, só para consulta
-build.mjs       junta src/ em dist/ (e confere a tag com --check-tag)
+legacy/         versões e fragmentos antigos (v6.5-*), só para consulta
+build.mjs       empacota src/modules com esbuild, junta src/ e gera dist/ (e confere a tag com --check-tag)
+eslint.config.js  no-undef e no-unused-vars nos módulos: acusa dependência esquecida antes do jogo quebrar
 CHANGELOG.md    uma linha por versão; vira a nota da Release
 ```
 
@@ -90,4 +94,4 @@ Para ver o resultado antes: `POKEBOT_UPDATE_CHANNEL=release npm run build`.
 - Os testes usam um DOM falso baseado no do jogo (conferido em 20/11/2026). Se o jogo mudar ids/classes, o smoke test continua passando: confira o HUD no jogo depois de atualizações do Pokeidle.
 - Mapa, captura e demais módulos não têm teste automatizado; foram só reorganizados, sem mudança de lógica.
 
-**Migração em andamento (Fase 2):** automação nova ou migrada vai para `src/modules/` com o contrato `{ id, everyMs, tick(ctx), dispose?(ctx) }`. O módulo só usa o que vem em `ctx` (config, estado, leitores do DOM, storage), então é testável sem o resto. Para migrar um fragmento: mover a lógica para um módulo, registrá-lo em `89-runtime.js`, tirar o `setInterval` correspondente de `90-init.js` e apagar o fragmento antigo.
+**Como adicionar ou mudar uma automação:** módulo novo em `src/modules/` com o contrato `{ id, everyMs, tick(ctx), dispose?(ctx) }`, exportado em `index.js` e registrado em `89-runtime.js`. O módulo só usa o que vem em `ctx` (config, estado, leitores do DOM, storage) e funções puras importadas de `pure.js`, então é testável sem o resto. Se algo ainda for usado pelo HUD ou pela API, deixe um alias com o nome antigo em `89-runtime.js` (sempre como função seta, por causa da ordem de definição). `npm run check` roda lint, build e testes.
