@@ -13,7 +13,9 @@
     const STORAGE_PREFS_KEY = 'pokeidle_hud_prefs_v60';
     const STORAGE_DEX_KEY = 'pokeidle_minigame_dex_v60';
     const STORAGE_PASS_NEXT_KEY = 'pokeidle_pass_next_ms_v60';
+    const STORAGE_HUNT_QUEUE_KEY = 'pokeidle_hunt_queue_v63';
 
+    const HUNT_GUIDE_URL = 'https://pokeidleguide.io/#hunt';
     const TETO_DEPOT = 3000;
     const ESPERA_TROCA_ATIVO_MS = 3250;
 
@@ -112,6 +114,7 @@
     };
 
     const savedPrefs = loadJson(STORAGE_PREFS_KEY, {});
+    const savedQueueStore = loadJson(STORAGE_HUNT_QUEUE_KEY, { items: [], index: 0 });
 
     const CONFIG = {
         mode: VALID_MODES.includes(savedPrefs.mode) ? savedPrefs.mode : 'equilibrado',
@@ -271,7 +274,7 @@
         paused: false,
         modalLockOwner: null,
         statusText: 'Ativo',
-        lastActionNote: 'Conectado (PokeBot v6.2)',
+        lastActionNote: 'Conectado (PokeBot v6.3)',
         throwPending: false,
         lastThrowAt: 0,
         lastEvolveAt: 0,
@@ -287,6 +290,8 @@
         lastBossCheckAt: 0,
         lastOptimizedTrainerLevel: null,
         lastMarkerMeta: null,
+        huntQueue: Array.isArray(savedQueueStore?.items) ? savedQueueStore.items : [],
+        huntQueueIndex: typeof savedQueueStore?.index === 'number' ? savedQueueStore.index : 0,
         lastSessionCaptures: null,
         lastShiniesVistos: null,
         shinyAlertActive: false,
@@ -757,7 +762,6 @@
             potions,
             pokeBalls: balls ? balls[0] : null,
             totalBalls: sumValid(balls),
-            // No DOM real: revives[0] = Max Revive, revives[1] = Revive comum
             maxRevives: revives ? revives[0] : null,
             reviveNormal: revives && revives.length > 1 ? revives[1] : revives ? revives[0] : null,
             totalRevives: sumValid(revives),
@@ -804,7 +808,6 @@
         let desiredIdx = currentIdx;
 
         if (isShiny) {
-            // Prioridade máxima para Shiny: Beast(4) -> Ultra(3) -> Super(2) -> Great(1) -> Poke(0)
             for (const idx of [4, 3, 2, 1, 0]) {
                 if (chips[idx] && counts[idx] > 0) {
                     desiredIdx = idx;
@@ -815,8 +818,8 @@
             const targetLv = parseNumber(targetBtn?.textContent) ?? getCurrentHunt()?.targetLevel ?? 1;
             const order =
                 targetLv >= CONFIG.caidos.highLevelUltraThreshold
-                    ? [3, 2, 1, 0] // Ultra -> Super -> Great -> Poke
-                    : [0, 1, 2, 3]; // Economiza: Poke -> Great -> Super -> Ultra
+                    ? [3, 2, 1, 0]
+                    : [0, 1, 2, 3];
             for (const idx of order) {
                 if (chips[idx] && counts[idx] > 0) {
                     desiredIdx = idx;
@@ -928,7 +931,7 @@
         }
     };
 
-    // --- 2. Restock (Pokébolas + Poções + Revive corrigido) ---
+    // --- 2. Restock ---
     const getVisibleMarketCards = () =>
         Array.from(document.querySelectorAll('#mk-corpo .mk-card')).filter(isInteractable);
 
@@ -1144,7 +1147,7 @@
         );
     };
 
-    // --- 4. Gestor de Depot (Venda / Oferenda / Sacrifício) ---
+    // --- 4. Gestor de Depot ---
     const openBackpackPocket = async (abaKey) => {
         if (getVisibleModal()) await closeActiveModal();
         const bagBtn = document.getElementById('btn-bolsa');
@@ -1393,7 +1396,7 @@
         );
     };
 
-    // --- 7. Equipe + Dia Sazonal (sem cloneNode) ---
+    // --- 7. Equipe + Dia Sazonal ---
     const getTeamCards = () => {
         const list = document.getElementById('time');
         if (!list) return [];
@@ -1531,7 +1534,7 @@
         }
     };
 
-    // --- 8. Auto-Evoluir (#btn-evoluir) ---
+    // --- 8. Auto-Evoluir ---
     const autoEvolveCheck = async () => {
         if (!state.running || state.paused || !CONFIG.evolve.enabled) return;
         if (state.modalLockOwner || getVisibleModal()) return;
@@ -2074,7 +2077,7 @@
         persistCurrentSession(false);
     };
 
-    // --- 12. Mapa, Benchmark e Auto-Hop de Top Catch ---
+    // --- 12. Mapa, Benchmark, Auto-Hop e Fila /hunt ---
     const isMapModalOpen = () => {
         const modal = getVisibleModal();
         return Boolean(modal && modal.querySelector('.mapa-barra'));
@@ -2341,6 +2344,166 @@
         return Boolean(traveled);
     };
 
+    const saveHuntQueueState = () => {
+        saveJson(STORAGE_HUNT_QUEUE_KEY, {
+            mode: CONFIG.mode,
+            updatedAt: Date.now(),
+            index: state.huntQueueIndex,
+            items: state.huntQueue,
+        });
+    };
+
+    const definirFilaHunt = (list) => {
+        if (!Array.isArray(list)) return [];
+        state.huntQueue = list
+            .map((entry) =>
+                typeof entry === 'string'
+                    ? { name: entry.trim(), raw: entry.trim(), mode: CONFIG.mode }
+                    : { ...entry, name: String(entry?.name || '').trim() }
+            )
+            .filter((x) => x.name.length > 0);
+        state.huntQueueIndex = 0;
+        saveHuntQueueState();
+        state.lastActionNote = `Fila /hunt: ${state.huntQueue.length} áreas`;
+        updateHud();
+        return state.huntQueue;
+    };
+
+    const syncHuntGuideQueue = async (force = false) => {
+        return withModalLock(
+            'Sync /hunt',
+            async () => {
+                let items = [];
+                if (typeof window.__POKEBOT_SYNC_HUNT_GUIDE__ === 'function') {
+                    const res = await window.__POKEBOT_SYNC_HUNT_GUIDE__(CONFIG.mode);
+                    if (res?.ok && Array.isArray(res.items) && res.items.length > 0) {
+                        items = res.items;
+                    } else if (res?.reason) {
+                        state.lastActionNote = `Guia /hunt: ${res.reason}`;
+                    }
+                }
+
+                // Fallback local: monta fila ordenada a partir das áreas seguras/liberadas do mapa
+                if (items.length === 0) {
+                    const poke = getActivePokemon();
+                    const modal = await openMapModal();
+                    if (modal) {
+                        const candidates = await collectCandidatesFromOpenMap(
+                            modal,
+                            poke,
+                            CONFIG.map.preferTypeAdvantage,
+                            CONFIG.mode === 'topcatch' ? 'Top Catch' : null,
+                            CONFIG.mode === 'topcatch'
+                        );
+                        await closeActiveModal();
+                        items = candidates.slice(0, 8).map((c) => ({
+                            name: c.regionName,
+                            regionName: c.regionName,
+                            areaLevel: c.areaLevel,
+                            markerMeta: c,
+                            mode: CONFIG.mode,
+                        }));
+                    }
+                }
+
+                if (items.length > 0) {
+                    state.huntQueue = items;
+                    state.huntQueueIndex = 0;
+                    saveHuntQueueState();
+                    state.lastActionNote = `Fila /hunt pronta (${items.length} áreas)`;
+                } else if (!state.lastActionNote.startsWith('Guia /hunt:')) {
+                    state.lastActionNote = 'Nenhuma área encontrada para a fila';
+                }
+                return state.huntQueue;
+            },
+            { force }
+        );
+    };
+
+    const irProximaHuntGuia = async (force = false) => {
+        return withModalLock(
+            'Fila /hunt',
+            async () => {
+                if (state.huntQueue.length === 0) {
+                    await syncHuntGuideQueue(true);
+                }
+                if (state.huntQueue.length === 0) {
+                    state.lastActionNote = 'Fila /hunt vazia';
+                    return false;
+                }
+
+                const poke = getActivePokemon();
+                const modal = await openMapModal();
+                if (!modal) return false;
+                const liveCandidates = await collectCandidatesFromOpenMap(
+                    modal,
+                    poke,
+                    false,
+                    null,
+                    CONFIG.mode === 'topcatch'
+                );
+                await closeActiveModal();
+
+                for (let attempt = 0; attempt < state.huntQueue.length; attempt++) {
+                    const idx = (state.huntQueueIndex + attempt) % state.huntQueue.length;
+                    const entry = state.huntQueue[idx];
+                    const needle = normalizeText(entry.regionName || entry.name);
+
+                    const matchedMeta =
+                        entry.markerMeta ||
+                        liveCandidates.find(
+                            (c) =>
+                                normalizeText(c.regionName).includes(needle) ||
+                                needle.includes(normalizeText(c.regionName))
+                        );
+
+                    if (!matchedMeta) continue;
+
+                    state.huntQueueIndex = (idx + 1) % state.huntQueue.length;
+                    saveHuntQueueState();
+                    state.lastActionNote = `Fila -> ${matchedMeta.regionName} Nv${matchedMeta.areaLevel}`;
+                    const ok = await travelToMarkerMeta(matchedMeta);
+                    if (ok) {
+                        state.session = createSession(getCurrentHunt(), getActivePokemon(), matchedMeta);
+                        return true;
+                    }
+                }
+
+                state.lastActionNote = 'Fila /hunt: sem área elegível agora';
+                return false;
+            },
+            { force }
+        );
+    };
+
+    const copiarFichaHunt = async (abrirSite = false) => {
+        const poke = getActivePokemon();
+        const native = readNativeSessionPanel();
+        const farm = state.session ? computeSessionMetrics(state.session) : null;
+        const pokeCardTxt = (document.getElementById('ativo-card')?.textContent || '').replace(/\s+/g, ' ').trim();
+
+        const lines = [
+            `Pokémon: ${pokeCardTxt || (poke ? `${poke.name} Nv ${poke.level} (${poke.types.join('/')})` : 'Nenhum')}`,
+            `Modo Bot: ${CONFIG.mode} | Região: ${farm?.regiao || '-'}`,
+            `Ritmo: ${native ? `${native.xpPokemonH.toLocaleString('pt-BR')} XP/h · ${native.goldH.toLocaleString('pt-BR')} Gold/h · ${native.lucroH.toLocaleString('pt-BR')} Lucro/h` : `${(farm?.xpPokeMin ?? 0) * 60} XP/h · ${(farm?.lucroLiqMin ?? 0) * 60} Lucro/h`}`,
+            `Guia: ${HUNT_GUIDE_URL}`,
+        ];
+        const text = lines.join('\n');
+
+        try {
+            if (navigator.clipboard?.writeText) {
+                await navigator.clipboard.writeText(text);
+            }
+        } catch {}
+
+        state.lastActionNote = 'Ficha copiada p/ pokeidleguide.io/#hunt';
+        updateHud();
+        if (abrirSite) {
+            window.open(HUNT_GUIDE_URL, '_blank', 'noopener,noreferrer');
+        }
+        return text;
+    };
+
     const hopNextTopCatchArea = async (force = false) => {
         return withModalLock(
             'TopCatch Hop',
@@ -2512,14 +2675,22 @@
             state.lastOptimizedTrainerLevel !== null &&
             trainerLv >= state.lastOptimizedTrainerLevel + CONFIG.autoRegion.levelStep
         ) {
-            await otimizarRegiao({ modo: CONFIG.mode });
+            if (state.huntQueue.length > 0) {
+                await irProximaHuntGuia(false);
+            } else {
+                await otimizarRegiao({ modo: CONFIG.mode });
+            }
             return;
         }
 
         if (state.session && getCurrentHunt()) {
             const m = computeSessionMetrics(state.session);
             if (m.abates >= 3 && (m.revivesMin > 0 || m.pocoesMin > CONFIG.farm.maxPotionsPerMinSafe)) {
-                await otimizarRegiao({ modo: CONFIG.mode });
+                if (state.huntQueue.length > 0) {
+                    await irProximaHuntGuia(false);
+                } else {
+                    await otimizarRegiao({ modo: CONFIG.mode });
+                }
             }
         }
     };
@@ -2590,6 +2761,7 @@
             }
             #${HUD_ID} .pb-tog.on { border-color: rgba(34, 197, 94, 0.55); background: rgba(34, 197, 94, 0.13); }
             #${HUD_ID} .pb-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+            #${HUD_ID} .pb-actions3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
             #${HUD_ID} .pb-actions4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
             #${HUD_ID} .pb-form { display: grid; grid-template-columns: 1fr 74px 54px; gap: 4px; }
             #${HUD_ID} input, #${HUD_ID} select {
@@ -2664,7 +2836,7 @@
             <div class="pb-head" data-pb-drag="1">
                 <div class="pb-title">
                     <span class="pb-dot" data-pb="dot"></span>
-                    <span data-pb="headTitle">PokeBot v6.2</span>
+                    <span data-pb="headTitle">PokeBot v6.3</span>
                 </div>
                 <div class="pb-head-btns">
                     <button class="pb-icon-btn" data-pb-act="min" title="Minimizar">—</button>
@@ -2684,7 +2856,7 @@
                         <div class="pb-row"><span class="pb-lbl">XP/h</span><span class="pb-val" data-pb="xpH">-</span></div>
                         <div class="pb-row"><span class="pb-lbl">Lucro/h</span><span class="pb-val" data-pb="lucroH">-</span></div>
                         <div class="pb-row"><span class="pb-lbl">Bônus / Dia</span><span class="pb-val" data-pb="xpBonus">-</span></div>
-                        <div class="pb-row"><span class="pb-lbl">Bola Alvo</span><span class="pb-val" data-pb="ballTier">-</span></div>
+                        <div class="pb-row"><span class="pb-lbl">Fila /hunt</span><span class="pb-val" data-pb="huntQueue">0</span></div>
                         <div class="pb-row"><span class="pb-lbl">Capturas</span><span class="pb-val" data-pb="caps">0</span></div>
                         <div class="pb-row"><span class="pb-lbl">B/P/R</span><span class="pb-val" data-pb="inv">-</span></div>
                     </div>
@@ -2694,6 +2866,11 @@
                         <button class="pb-btn" data-pb-mode="ouro">Ouro</button>
                         <button class="pb-btn" data-pb-mode="equilibrado">Equil.</button>
                         <button class="pb-btn" data-pb-mode="topcatch">Catch</button>
+                    </div>
+                    <div class="pb-actions3">
+                        <button class="pb-btn" data-pb-act="syncGuide">Sync /hunt</button>
+                        <button class="pb-btn" data-pb-act="nextQueue">Próx. Fila</button>
+                        <button class="pb-btn" data-pb-act="copyHunt">Copiar Ficha</button>
                     </div>
                     <div class="pb-actions">
                         <button class="pb-btn" data-pb-act="optimize">Otimizar Mapa</button>
@@ -2862,6 +3039,12 @@
                 stop();
             } else if (act === 'pause') {
                 state.paused ? retomar() : pausar();
+            } else if (act === 'syncGuide') {
+                syncHuntGuideQueue(true);
+            } else if (act === 'nextQueue') {
+                irProximaHuntGuia(true);
+            } else if (act === 'copyHunt') {
+                copiarFichaHunt(false);
             } else if (act === 'optimize') {
                 otimizarRegiao({ modo: CONFIG.mode, force: true });
             } else if (act === 'hop') {
@@ -2914,7 +3097,6 @@
         const poke = getActivePokemon();
         const inv = getInventorySnapshot();
         const farm = state.session ? computeSessionMetrics(state.session) : null;
-        const ballTier = getTargetBallTier();
         const dayType = getSeasonalDayType();
 
         const setText = (attr, val) => {
@@ -2952,7 +3134,7 @@
             );
         }
 
-        setText('headTitle', `PokeBot v6.2 · ${state.shinyAlertActive ? '✨ SHINY!' : state.statusText}`);
+        setText('headTitle', `PokeBot v6.3 · ${state.shinyAlertActive ? '✨ SHINY!' : state.statusText}`);
         setText('poke', poke ? `${poke.name} Nv${poke.level ?? '?'} (${poke.types.join('/') || '-'})` : '-');
         setText('regiao', farm ? farm.regiao : '-');
         setText(
@@ -2964,7 +3146,12 @@
             native ? `${native.lucroH.toLocaleString('pt-BR')}/h` : `${((farm?.lucroLiqMin ?? 0) * 60).toLocaleString('pt-BR')}/h`
         );
         setText('xpBonus', `${native ? native.xpBonusText : '-'} · ${dayType || '-'}`);
-        setText('ballTier', ballTier.itemName.replace(' Ball', ''));
+        setText(
+            'huntQueue',
+            state.huntQueue.length > 0
+                ? `${Math.min(state.huntQueueIndex + 1, state.huntQueue.length)}/${state.huntQueue.length}`
+                : '0'
+        );
         setText('caps', native ? String(native.capturas) : String(state.stats.captures));
         setText(
             'inv',
@@ -3069,7 +3256,7 @@
             state.observedLogNode = null;
         }
         unmountHud();
-        console.log('[PokeBot v6.2] Encerrado.');
+        console.log('[PokeBot v6.3] Encerrado.');
     };
 
     const status = () => {
@@ -3093,6 +3280,7 @@
             localSessao: native?.lugar || '-',
             pokemon: poke ? `${poke.name} Nv${poke.level ?? '?'} (${poke.types.join('/') || '-'})` : '-',
             regiao: farm ? farm.regiao : '-',
+            filaHuntTotal: state.huntQueue.length,
             xpPokeHora: native?.xpPokemonH ?? (farm ? farm.xpPokeMin * 60 : 0),
             lucroHora: native?.lucroH ?? (farm ? farm.lucroLiqMin * 60 : 0),
             capturasSessao: native?.capturas ?? state.stats.captures,
@@ -3111,6 +3299,10 @@
         status,
         lerSessaoNativa: readNativeSessionPanel,
         otimizarRegiao,
+        syncHuntGuide: () => syncHuntGuideQueue(true),
+        proximaHuntGuia: () => irProximaHuntGuia(true),
+        definirFilaHunt,
+        copiarFichaHunt,
         hopTopCatch: () => hopNextTopCatchArea(true),
         rodarDepot: () => runDepotManager(true),
         checarPasse: () => checkDailyPass(true),
@@ -3157,5 +3349,5 @@
     state.timers.push(setInterval(() => scheduleIdle(updateHud), CONFIG.hud.refreshMs));
 
     updateHud();
-    console.log('[PokeBot v6.2] Ativo!');
+    console.log('[PokeBot v6.3] Ativo!');
 })();
