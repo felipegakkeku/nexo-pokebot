@@ -824,7 +824,6 @@
                 }
             }
         } else if (currentIdx === -1 || counts[currentIdx] <= 0) {
-            // Nunca fica preso em uma bola zerada (ex: Great Ball vazia)
             const firstAvailable = counts.findIndex((n) => n > 0);
             if (firstAvailable !== -1) desiredIdx = firstAvailable;
         }
@@ -3030,38 +3029,6 @@
         if (!VALID_MODES.includes(normalized)) return false;
         CONFIG.mode = normalized;
         if (normalized === 'topcatch') CONFIG.topCatchHop.enabled = true;
-        persistPrefs();
-        state.lastActionNote = `Modo: ${normalized}`;
-        updateHud();
-        if (trocarAgora) {
-            normalized === 'topcatch'
-                ? hopNextTopCatchArea(true)
-                : otimizarRegiao({ modo: normalized, force: true });
-        }
-        return true;
-    };
-
-    const pausar = () => {
-        state.paused = true;
-        setStatus('Pausado', 'Pausado pelo usuário');
-    };
-
-    const retomar = () => {
-        state.paused = false;
-        setStatus('Ativo', 'Retomado');
-        if (state.observedCaidosNode) processCaidos(state.observedCaidosNode);
-    };
-
-    const stop = () => {
-        if (!state.running) return;
-        persistCurrentSession(false);
-        state.running = false;
-        state.throwPending = false;
-        state.timers.forEach(clearInterval);
-        state.timers = [];
-        if (state.caidosObserver) {
-            state.caidosObserver.disconnect();
-            state.caidosObserver = null.enabled = true;
         persistPrefs();
         state.lastActionNote = `Modo: ${normalized}`;
         updateHud();
