@@ -2,6 +2,25 @@
 
 Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova versão (o workflow usa o texto da seção como nota da Release).
 
+## 1.0.7
+
+Interface nova do Hub, pensada para acompanhar as 4 contas de relance, e alerta de shiny visto e não capturado:
+
+- **Shiny que escapou (`src/headless/gui-server.mjs`)**: quando um shiny aparece no campo e some sem captura (fugiu, o corpo expirou ou a bola falhou), vira um evento próprio no registro, no Hub e no Windows. O som pode ser trocado por qualquer link do myinstants.com ou de um arquivo .mp3.
+- **Alertas por evento**: shiny perdido, shiny capturado, drop raro, erro, caixinha da live e voto diário. Cada um escolhe entre **Som**, **Hub** e **Windows**; a notificação do Windows sai com o Hub minimizado e o clique leva direto para a conta.
+- **Bandeja**: o ícone muda de cor pelo estado das contas (verde, amarelo, vermelho), o menu mostra XP/h, ouro/h e shinies de cada conta e liga o mini-HUD.
+- **Temas escuros e cor de destaque**: Marinho, Grafite, Preto OLED e Alto contraste, com 6 cores de destaque, no menu **⋯** do topo.
+- **Topo enxuto**: abas de conta com o sprite do Pokémon ativo e borda pelo estado, ícones no lugar dos textos e a central **Precisa de você** (sino), que junta avisos de modo com botão **Corrigir**, erros, contas pausadas, caixinha para resgatar, voto e shinies que escaparam.
+- **Números grandes**: XP/h, Lucro/h e Shinies no topo do Desempenho, com minicurva e tendência.
+- **Painel vivo no Headless**: a tela de cada conta sem jogo aberto mostra Pokémon com anel de HP, ritmo, últimos eventos e drops da sessão.
+- **Jogo embutido mais integrado**: barra fina sobre o jogo com HP, XP/h, lucro, abates e shinies (em cima, embaixo ou desligada); na Grade, os avisos aparecem dentro da tela da conta.
+- **Registro legível**: filtros (Shiny, Recompensas, Avisos, Erros), busca, conta escolhida ou as 4, repetições agrupadas e hora relativa.
+- **Layout livre**: Atividade fixa numa coluna ao lado (tecla **A**), **Só Painel** em até 3 colunas montadas arrastando as abas, layouts com nome e qualquer aba numa **janela solta**.
+- **Mini-HUD**: janela pequena sempre visível com as 4 contas (tecla **H** ou pela bandeja).
+- **Configuração que salva sozinha**: aviso "Salvo às HH:MM" com **Desfazer**, selo mostrando que a regra vale só para a conta escolhida e cópia para as outras contas com confirmação. O guia longo virou dicas ⓘ ao lado de cada opção.
+- **Enquanto você estava fora**: depois de 30 min longe, um resumo por conta no lugar da rajada de avisos.
+- **Atalhos de teclado**: 1 a 4, S/G/P/C, A, B, H, M, [ ] e **?** para ver a lista.
+
 ## 1.0.6
 
 Atualização que aplica de verdade, aviso proativo de versão nova, grade livre das 4 contas, sequência de lives contada pela Twitch e gestor de buffs redesenhado:
