@@ -64,7 +64,9 @@ flowchart LR
 5. **Lives da Twitch e Kick respeitando o navegador e perfil configurados**: lista todos os perfis instalados (Chrome, Brave e Edge) e identifica automaticamente o motor de perfis isolados para abrir lives e chat sempre na mesma conta logada, com buff configurável por canal e gestor inteligente de bônus.
 6. **Telemetria de eficiência, drops filtráveis e notificações toast**: identifica foco do mapa (Outland, Unova, Boss ou Hunt), contabiliza drops com filtros clicáveis por categoria/item, calcula tempo/abate, capturas/abate e lucro líquido/h, e exibe toasts flutuantes para shinies, drops raros, recompensas e alertas.
 7. **Importador e recuperador de sessões em 1 clique (`Recuperar Sessoes Nexo PokeBot.bat`)**: importa diretamente as 4 contas (**PokeIdle + Twitch + Kick**) já logadas de **PokeIdleMulti**, **IdleDeck**, **PokeGrid**, pastas antigas do PokeBot ou até da Lixeira do Windows, sem precisar instalar Node.js.
-8. **Identidade nativa no Windows**: executável, runtime Electron (`Nexo PokeBot.exe`), bandeja única por nick e ícone multi-resolução (16 a 256 px) identificados corretamente no Gerenciador de Tarefas e na Barra de Tarefas.
+8. **Atualização automática via GitHub Releases no app e no `.exe`**: verifica novas Releases automaticamente ao abrir (ou por `Nexo PokeBot.exe --update`), baixa e aplica o pacote reiniciando o app sem apagar suas 4 contas, sessões ou configurações (`.pokebot-*`).
+9. **Monitor de Vote & Ganhe (IdleHub.io) em 1 clique**: consulta `/idlehub/me` nas 4 contas, dispara toast quando o voto diário liberar ou creditar diamantes e abre o link oficial já com o nick preenchido no perfil configurado de cada conta.
+10. **Identidade nativa no Windows**: executável, runtime Electron (`Nexo PokeBot.exe`), bandeja única por nick e ícone multi-resolução (16 a 256 px) identificados corretamente no Gerenciador de Tarefas e na Barra de Tarefas.
 
 ## Modos de execução
 

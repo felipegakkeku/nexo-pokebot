@@ -2093,6 +2093,29 @@ export function createHeadlessController(options = {}) {
     let pendingHuntSlug = null;
     let huntFlushTimer = null;
 
+    const voteFetch = typeof options.voteFetch === 'function'
+        ? options.voteFetch
+        : (!options.disableVotePolling && !options.wsFactory ? fetch : null);
+    let voteState = {
+        checkedAt: 0,
+        ativo: false,
+        esperaMs: 0,
+        availableAt: 0,
+        votos: 0,
+        noPar: 0,
+        votosPorDiamante: 2,
+        porPar: 1,
+        diamantes: 0,
+        url: '',
+        identificador: '',
+        error: null,
+        notifiedAvailableKey: '',
+    };
+    let voteTimer = null;
+    let voteRecheckTimer = null;
+    let voteAbortCtrl = null;
+    let voteInFlightPromise = null;
+
     let merger = createStateMerger();
     const field = createFieldTracker();
     const catalog = createEmptyCatalog();
@@ -2596,6 +2619,10 @@ export function createHeadlessController(options = {}) {
                 const name = e.pokemon?.nome || e.pokemon?.name || catalog.pokemonNames?.[e.pokemon?.speciesId] || `#${e.pokemon?.speciesId ?? '?'}`;
                 const level = e.pokemon?.level ?? e.pokemon?.nivel ?? '?';
                 pushLog(isShiny ? 'shiny' : 'catch', `Capturado${isShiny ? ' SHINY' : ''}: ${name} (Nv ${level})`);
+            } else if (kind === 'votoCreditado') {
+                const qtd = Number(e.qtd || 1);
+                pushLog('reward', `+${qtd} diamante${qtd === 1 ? '' : 's'} creditado${qtd === 1 ? '' : 's'} pelo voto no IdleHub.io!`);
+                void refreshVoteStatus({ force: true });
             }
         }
     };
@@ -2636,6 +2663,13 @@ export function createHeadlessController(options = {}) {
                     }
                 }
             }
+            return;
+        }
+
+        if (m.t === 'votoCreditado') {
+            const qtd = Number(m.qtd || 1);
+            pushLog('reward', `+${qtd} diamante${qtd === 1 ? '' : 's'} creditado${qtd === 1 ? '' : 's'} pelo voto no IdleHub.io!`);
+            void refreshVoteStatus({ force: true });
             return;
         }
 
@@ -2698,6 +2732,8 @@ export function createHeadlessController(options = {}) {
             liveBridge.setPaused(false);
             liveBridge.startTimer();
             liveBridge.runOnce({ force: false });
+            ensureVoteTimer();
+            void refreshVoteStatus({ force: false });
             return;
         }
 
@@ -3335,6 +3371,134 @@ export function createHeadlessController(options = {}) {
         return { exe, profileDir, existingProfile: null };
     };
 
+    const getVoteRemainingMs = (now = nowFn()) => {
+        if (!voteState.ativo) return 0;
+        if (voteState.availableAt > 0) return Math.max(0, voteState.availableAt - now);
+        return Math.max(0, Number(voteState.esperaMs || 0));
+    };
+
+    const clearVoteTimers = () => {
+        if (voteTimer) {
+            clearInterval(voteTimer);
+            voteTimer = null;
+        }
+        if (voteRecheckTimer) {
+            clearTimeout(voteRecheckTimer);
+            voteRecheckTimer = null;
+        }
+        if (voteAbortCtrl) {
+            try { voteAbortCtrl.abort(); } catch { /* ignore */ }
+            voteAbortCtrl = null;
+        }
+    };
+
+    const refreshVoteStatus = async ({ force = false } = {}) => {
+        if (disposed) return voteState;
+        if (voteInFlightPromise) return voteInFlightPromise;
+        const fetcher = voteFetch || (force ? fetch : null);
+        if (!fetcher) return voteState;
+        const tok = session?.token || getRawSession()?.token || options.token || '';
+        if (!tok) return voteState;
+        const now = nowFn();
+        if (!force && voteState.checkedAt > 0 && (now - voteState.checkedAt) < 5 * 60_000) {
+            return voteState;
+        }
+        const ac = new AbortController();
+        voteAbortCtrl = ac;
+        const timeout = setTimeout(() => ac.abort(), 10_000);
+        const run = (async () => {
+            try {
+                const resp = await fetcher('https://pokeidle.io/idlehub/me', {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify({ token: tok }),
+                    signal: ac.signal,
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || !data || typeof data !== 'object') {
+                    voteState.error = data?.erro || `HTTP ${resp.status}`;
+                    voteState.checkedAt = nowFn();
+                    return voteState;
+                }
+                const tNow = nowFn();
+                const esperaMs = Math.max(0, Number(data.esperaMs || 0));
+                const ativo = Boolean(data.ativo);
+                const url = typeof data.url === 'string' && /^https?:\/\//i.test(data.url) ? data.url : '';
+                const available = ativo && esperaMs <= 0 && Boolean(url);
+                const availKey = available ? `${data.votos ?? 0}:${data.noPar ?? 0}:${data.identificador || session?.nick || ''}` : '';
+                const shouldNotify = available && availKey && availKey !== voteState.notifiedAvailableKey;
+                voteState = {
+                    checkedAt: tNow,
+                    ativo,
+                    esperaMs,
+                    availableAt: esperaMs > 0 ? tNow + esperaMs : 0,
+                    votos: Number(data.votos || 0),
+                    noPar: Number(data.noPar || 0),
+                    votosPorDiamante: Math.max(1, Number(data.votosPorDiamante || 2)),
+                    porPar: Math.max(1, Number(data.porPar || 1)),
+                    diamantes: Number(data.diamantes || 0),
+                    url,
+                    identificador: String(data.identificador || session?.nick || ''),
+                    error: null,
+                    notifiedAvailableKey: available ? availKey : '',
+                };
+                if (shouldNotify) {
+                    pushLog('reward', 'Voto diario disponivel no IdleHub.io! Clique em Votar para ganhar diamantes.');
+                }
+                return voteState;
+            } catch (err) {
+                if (!disposed) {
+                    voteState.error = err?.message || 'Erro ao consultar voto';
+                }
+                return voteState;
+            } finally {
+                clearTimeout(timeout);
+                if (voteAbortCtrl === ac) voteAbortCtrl = null;
+                if (voteInFlightPromise === run) voteInFlightPromise = null;
+            }
+        })();
+        voteInFlightPromise = run;
+        return run;
+    };
+
+    const ensureVoteTimer = () => {
+        if (disposed || voteTimer || !voteFetch) return;
+        voteTimer = setInterval(() => {
+            if (disposed || !session?.token) return;
+            const rem = getVoteRemainingMs();
+            const stale = !voteState.checkedAt || (nowFn() - voteState.checkedAt) >= 15 * 60_000;
+            if (stale || (voteState.availableAt > 0 && rem === 0)) {
+                void refreshVoteStatus({ force: true });
+            }
+        }, 60_000);
+        voteTimer.unref?.();
+    };
+
+    const openVote = async () => {
+        if (disposed) return false;
+        if (!voteState.url || !voteState.checkedAt) {
+            await refreshVoteStatus({ force: true });
+        }
+        const targetUrl = voteState.url;
+        if (!targetUrl || !/^https?:\/\//i.test(targetUrl)) {
+            pushLog('warn', voteState.ativo === false && voteState.checkedAt
+                ? 'Vote & Ganhe ainda nao esta ativo no servidor.'
+                : 'Link de voto do IdleHub.io ainda nao disponivel. Conecte a conta primeiro.');
+            return false;
+        }
+        const opened = await openExternalUrl(targetUrl, { forLives: false });
+        if (opened) {
+            pushLog('info', `Pagina de voto (IdleHub.io) aberta no perfil configurado (${voteState.identificador || session?.nick || 'conta'}).`);
+            if (voteRecheckTimer) clearTimeout(voteRecheckTimer);
+            voteRecheckTimer = setTimeout(() => {
+                voteRecheckTimer = null;
+                if (!disposed) void refreshVoteStatus({ force: true });
+            }, 60_000);
+            voteRecheckTimer.unref?.();
+        }
+        return opened;
+    };
+
     const openExternalUrl = async (url, { forLives = false } = {}) => {
         if (disposed || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return false;
         const { exe, profileDir, existingProfile } = resolveBrowserLaunchTarget({ forLives });
@@ -3688,6 +3852,10 @@ export function createHeadlessController(options = {}) {
             pushLog('info', 'Estatísticas e drops da sessão zerados.');
             return true;
         }
+        if (name === 'refresh-vote') {
+            void refreshVoteStatus({ force: true });
+            return true;
+        }
         return false;
     };
 
@@ -3886,6 +4054,24 @@ export function createHeadlessController(options = {}) {
                 hpLimiar: Number(state?.automation?.hpLimiar || 0),
             },
             lives: liveBridge.getLivesSnapshot(),
+            vote: (() => {
+                const remMs = getVoteRemainingMs(now);
+                return {
+                    checkedAt: voteState.checkedAt,
+                    ativo: voteState.ativo,
+                    available: Boolean(voteState.ativo && remMs === 0 && voteState.url),
+                    remainingMs: remMs,
+                    availableAt: remMs > 0 ? now + remMs : 0,
+                    votos: voteState.votos,
+                    noPar: voteState.noPar,
+                    votosPorDiamante: voteState.votosPorDiamante,
+                    porPar: voteState.porPar,
+                    diamantes: voteState.diamantes,
+                    url: voteState.url,
+                    identificador: voteState.identificador,
+                    error: voteState.error,
+                };
+            })(),
             hunts: includeHunts ? catalog.huntsList : undefined,
             huntsCount: catalog.huntsList.length,
             logs: [...logs],
@@ -3973,6 +4159,7 @@ export function createHeadlessController(options = {}) {
             loginAbortCtrl = null;
         }
         liveBridge.dispose();
+        clearVoteTimers();
         if (options.headlessHuntGuide === undefined) {
             try { headlessHuntGuide?.dispose?.(); } catch { /* ignore */ }
         }
@@ -3996,6 +4183,8 @@ export function createHeadlessController(options = {}) {
         openLives,
         openPanel,
         openExternalUrl,
+        openVote,
+        refreshVoteStatus,
         goCenter,
         cancelPendingHunt,
         setHunt,
@@ -4151,6 +4340,11 @@ export async function startGuiServer(options = {}) {
                 ok = await controller.openGame({ linked: true });
             } else if (action === 'open-lives') {
                 ok = await controller.openLives(body.url);
+            } else if (action === 'open-vote') {
+                ok = await controller.openVote();
+            } else if (action === 'refresh-vote') {
+                await controller.refreshVoteStatus({ force: true });
+                ok = true;
             } else if (action === 'open-live-chat') {
                 ok = typeof body.url === 'string' && await controller.openLives(body.url, { chatOnly: true });
             } else if (action === 'open-panel') {

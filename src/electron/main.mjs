@@ -6,6 +6,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startGuiServer } from '../headless/gui-server.mjs';
 import { createHeadlessHuntGuideEvaluator, findHuntExtensionDir } from '../headless/hunt-guide.mjs';
 import { loadAppIconBuffer } from '../desktop/build-exe.mjs';
+import {
+    checkForUpdate,
+    downloadAndStageUpdate,
+    launchApplyUpdateScript,
+    readInstalledVersion,
+} from '../desktop/updater.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
@@ -30,6 +36,133 @@ let awakeId = null;
 let minToTray = true;
 let isQuitting = false;
 let lastTraySignature = '';
+
+const installedVersion = readInstalledVersion(ROOT);
+let latestReleaseInfo = null;
+let updateCheckTimer = null;
+let updateBootTimer = null;
+let updateBusy = false;
+let updateState = {
+    status: 'idle', // idle | checking | up-to-date | available | downloading | extracting | applying | error
+    currentVersion: installedVersion,
+    latestVersion: installedVersion,
+    tagName: `v${installedVersion}`,
+    releaseName: `Nexo PokeBot v${installedVersion}`,
+    releaseNotes: '',
+    releaseUrl: 'https://github.com/felipegakkeku/nexo-pokebot/releases/latest',
+    hasUpdate: false,
+    isGitRepo: existsSync(join(ROOT, '.git')),
+    assetName: '',
+    assetSize: 0,
+    percent: 0,
+    downloadedBytes: 0,
+    totalBytes: 0,
+    checkedAt: 0,
+    error: null,
+};
+
+function broadcastUpdateState() {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('hub:update-state', updateState);
+    }
+    refreshTrayMenu();
+}
+
+function patchUpdateState(patch) {
+    updateState = { ...updateState, ...patch };
+    broadcastUpdateState();
+    return updateState;
+}
+
+async function runUpdateCheck() {
+    if (updateBusy) return updateState;
+    updateBusy = true;
+    patchUpdateState({ status: 'checking', error: null });
+    try {
+        const res = await checkForUpdate({ rootDir: ROOT, currentVersion: installedVersion });
+        if (!res.ok) {
+            return patchUpdateState({
+                status: 'error',
+                checkedAt: Date.now(),
+                error: res.error || 'Falha ao verificar atualizacao.',
+            });
+        }
+        latestReleaseInfo = res;
+        return patchUpdateState({
+            status: res.hasUpdate ? 'available' : 'up-to-date',
+            currentVersion: res.currentVersion,
+            latestVersion: res.latestVersion,
+            tagName: res.tagName,
+            releaseName: res.releaseName,
+            releaseNotes: res.releaseNotes,
+            releaseUrl: res.releaseUrl,
+            hasUpdate: res.hasUpdate,
+            isGitRepo: res.isGitRepo,
+            assetName: res.asset?.name || '',
+            assetSize: Number(res.asset?.size || 0),
+            percent: 0,
+            downloadedBytes: 0,
+            totalBytes: Number(res.asset?.size || 0),
+            checkedAt: Date.now(),
+            error: null,
+        });
+    } finally {
+        updateBusy = false;
+    }
+}
+
+async function runUpdateInstall() {
+    if (updateBusy) return { ok: false, error: 'Atualizacao ja esta em andamento.' };
+    if (!latestReleaseInfo?.hasUpdate || !latestReleaseInfo?.asset?.downloadUrl) {
+        await runUpdateCheck();
+    }
+    if (!latestReleaseInfo?.hasUpdate) {
+        return { ok: false, error: 'Voce ja esta na versao mais recente.' };
+    }
+    if (!latestReleaseInfo?.asset?.downloadUrl) {
+        return { ok: false, error: 'A Release nao possui pacote ZIP para Windows.' };
+    }
+    if (latestReleaseInfo.isGitRepo) {
+        return {
+            ok: false,
+            error: 'Pasta de desenvolvimento (.git) detectada. Atualize via git pull ou baixe a Release manualmente.',
+        };
+    }
+    updateBusy = true;
+    patchUpdateState({ status: 'downloading', percent: 0, downloadedBytes: 0, error: null });
+    try {
+        const staged = await downloadAndStageUpdate({
+            rootDir: ROOT,
+            releaseInfo: latestReleaseInfo,
+            waitPids: [process.pid],
+            onProgress: (p) => {
+                if (p.phase === 'downloading') {
+                    patchUpdateState({
+                        status: 'downloading',
+                        percent: p.percent || 0,
+                        downloadedBytes: p.downloadedBytes || 0,
+                        totalBytes: p.totalBytes || updateState.assetSize || 0,
+                    });
+                } else if (p.phase === 'extracting') {
+                    patchUpdateState({ status: 'extracting', percent: 100 });
+                }
+            },
+        });
+        patchUpdateState({ status: 'applying', percent: 100 });
+        launchApplyUpdateScript(staged.scriptPath);
+        setTimeout(() => {
+            isQuitting = true;
+            app.quit();
+        }, 450);
+        return { ok: true, version: staged.version };
+    } catch (err) {
+        const msg = err?.message || String(err);
+        patchUpdateState({ status: 'error', error: msg });
+        return { ok: false, error: msg };
+    } finally {
+        updateBusy = false;
+    }
+}
 
 const sharedHuntGuide = createHeadlessHuntGuideEvaluator({ cwd: ROOT });
 const servers = new Map(); // account (1..4) -> { instance, port, attached: { onFrame, onDetach, bridgeId } | null }
@@ -193,7 +326,8 @@ function refreshTrayMenu() {
         });
     }
 
-    const sig = sigParts.join('|');
+    const updSig = `${updateState.status}:${updateState.latestVersion}:${updateState.hasUpdate}`;
+    const sig = `${sigParts.join('|')}||${updSig}`;
     if (sig === lastTraySignature) return;
     lastTraySignature = sig;
 
@@ -202,8 +336,25 @@ function refreshTrayMenu() {
         : 'Nexo PokeBot (4 contas)';
     tray.setToolTip(tooltip.slice(0, 125));
 
+    const updateTrayItem = updateState.hasUpdate
+        ? {
+            label: `Atualizar para v${updateState.latestVersion} (nova Release)`,
+            click: () => {
+                showMainWindow();
+                if (!updateState.isGitRepo) void runUpdateInstall();
+            },
+        }
+        : {
+            label: `Verificar atualizacoes (v${installedVersion})`,
+            click: () => {
+                showMainWindow();
+                void runUpdateCheck();
+            },
+        };
+
     const menu = Menu.buildFromTemplate([
         { label: 'Abrir Nexo PokeBot', click: () => showMainWindow() },
+        updateTrayItem,
         { type: 'separator' },
         ...accountItems,
         { type: 'separator' },
@@ -407,6 +558,11 @@ function registerIpcHandlers() {
             ok = await controller.openLives(payload.url);
         } else if (act === 'open-live-chat') {
             ok = typeof payload.url === 'string' && await controller.openLives(payload.url, { chatOnly: true });
+        } else if (act === 'open-vote') {
+            ok = await controller.openVote();
+        } else if (act === 'refresh-vote') {
+            await controller.refreshVoteStatus({ force: true });
+            ok = true;
         } else if (act === 'open-extensions') {
             ok = await controller.openPanel(port, { extensions: true });
         } else if (act === 'open-panel') {
@@ -545,6 +701,10 @@ function registerIpcHandlers() {
         return minToTray;
     });
 
+    ipcMain.handle('hub:update-get-state', () => updateState);
+    ipcMain.handle('hub:update-check', () => runUpdateCheck());
+    ipcMain.handle('hub:update-install', () => runUpdateInstall());
+
     ipcMain.handle('hub:open-external', async (_ev, url, account = 1) => {
         try {
             const parsed = new URL(String(url));
@@ -622,6 +782,8 @@ app.on('before-quit', (ev) => {
     }
     const closing = [...servers.values()].map((entry) => entry.instance.close().catch(() => {}));
     servers.clear();
+    if (updateBootTimer) clearTimeout(updateBootTimer);
+    if (updateCheckTimer) clearInterval(updateCheckTimer);
     try { sharedHuntGuide?.dispose?.(); } catch { /* ignore */ }
     Promise.allSettled(closing).finally(() => app.exit(0));
 });
@@ -638,6 +800,15 @@ app.whenReady().then(async () => {
     await loadHuntExtensionIntoPartitions();
     await createMainWindow();
     setupTray();
+    updateBootTimer = setTimeout(() => {
+        updateBootTimer = null;
+        void runUpdateCheck();
+    }, 6000);
+    updateBootTimer.unref?.();
+    updateCheckTimer = setInterval(() => {
+        void runUpdateCheck();
+    }, 4 * 60 * 60 * 1000);
+    updateCheckTimer.unref?.();
 }).catch((err) => {
     console.error('[Nexo PokeBot] Falha ao iniciar:', err);
     isQuitting = true;

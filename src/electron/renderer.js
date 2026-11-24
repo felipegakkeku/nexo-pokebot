@@ -44,6 +44,8 @@ const toastBaselineByAcc = {};
 const recentToastMap = new Map();
 let serverShinyToastBaselineDone = false;
 let lastServerShinyToastKey = '';
+let lastNotifiedUpdateVersion = '';
+let currentUpdateState = null;
 
 const POTION_LABELS = {
     200: 'Small Potion',
@@ -484,6 +486,7 @@ function renderActiveAccountPanel() {
         huntSel.value = t.huntSlug;
     }
     refreshHuntAndCenterButtons();
+    renderVoteBar(data);
 
     // KPIs e Eficiência
     $('kKills').textContent = fmtNum(st.kills);
@@ -995,6 +998,161 @@ function processActivityToasts(allSnaps) {
     }
 }
 
+function fmtShortDuration(ms) {
+    const totalSec = Math.max(0, Math.ceil(Number(ms || 0) / 1000));
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
+    if (m > 0) return `${m}m`;
+    return `${Math.max(1, totalSec)}s`;
+}
+
+function renderVoteBar(data = snapshots[activeAccount]) {
+    const bar = $('voteBar');
+    if (!bar) return;
+    const pill = $('votePill');
+    const sub = $('voteSub');
+    const btn = $('btnOpenVote');
+    const v = data?.vote;
+    if (!v || !v.checkedAt) {
+        bar.classList.remove('ready');
+        btn.classList.remove('ready');
+        btn.disabled = !data?.session?.nick && (!data?.trainer?.nick || data.trainer.nick === '-');
+        pill.textContent = 'IdleHub.io';
+        sub.textContent = v?.error
+            ? `Erro: ${v.error}`
+            : 'Conecte a conta ou clique em ↻ para verificar';
+        return;
+    }
+    const now = Date.now();
+    const remMs = v.availableAt > now ? v.availableAt - now : (v.availableAt > 0 ? 0 : Number(v.remainingMs || 0));
+    const ready = Boolean(v.ativo && remMs <= 0 && v.url);
+    bar.classList.toggle('ready', ready);
+    btn.classList.toggle('ready', ready);
+    btn.disabled = !v.url;
+    if (!v.ativo) {
+        pill.textContent = 'Desligado';
+        sub.textContent = 'Vote & Ganhe inativo no servidor';
+        return;
+    }
+    const progress = `${v.noPar || 0}/${v.votosPorDiamante || 2} p/ 💎 · ${fmtNum(v.votos || 0)} votos (${fmtNum(v.diamantes || 0)} 💎)`;
+    if (ready) {
+        pill.textContent = 'Disponível agora';
+        sub.textContent = `${progress}`;
+    } else {
+        pill.textContent = `Em ${fmtShortDuration(remMs)}`;
+        sub.textContent = progress;
+    }
+}
+
+function formatBytesMb(bytes) {
+    const n = Number(bytes || 0);
+    if (n <= 0) return '';
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function renderUpdateUi(st) {
+    if (!st) return;
+    currentUpdateState = st;
+    const btn = $('btnUpdateToggle');
+    const title = $('updatePopTitle');
+    const verTag = $('updatePopVer');
+    const desc = $('updatePopDesc');
+    const progWrap = $('updateProgWrap');
+    const progFill = $('updateProgFill');
+    const progTxt = $('updateProgTxt');
+    const notesEl = $('updatePopNotes');
+    const btnInstall = $('btnUpdateInstall');
+    const btnCheck = $('btnUpdateCheck');
+    const brandVer = document.querySelector('.brand-ver');
+
+    const curVer = st.currentVersion || '1.0.0';
+    const shortCur = curVer.replace(/\.0$/, '');
+    if (brandVer) brandVer.textContent = `v${shortCur}`;
+
+    const hasUpd = Boolean(st.hasUpdate);
+    const busy = st.status === 'checking' || st.status === 'downloading' || st.status === 'extracting' || st.status === 'applying';
+    btn.classList.toggle('has-update', hasUpd);
+    if (st.status === 'downloading') {
+        btn.textContent = `Baixando ${st.percent || 0}%`;
+    } else if (st.status === 'extracting' || st.status === 'applying') {
+        btn.textContent = 'Aplicando...';
+    } else if (hasUpd) {
+        btn.textContent = `⬇ v${(st.latestVersion || '').replace(/\.0$/, '')}`;
+    } else {
+        btn.textContent = 'Atualizar';
+    }
+
+    verTag.textContent = hasUpd ? `v${curVer} -> v${st.latestVersion}` : `v${curVer}`;
+    btnCheck.disabled = busy;
+
+    if (st.status === 'checking') {
+        title.textContent = 'Verificando atualizações';
+        desc.textContent = 'Consultando Releases em felipegakkeku/nexo-pokebot...';
+        progWrap.classList.add('hidden');
+        btnInstall.classList.add('hidden');
+    } else if (st.status === 'downloading') {
+        title.textContent = `Baixando v${st.latestVersion}`;
+        const mbDone = formatBytesMb(st.downloadedBytes);
+        const mbTot = formatBytesMb(st.totalBytes || st.assetSize);
+        desc.textContent = mbTot ? `${mbDone} / ${mbTot}` : 'Baixando pacote Windows...';
+        progWrap.classList.remove('hidden');
+        progFill.style.width = `${Math.max(0, Math.min(100, Number(st.percent || 0)))}%`;
+        progTxt.textContent = `${st.percent || 0}%`;
+        btnInstall.classList.add('hidden');
+    } else if (st.status === 'extracting') {
+        title.textContent = `Extraindo v${st.latestVersion}`;
+        desc.textContent = 'Validando pacote antes de aplicar...';
+        progWrap.classList.remove('hidden');
+        progFill.style.width = '100%';
+        progTxt.textContent = 'Extraindo...';
+        btnInstall.classList.add('hidden');
+    } else if (st.status === 'applying') {
+        title.textContent = 'Aplicando atualização';
+        desc.textContent = 'Fechando para atualizar e reabrir automaticamente...';
+        progWrap.classList.remove('hidden');
+        progFill.style.width = '100%';
+        progTxt.textContent = 'Reiniciando...';
+        btnInstall.classList.add('hidden');
+    } else if (hasUpd) {
+        title.textContent = `Nova Release: v${st.latestVersion}`;
+        const sizeLabel = st.assetSize ? ` (${formatBytesMb(st.assetSize)})` : '';
+        desc.textContent = st.isGitRepo
+            ? 'Ambiente Git (.git) detectado. Use git pull ou abra a Release no GitHub.'
+            : `Versão v${st.latestVersion} pronta para instalar${sizeLabel}.`;
+        progWrap.classList.add('hidden');
+        btnInstall.classList.toggle('hidden', Boolean(st.isGitRepo) || !st.assetName);
+        btnInstall.disabled = false;
+        if (st.latestVersion && st.latestVersion !== lastNotifiedUpdateVersion) {
+            lastNotifiedUpdateVersion = st.latestVersion;
+            showToast({
+                kind: 'ok',
+                title: `Nova versão: v${st.latestVersion}`,
+                text: 'Clique em Atualizar no topo para baixar sem perder suas contas.',
+            });
+        }
+    } else if (st.status === 'error') {
+        title.textContent = 'Erro na atualização';
+        desc.textContent = st.error || 'Não foi possível consultar o GitHub agora.';
+        progWrap.classList.add('hidden');
+        btnInstall.classList.add('hidden');
+    } else {
+        title.textContent = 'Tudo atualizado';
+        desc.textContent = st.checkedAt
+            ? `Você já está na última Release (v${curVer}).`
+            : 'Clique em Verificar para buscar novas Releases no GitHub.';
+        progWrap.classList.add('hidden');
+        btnInstall.classList.add('hidden');
+    }
+
+    if (hasUpd && st.releaseNotes) {
+        notesEl.textContent = st.releaseNotes.slice(0, 900);
+        notesEl.classList.remove('hidden');
+    } else {
+        notesEl.classList.add('hidden');
+    }
+}
+
 function renderAll() {
     renderTopTabsAndSlots();
     renderActiveAccountPanel();
@@ -1011,27 +1169,34 @@ async function pollSnapshots() {
 }
 
 function wireEvents() {
+    const updPop = $('updatePopover');
+    const updToggle = $('btnUpdateToggle');
+    const setUpdateOpen = (open) => {
+        if (!updPop || !updToggle) return;
+        updPop.classList.toggle('hidden', !open);
+        updToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    };
+
     const support = $('pixSupport');
     const pixKey = support?.dataset?.pixKey?.trim() || '';
+    let setPixOpen = () => {};
     if (support && pixKey) {
         support.classList.remove('hidden');
         $('pixKey').textContent = pixKey;
         const pop = $('pixPopover');
         const toggleBtn = $('btnPixToggle');
-        const setPixOpen = (open) => {
+        setPixOpen = (open) => {
             pop.classList.toggle('hidden', !open);
             toggleBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
             if (!open) $('pixStatus').textContent = '';
         };
         toggleBtn.addEventListener('click', (ev) => {
             ev.stopPropagation();
-            setPixOpen(pop.classList.contains('hidden'));
+            const next = pop.classList.contains('hidden');
+            setUpdateOpen(false);
+            setPixOpen(next);
         });
         pop.addEventListener('click', (ev) => ev.stopPropagation());
-        document.addEventListener('click', () => setPixOpen(false));
-        document.addEventListener('keydown', (ev) => {
-            if (ev.key === 'Escape') setPixOpen(false);
-        });
         $('copyPix').onclick = async () => {
             try {
                 await navigator.clipboard.writeText(pixKey);
@@ -1041,6 +1206,37 @@ function wireEvents() {
             }
         };
     }
+
+    if (updToggle && updPop) {
+        updToggle.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            const next = updPop.classList.contains('hidden');
+            setPixOpen(false);
+            setUpdateOpen(next);
+        });
+        updPop.addEventListener('click', (ev) => ev.stopPropagation());
+        $('btnUpdateCheck')?.addEventListener('click', () => {
+            void window.pokeHub.checkUpdate().then(renderUpdateUi);
+        });
+        $('btnUpdateInstall')?.addEventListener('click', () => {
+            void window.pokeHub.installUpdate();
+        });
+        $('btnUpdateOpenRelease')?.addEventListener('click', () => {
+            const url = currentUpdateState?.releaseUrl || 'https://github.com/felipegakkeku/nexo-pokebot/releases/latest';
+            void window.pokeHub.openExternal(url, activeAccount);
+        });
+    }
+
+    document.addEventListener('click', () => {
+        setPixOpen(false);
+        setUpdateOpen(false);
+    });
+    document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') {
+            setPixOpen(false);
+            setUpdateOpen(false);
+        }
+    });
 
     const toastChk = $('cToastEnabled');
     if (toastChk) {
@@ -1136,6 +1332,8 @@ function wireEvents() {
     $('btnPassNow').addEventListener('click', () => sendAction('claim-pass'));
     $('btnPreyNow').addEventListener('click', () => sendAction('roll-prey'));
     $('btnLivesNow').addEventListener('click', () => sendAction('run-lives'));
+    $('btnOpenVote')?.addEventListener('click', () => sendAction('open-vote'));
+    $('btnRefreshVote')?.addEventListener('click', () => sendAction('refresh-vote'));
     $('btnOpenLives').addEventListener('click', () => sendAction('open-lives'));
     $('chatReminder').addEventListener('change', event => {
         clearInterval(chatReminderTimer);
@@ -1300,6 +1498,10 @@ function wireEvents() {
         void closeAllEmbeddedToHeadless();
     });
 
+    if (typeof window.pokeHub.onUpdateState === 'function') {
+        window.pokeHub.onUpdateState((st) => renderUpdateUi(st));
+    }
+
     document.addEventListener('visibilitychange', () => {
         if (!document.hidden) {
             void pollSnapshots();
@@ -1325,6 +1527,9 @@ function startPolling() {
 async function init() {
     webviewPreloadUrl = await window.pokeHub.getWebviewPreload();
     wireEvents();
+    if (typeof window.pokeHub.getUpdateState === 'function') {
+        window.pokeHub.getUpdateState().then(renderUpdateUi).catch(() => {});
+    }
     await pollSnapshots();
     startPolling();
 }

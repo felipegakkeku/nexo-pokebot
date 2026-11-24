@@ -54,6 +54,27 @@
       </div>
 
       <div class="top-actions">
+        <div class="update-wrap" id="updateWrap">
+          <button type="button" class="btn sm update-btn" id="btnUpdateToggle" aria-expanded="false" aria-controls="updatePopover" title="Verificar atualizações do Nexo PokeBot">Atualizar</button>
+          <div class="update-popover hidden" id="updatePopover" role="dialog" aria-label="Atualização do Nexo PokeBot">
+            <div class="update-pop-head">
+              <span class="update-pop-title" id="updatePopTitle">Atualizações</span>
+              <span class="update-ver-tag" id="updatePopVer">v1.0.0</span>
+            </div>
+            <div class="update-pop-desc" id="updatePopDesc">Verificando Releases do GitHub...</div>
+            <div class="update-progress hidden" id="updateProgWrap">
+              <div class="update-prog-track"><div class="update-prog-fill" id="updateProgFill" style="width:0%"></div></div>
+              <div class="update-prog-txt" id="updateProgTxt">0%</div>
+            </div>
+            <div class="update-pop-notes hidden" id="updatePopNotes"></div>
+            <div class="update-safe-note">Suas 4 contas, sessões e configurações ficam preservadas.</div>
+            <div class="update-pop-actions">
+              <button type="button" class="btn sm primary hidden" id="btnUpdateInstall">Baixar e atualizar</button>
+              <button type="button" class="btn sm" id="btnUpdateCheck">Verificar</button>
+              <button type="button" class="btn sm" id="btnUpdateOpenRelease">Release</button>
+            </div>
+          </div>
+        </div>
         <div class="pix-wrap hidden" id="pixSupport" data-pix-key="0a2a3538-4d9e-4eeb-836e-5ee6136ab7ff">
           <button type="button" class="btn sm pix-btn" id="btnPixToggle" aria-expanded="false" aria-controls="pixPopover" title="Apoiar o desenvolvimento do Nexo PokeBot">Apoiar ♥</button>
           <div class="pix-popover hidden" id="pixPopover" role="dialog" aria-label="Apoiar o Nexo PokeBot">
@@ -180,6 +201,19 @@
                 <button type="button" class="btn" id="btnPassNow">Resgatar passe</button>
                 <button type="button" class="btn" id="btnPreyNow">Rolar Prey</button>
                 <button type="button" class="btn" id="btnLivesNow">Coletar das lives</button>
+              </div>
+              <div class="vote-bar" id="voteBar">
+                <div class="vote-bar-info">
+                  <div class="vote-bar-title">
+                    <strong>Vote &amp; Ganhe</strong>
+                    <span class="vote-pill" id="votePill">IdleHub.io</span>
+                  </div>
+                  <div class="vote-bar-sub" id="voteSub">Conecte a conta para verificar o voto diário</div>
+                </div>
+                <div class="vote-bar-actions">
+                  <button type="button" class="btn sm vote-btn" id="btnOpenVote" title="Abre o IdleHub.io no perfil configurado desta conta com o nick já preenchido">Votar</button>
+                  <button type="button" class="btn sm" id="btnRefreshVote" title="Atualizar status do voto">↻</button>
+                </div>
               </div>
             </div>
           </div>

@@ -3,9 +3,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { createServer as createHttpServer } from 'node:http';
-import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import {
+    parseSemver,
+    compareSemver,
+    selectReleaseZipAsset,
+    checkForUpdate,
+    buildWindowsApplyScript,
+    downloadAndStageUpdate,
+} from '../src/desktop/updater.mjs';
 
 import {
     snappyDecompress,
@@ -2655,6 +2664,190 @@ test('perfil configurado: openLives, openPanel e openExternalUrl usam o perfil e
         } finally {
             controller.stop();
         }
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('vote: monitora /idlehub/me, abre IdleHub no perfil configurado e reage a votoCreditado', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pokebot-vote-'));
+    try {
+        const chromeRoot = join(dir, 'Google', 'Chrome', 'User Data');
+        mkdirSync(join(chromeRoot, 'Profile 3', 'Local Storage', 'leveldb'), { recursive: true });
+        writeFileSync(
+            join(chromeRoot, 'Local State'),
+            JSON.stringify({ profile: { info_cache: { 'Profile 3': { name: 'Google Vote' } } } }),
+            'utf8'
+        );
+        const launches = [];
+        let voteChecks = 0;
+        let waitingMs = 0;
+        const fakeVoteFetch = async (url, init) => {
+            voteChecks += 1;
+            assert.equal(url, 'https://pokeidle.io/idlehub/me');
+            const body = JSON.parse(String(init?.body || '{}'));
+            assert.equal(body.token, 'tok-vote-123');
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    ativo: true,
+                    esperaMs: waitingMs,
+                    votos: 7,
+                    noPar: 1,
+                    votosPorDiamante: 2,
+                    porPar: 1,
+                    diamantes: 3,
+                    url: 'https://idlehub.io/vote/pokeidle?nick=VoteNick',
+                    identificador: 'VoteNick',
+                }),
+            };
+        };
+
+        const controller = createHeadlessController({
+            cwd: dir,
+            token: 'tok-vote-123',
+            nick: 'VoteNick',
+            useExistingBrowser: true,
+            enableBrowserProfilePicker: true,
+            browserExecutablePath: 'C:\\Fake\\chrome.exe',
+            browserUserDataRoots: [chromeRoot],
+            browserLauncher: async (exe, profileDir, urls, existingProfile) => {
+                launches.push({ exe, profileDir, urls, existingProfile });
+            },
+            voteFetch: fakeVoteFetch,
+            disableHeadlessHuntGuide: true,
+            wsFactory: () => { throw new Error('nao esperado'); },
+        });
+
+        try {
+            controller.updateConfig({ browserProfile: 'Profile 3' });
+            const hooks = controller.attachExternalBridge({
+                send: () => true,
+                close: () => {},
+                isReady: () => true,
+            }, { waitForWelcome: true });
+            hooks.onFrame(JSON.stringify({
+                t: 'welcome',
+                estado: { cheio: true, nick: 'VoteNick', level: 20, pokemons: [] },
+            }));
+            await controller.refreshVoteStatus({ force: true });
+
+            const snap1 = controller.getSnapshot({ includeHunts: false });
+            assert.equal(snap1.vote.ativo, true);
+            assert.equal(snap1.vote.available, true);
+            assert.equal(snap1.vote.votos, 7);
+            assert.equal(snap1.vote.url, 'https://idlehub.io/vote/pokeidle?nick=VoteNick');
+            assert.ok(snap1.logs.some((l) => l.kind === 'reward' && /Voto diario disponivel/i.test(l.text)));
+
+            const opened = await controller.openVote();
+            assert.equal(opened, true);
+            assert.equal(launches.length, 1);
+            assert.deepEqual(launches[0].urls, ['https://idlehub.io/vote/pokeidle?nick=VoteNick']);
+            assert.equal(launches[0].existingProfile?.name, 'Profile 3');
+
+            waitingMs = 24 * 3_600_000;
+            const beforeChecks = voteChecks;
+            hooks.onFrame(JSON.stringify({ t: 'votoCreditado', qtd: 1 }));
+            await new Promise((r) => setTimeout(r, 30));
+            assert.ok(voteChecks > beforeChecks);
+            const snap2 = controller.getSnapshot({ includeHunts: false });
+            assert.equal(snap2.vote.available, false);
+            assert.ok(snap2.vote.remainingMs > 23 * 3_600_000);
+            assert.ok(snap2.logs.some((l) => l.kind === 'reward' && /\+1 diamante.*IdleHub/i.test(l.text)));
+        } finally {
+            controller.stop();
+        }
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('updater: semver, selecao de ZIP, checkForUpdate, script seguro e staging de ZIP', async () => {
+    assert.deepEqual(parseSemver('v1.2.3-beta.1'), { major: 1, minor: 2, patch: 3, prerelease: 'beta.1', raw: '1.2.3-beta.1' });
+    assert.ok(compareSemver('1.1.0', '1.0.0') > 0);
+    assert.ok(compareSemver('1.0.0', '1.0.0-rc.1') > 0);
+    assert.equal(compareSemver('v1.0.0', '1.0'), 0);
+
+    const picked = selectReleaseZipAsset({
+        assets: [
+            { name: 'pokebot.user.js', size: 100, browser_download_url: 'https://github.com/a/b/pokebot.user.js' },
+            { name: 'Nexo-PokeBot-v1.1.zip', size: 140_000_000, browser_download_url: 'https://github.com/a/b/Nexo-PokeBot-v1.1.zip' },
+        ],
+    });
+    assert.equal(picked?.name, 'Nexo-PokeBot-v1.1.zip');
+
+    const dir = mkdtempSync(join(tmpdir(), 'pokebot-upd-'));
+    try {
+        const fakeApp = join(dir, 'app');
+        mkdirSync(fakeApp, { recursive: true });
+        writeFileSync(join(fakeApp, 'package.json'), JSON.stringify({ name: 'nexo-pokebot', version: '1.0.0' }), 'utf8');
+
+        const info = await checkForUpdate({
+            rootDir: fakeApp,
+            fetchImpl: async () => ({
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    tag_name: 'v1.1.0',
+                    name: 'Nexo PokeBot v1.1',
+                    body: 'Auto-updater e monitor de voto',
+                    html_url: 'https://github.com/felipegakkeku/nexo-pokebot/releases/tag/v1.1.0',
+                    assets: [
+                        { name: 'Nexo-PokeBot-v1.1.zip', size: 1234, browser_download_url: 'https://github.com/felipegakkeku/nexo-pokebot/releases/download/v1.1.0/Nexo-PokeBot-v1.1.zip' },
+                    ],
+                }),
+            }),
+        });
+        assert.equal(info.ok, true);
+        assert.equal(info.hasUpdate, true);
+        assert.equal(info.latestVersion, '1.1.0');
+        assert.equal(info.isGitRepo, false);
+        assert.equal(info.asset?.name, 'Nexo-PokeBot-v1.1.zip');
+
+        const pkgSrc = join(dir, 'pkg-src', 'Nexo-PokeBot-v1.1');
+        mkdirSync(join(pkgSrc, 'src', 'electron'), { recursive: true });
+        writeFileSync(join(pkgSrc, 'package.json'), JSON.stringify({ name: 'nexo-pokebot', version: '1.1.0' }), 'utf8');
+        writeFileSync(join(pkgSrc, 'src', 'electron', 'main.mjs'), '// updated main\n', 'utf8');
+        const zipFile = join(dir, 'Nexo-PokeBot-v1.1.zip');
+        execFileSync('tar.exe', ['-a', '-c', '-f', zipFile, '-C', join(dir, 'pkg-src'), 'Nexo-PokeBot-v1.1'], { stdio: 'pipe' });
+        const zipBuf = readFileSync(zipFile);
+
+        const progressEvents = [];
+        const staged = await downloadAndStageUpdate({
+            rootDir: fakeApp,
+            releaseInfo: info,
+            waitPids: [999999],
+            onProgress: (p) => progressEvents.push(p.phase),
+            fetchImpl: async () => ({
+                ok: true,
+                status: 200,
+                headers: new Headers({ 'content-length': String(zipBuf.length) }),
+                arrayBuffer: async () => zipBuf.buffer.slice(zipBuf.byteOffset, zipBuf.byteOffset + zipBuf.byteLength),
+            }),
+        });
+        try {
+            assert.equal(staged.ok, true);
+            assert.equal(staged.version, '1.1.0');
+            assert.ok(progressEvents.includes('downloading'));
+            assert.ok(progressEvents.includes('extracting'));
+            assert.ok(progressEvents.includes('ready'));
+            const psText = readFileSync(staged.scriptPath, 'utf8');
+            assert.ok(psText.includes('.pokebot-update-backup'));
+            assert.ok(psText.includes('^\\.pokebot-|^\\.git|^\\.env'));
+            assert.doesNotMatch(psText, /robocopy\s+\$stageRoot\s+\$appDir\s+\/MIR/i);
+        } finally {
+            rmSync(staged.tempRoot, { recursive: true, force: true });
+        }
+
+        const psSample = buildWindowsApplyScript({
+            stageRoot: "C:\\Tmp\\O'Brien\\stage",
+            appDir: "C:\\Apps\\Nexo's Bot",
+            launchExe: "C:\\Apps\\Nexo's Bot\\Nexo PokeBot.exe",
+            tempRoot: 'C:\\Tmp\\upd',
+        });
+        assert.ok(psSample.includes("O''Brien"));
+        assert.ok(psSample.includes("Nexo''s Bot"));
     } finally {
         rmSync(dir, { recursive: true, force: true });
     }

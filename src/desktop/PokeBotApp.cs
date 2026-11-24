@@ -2578,6 +2578,47 @@ namespace PokeBotDesktop
             }
         }
 
+        internal static bool TryRunSelfUpdate(out string failureReason)
+        {
+            failureReason = null;
+            string root = FindProjectRoot();
+            if (string.IsNullOrEmpty(root))
+            {
+                failureReason = "Pasta do Nexo PokeBot não encontrada para atualizar.";
+                return false;
+            }
+            string updaterScript = Path.Combine(root, "src", "desktop", "updater.mjs");
+            if (!File.Exists(updaterScript))
+            {
+                failureReason = "Módulo de atualização não encontrado em:\n" + updaterScript;
+                return false;
+            }
+            string electronDist = Path.Combine(root, "node_modules", "electron", "dist");
+            string brandedExe = Path.Combine(electronDist, "Nexo PokeBot.exe");
+            string fallbackExe = Path.Combine(electronDist, "electron.exe");
+            string runtimeExe = File.Exists(brandedExe) ? brandedExe : (File.Exists(fallbackExe) ? fallbackExe : FindNodeExe());
+            bool asNode = runtimeExe.Equals(brandedExe, StringComparison.OrdinalIgnoreCase) ||
+                          runtimeExe.Equals(fallbackExe, StringComparison.OrdinalIgnoreCase);
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = runtimeExe,
+                    Arguments = "\"" + updaterScript + "\" --apply",
+                    WorkingDirectory = root,
+                    UseShellExecute = false,
+                };
+                if (asNode) psi.EnvironmentVariables["ELECTRON_RUN_AS_NODE"] = "1";
+                Process.Start(psi);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                failureReason = "Não foi possível iniciar o atualizador:\n" + ex.Message;
+                return false;
+            }
+        }
+
         internal static bool TryLaunchElectronHub(out string failureReason)
         {
             failureReason = null;
@@ -2783,12 +2824,22 @@ namespace PokeBotDesktop
             bool legacyMode = Array.IndexOf(args, "--legacy") >= 0;
             bool ecoMode = Array.IndexOf(args, "--eco") >= 0;
             bool extMode = Array.IndexOf(args, "--extensions") >= 0;
+            bool updateMode = Array.IndexOf(args, "--update") >= 0;
             int account = 1;
             int accountIndex = Array.IndexOf(args, "--account");
             if (accountIndex >= 0 && (accountIndex + 1 >= args.Length ||
                 !int.TryParse(args[accountIndex + 1], out account) || account < 1 || account > 4))
             {
                 MessageBox.Show("Use --account com um número de 1 a 4.");
+                return;
+            }
+            if (updateMode)
+            {
+                string updErr;
+                if (!PokeBotMainForm.TryRunSelfUpdate(out updErr) && !string.IsNullOrEmpty(updErr))
+                {
+                    MessageBox.Show(updErr, "Nexo PokeBot - Atualização", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                }
                 return;
             }
             if (ecoMode && PokeBotMainForm.TryLaunchEcoDaemon())

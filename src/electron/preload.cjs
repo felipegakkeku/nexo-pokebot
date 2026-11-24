@@ -14,7 +14,15 @@ contextBridge.exposeInMainWorld('pokeHub', {
     minimizeToTray: () => ipcRenderer.invoke('hub:window-minimize-tray'),
     setAwake: (enabled) => ipcRenderer.invoke('hub:awake-set', Boolean(enabled)),
     setMinToTray: (enabled) => ipcRenderer.invoke('hub:mintray-set', Boolean(enabled)),
-    openExternal: (url) => ipcRenderer.invoke('hub:open-external', url),
+    openExternal: (url, account) => ipcRenderer.invoke('hub:open-external', url, account),
+    getUpdateState: () => ipcRenderer.invoke('hub:update-get-state'),
+    checkUpdate: () => ipcRenderer.invoke('hub:update-check'),
+    installUpdate: () => ipcRenderer.invoke('hub:update-install'),
+    onUpdateState: (cb) => {
+        const fn = (_ev, data) => cb(data);
+        ipcRenderer.on('hub:update-state', fn);
+        return () => ipcRenderer.removeListener('hub:update-state', fn);
+    },
     onWebviewSend: (cb) => {
         const fn = (_ev, data) => cb(data);
         ipcRenderer.on('hub:webview-send', fn);
