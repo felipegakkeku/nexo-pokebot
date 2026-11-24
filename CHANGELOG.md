@@ -4,6 +4,8 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+## 1.0.12
+
 - **Completar Pokédex** captura espécies ainda sem registro e busca outra hunt quando termina as pendências do mapa.
 - **Top Catch semanal** usa as capturas da semana, inclusive para espécies já registradas na Pokédex. Após uma captura nova, prioriza outro mapa elegível. O Hub e o painel web mostram prazo, progresso, marcos e posição quando o servidor disponibiliza o ranking.
 - Nos dois modos, o usuário pode priorizar XP/h, ouro/h, shiny/h ou capturas rápidas. As três primeiras metas usam o ranking do `/hunt` quando disponível. Ao ativar um modo de coleção, o bot desliga a captura VIP do jogo que lançaria bolas fora do objetivo.
