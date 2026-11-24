@@ -125,6 +125,74 @@ export function createStateMerger() {
     return { merge, getState };
 }
 
+export const OUTLAND_DEX_BY_POKE_ID = Object.freeze({
+    2001: 9, 2002: 160, 2003: 154, 2004: 3, 2005: 214, 2006: 123, 2007: 203, 2008: 26,
+    2009: 181, 2010: 125, 2011: 148, 2012: 91, 2013: 87, 2014: 124, 2015: 221, 2016: 241,
+    2017: 232, 2018: 28, 2019: 76, 2020: 112, 2021: 6, 2022: 157, 2023: 34, 2024: 31,
+    2025: 169, 2026: 94, 2027: 200, 2028: 107, 2029: 106, 2030: 237, 2031: 59, 2032: 126,
+    2033: 247, 2034: 208, 2035: 40, 2036: 178, 2037: 65, 2038: 97, 2039: 130, 2040: 226,
+    2041: 127, 2042: 36, 2043: 210, 2044: 227, 2045: 164, 2046: 18, 2047: 105, 2048: 248,
+    2049: 142, 2050: 212, 2051: 149, 2052: 547, 2053: 219, 2054: 454, 2055: 103, 2056: 429,
+    2057: 699, 2058: 560,
+});
+
+const OUTLAND_DEX_BY_BASE_NAME = Object.freeze({
+    blastoise: 9, feraligatr: 160, meganium: 154, venusaur: 3, heracross: 214, scyther: 123,
+    girafarig: 203, raichu: 26, ampharos: 181, electabuzz: 125, dragonair: 148, cloyster: 91,
+    dewgong: 87, jynx: 124, piloswine: 221, miltank: 241, donphan: 232, sandslash: 28,
+    golem: 76, rhydon: 112, charizard: 6, typhlosion: 157, nidoking: 34, nidoqueen: 31,
+    crobat: 169, gengar: 94, misdreavus: 200, hitmonchan: 107, hitmonlee: 106, hitmontop: 237,
+    arcanine: 59, magmar: 126, pupitar: 247, steelix: 208, wigglytuff: 40, xatu: 178,
+    alakazam: 65, hypno: 97, gyarados: 130, mantine: 226, pinsir: 127, clefable: 36,
+    granbull: 210, skarmory: 227, noctowl: 164, pidgeot: 18, marowak: 105, tyranitar: 248,
+    aerodactyl: 142, scizor: 212, dragonite: 149, whimsicott: 547, magcargo: 219, toxicroak: 454,
+    exeggutor: 103, mismagius: 429, aurorus: 699, scrafty: 560,
+});
+
+const SPECIAL_DEX_BY_POKE_ID = Object.freeze({
+    8017: 1017,
+    9017: 1017,
+    12017: 1017,
+    10001: 9,
+});
+
+const VARIANT_NAME_PREFIX_RE = /^(?:shiny|mega|alolan|galarian|hisuian|paldean|brave|tribal|ancient|war|furious|charged|magnetic|evil|freezing|psy|heavy|milch|roll|hard|brute|enraged|dark|trickmaster|banshee|taekwondo|enigmatic|magma|toxic)[\s-]+/i;
+
+/**
+ * Converte qualquer `speciesId` interno do PokeIdle (Gen 1-9, Hoenn 13xxx, Outland 2001..2058 / 10501..10547,
+ * Megas 3xxx / 9xxx / 14xxx e Formas Regionais/Especiais 1479 / 4xxx..12xxx) para o numero da National Dex (1..1025)
+ * compativel com o repositorio de sprites da PokeAPI.
+ * @param {number|string|null|undefined} speciesId ID interno da especie no PokeIdle.
+ * @param {string} [name=''] Nome opcional para fallback (ex.: variantes Outland ou anuncios sem speciesId).
+ * @param {Record<string, number>|null} [dexByName=null] Mapa opcional nome normalizado -> National Dex.
+ * @returns {number} Numero da National Dex (1..1025) ou 0 se nao resolvido.
+ */
+export function resolvePokemonSpriteDex(speciesId, name = '', dexByName = null) {
+    let id = Number(speciesId);
+    if (Number.isInteger(id) && id > 0) {
+        if (id >= 10501 && id <= 10548) id -= 8500;
+        if (SPECIAL_DEX_BY_POKE_ID[id]) return SPECIAL_DEX_BY_POKE_ID[id];
+        if (OUTLAND_DEX_BY_POKE_ID[id]) return OUTLAND_DEX_BY_POKE_ID[id];
+        if (id <= 1025) return id;
+        const mod = id % 1000;
+        if (mod >= 1 && mod <= 999) return mod;
+    }
+    const raw = String(name || '').trim();
+    if (raw) {
+        const lower = raw.toLowerCase();
+        if (dexByName && dexByName[lower]) return dexByName[lower];
+        let stripped = lower;
+        for (let i = 0; i < 3; i++) {
+            const next = stripped.replace(VARIANT_NAME_PREFIX_RE, '').trim();
+            if (next === stripped) break;
+            stripped = next;
+        }
+        if (dexByName && dexByName[stripped]) return dexByName[stripped];
+        if (OUTLAND_DEX_BY_BASE_NAME[stripped]) return OUTLAND_DEX_BY_BASE_NAME[stripped];
+    }
+    return 0;
+}
+
 /**
  * Verifica se uma entidade presente em `campo` / `campo.init` representa um Pokemon selvagem de hunt.
  * Exclui treinadores (`tr`), pets de jogadores (`dn`), equipes PvP (`eq`), bonecos (`bn`),

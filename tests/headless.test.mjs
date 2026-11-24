@@ -35,6 +35,7 @@ import {
     createStateMerger,
     createFieldTracker,
     isWildCampoMob,
+    resolvePokemonSpriteDex,
     pickHeadlessBallForCorpse,
     resolveRestockBallId,
     resolveRestockPotionId,
@@ -3347,6 +3348,109 @@ test('shiny-miss e shiniesSeen: ignora pets de jogadores (dn), treino na casa (t
             assert.equal(snapReal.stats.shiniesMissed, 1);
             assert.equal(snapReal.missedShinies[0]?.name, 'Shedinja');
             assert.ok(snapReal.logs.some((l) => l.kind === 'shiny-miss' && /Shedinja \(Nv 100\)/.test(l.text)));
+        } finally {
+            controller.stop();
+        }
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('sprites: resolvePokemonSpriteDex mapeia Hoenn (13xxx), Outland (2001..2058 e 10501..), Megas, Formas e nome fallback no gui-server', async () => {
+    // 1) National Dex direta (Gen 1..9)
+    assert.equal(resolvePokemonSpriteDex(6), 6);
+    assert.equal(resolvePokemonSpriteDex(1025), 1025);
+    // 2) Hoenn / Geracoes 3+ (13xxx -> id % 1000)
+    assert.equal(resolvePokemonSpriteDex(13361, 'Snorunt'), 361);
+    assert.equal(resolvePokemonSpriteDex(13292, 'Shedinja'), 292);
+    // 3) Outland (2001..2058 e legado 10501..10548)
+    assert.equal(resolvePokemonSpriteDex(2001, 'Brave Blastoise'), 9);
+    assert.equal(resolvePokemonSpriteDex(2033, 'Ancient Pupitar'), 247);
+    assert.equal(resolvePokemonSpriteDex(2058, 'War Scrafty'), 560);
+    assert.equal(resolvePokemonSpriteDex(10533, 'Ancient Pupitar'), 247);
+    // 4) Megas e Formas regionais / especiais
+    assert.equal(resolvePokemonSpriteDex(3006, 'Mega Charizard Y'), 6);
+    assert.equal(resolvePokemonSpriteDex(9006, 'Mega Charizard X'), 6);
+    assert.equal(resolvePokemonSpriteDex(14009, 'Mega Blastoise'), 9);
+    assert.equal(resolvePokemonSpriteDex(4037, 'Alolan Vulpix'), 37);
+    assert.equal(resolvePokemonSpriteDex(5052, 'Galarian Meowth'), 52);
+    assert.equal(resolvePokemonSpriteDex(6058, 'Hisuian Growlithe'), 58);
+    assert.equal(resolvePokemonSpriteDex(1479, 'Mow Rotom'), 479);
+    assert.equal(resolvePokemonSpriteDex(8017, 'Ogerpon Hearthflame'), 1017);
+    assert.equal(resolvePokemonSpriteDex(9017, 'Ogerpon Wellspring'), 1017);
+    assert.equal(resolvePokemonSpriteDex(12017, 'Ogerpon Cornerstone'), 1017);
+    assert.equal(resolvePokemonSpriteDex(10001, 'Blastoise'), 9);
+    // 5) Fallback por nome quando speciesId esta ausente
+    assert.equal(resolvePokemonSpriteDex(null, 'Ancient Pupitar'), 247);
+    assert.equal(resolvePokemonSpriteDex(0, 'Shiny Snorunt', { snorunt: 361 }), 361);
+
+    // 6) gui-server popula spriteDex em activePokemon, recentShinies e ownShinies
+    const dir = makeTempDir('pokebot-sprite-dex-');
+    let sock = null;
+    try {
+        const controller = createHeadlessController({
+            cwd: dir,
+            configPath: join(dir, '.pokebot-headless-config.json'),
+            disableBrowserProfileSync: true,
+            disableHeadlessHuntGuide: true,
+            disableVotePolling: true,
+            initialConfig: { caidosEnabled: false, restockEnabled: false, dailyPassEnabled: false, preyEnabled: false, liveEnabled: false, ensureNativeAutoHeal: false },
+            liveRunner: async () => {},
+            liveDisposer: () => {},
+            resolveSession: () => ({
+                nick: 'SpriteTester',
+                token: makeFakeJwt({ nick: 'SpriteTester', exp: Date.now() + 3_600_000 }),
+                dispositivo: 'uuid-sp',
+                prefs: {},
+                payload: { nick: 'SpriteTester', exp: Date.now() + 3_600_000 },
+                source: 'mock',
+            }),
+            wsFactory: () => {
+                sock = { readyState: 1, send() {}, close() { this.readyState = 3; } };
+                queueMicrotask(() => {
+                    sock.onopen?.();
+                    sock.onmessage?.({
+                        data: JSON.stringify({
+                            t: 'welcome',
+                            hunts: [
+                                { slug: 'snorunt', nome: 'Snorunt', nivel: 40, especies: [{ pokeId: 13361, nome: 'Snorunt', pontos: 100 }] },
+                            ],
+                            estado: {
+                                cheio: true,
+                                nick: 'SpriteTester',
+                                level: 200,
+                                gold: 100_000,
+                                activeId: 1,
+                                huntSlug: 'snorunt',
+                                pokemons: [{ id: 1, speciesId: 2033, nome: 'Ancient Pupitar', level: 100, shiny: true, hp: 100, maxHp: 100 }],
+                            },
+                        }),
+                    });
+                });
+                return sock;
+            },
+        });
+        try {
+            controller.start();
+            await new Promise((r) => setTimeout(r, 30));
+            sock.onmessage?.({
+                data: JSON.stringify({
+                    t: 'shiny.captura',
+                    nick: 'Meimei',
+                    ovo: false,
+                    pokemon: { nome: 'Snorunt', speciesId: 13361 },
+                }),
+            });
+            sock.onmessage?.({
+                data: JSON.stringify({
+                    t: 'batalha',
+                    ev: [{ k: 'capturado', pokemon: { nome: 'Snorunt', speciesId: 13361, level: 40, shiny: true } }],
+                }),
+            });
+            const snap = controller.getSnapshot({ includeHunts: false });
+            assert.equal(snap.activePokemon?.spriteDex, 247);
+            assert.equal(snap.recentShinies?.[0]?.spriteDex, 361);
+            assert.equal(snap.ownShinies?.[0]?.spriteDex, 361);
         } finally {
             controller.stop();
         }

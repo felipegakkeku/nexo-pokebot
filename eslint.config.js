@@ -46,6 +46,7 @@ export default [
                 ...Object.fromEntries([
                     'snapshots', 'activeAccount', 'viewMode', 'gridState', 'webviews', 'ACCOUNTS', 'STATUS_LABELS',
                     'dirtyByAcc', 'currentUpdateState', 'BUFF_KINDS', '$', 'fmtNum', 'escapeHtml', 'pokemonSpriteUrl',
+                    'resolvePokemonSpriteDex', 'setPokemonSpriteImg',
                     'selectAccount', 'setViewMode', 'setSubtab', 'sendAction', 'claimTwitchChest', 'isAccountMuted',
                     'setAccountMuted', 'renderActiveAccountPanel', 'renderAll', 'saveConfig', 'readConfigForm',
                     'applyConfigTo', 'applyGridLayout', 'renderGridToolbar', 'requestLivesRefresh',

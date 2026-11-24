@@ -635,16 +635,20 @@ function renderPanelsGrid() {
 
         const pk = s.activePokemon;
         const spriteBox = card.querySelector('.pcard-sprite');
-        const spKey = pk && pk.speciesId > 0 ? `${pk.speciesId}:${pk.shiny ? 1 : 0}` : '';
+        const pkDex = pk ? resolvePokemonSpriteDex(pk.speciesId, pk.name, pk.spriteDex) : 0;
+        const spKey = pkDex > 0 ? `${pkDex}:${pk.shiny ? 1 : 0}` : '';
         if (spriteBox.dataset.key !== spKey) {
             spriteBox.dataset.key = spKey;
             spriteBox.classList.toggle('shiny', Boolean(pk?.shiny));
-            const url = spKey ? pokemonSpriteUrl(pk.speciesId, Boolean(pk.shiny)) : '';
+            const url = spKey ? pokemonSpriteUrl(pk.speciesId, Boolean(pk.shiny), pkDex, pk.name) : '';
             if (url) {
                 const img = document.createElement('img');
                 img.src = url;
                 img.alt = '';
-                img.addEventListener('error', () => { spriteBox.textContent = '?'; });
+                img.dataset.spriteDex = String(pkDex);
+                img.dataset.spriteShiny = pk.shiny ? '1' : '0';
+                img.dataset.spriteStep = '0';
+                img.dataset.spriteFallbackText = '?';
                 spriteBox.replaceChildren(img);
             } else {
                 spriteBox.textContent = '?';
@@ -1375,16 +1379,17 @@ function renderActiveAccountPanel() {
     fill.style.width = `${pct}%`;
     fill.style.background = pct > 55 ? '#10b981' : pct > 25 ? '#f59e0b' : '#ef4444';
 
-    const spKey = pk ? `${activeAccount}:${pk.speciesId}:${pk.shiny ? 1 : 0}` : '';
+    const pkDex = pk ? resolvePokemonSpriteDex(pk.speciesId, pk.name, pk.spriteDex) : 0;
+    const spKey = pk && pkDex > 0 ? `${activeAccount}:${pkDex}:${pk.shiny ? 1 : 0}` : '';
     if (spKey !== lastSpriteKey) {
         lastSpriteKey = spKey;
         const box = $('pokeSprite');
-        if (pk && pk.speciesId > 0) {
-            const seg = pk.shiny ? 'shiny/' : '';
+        const url = spKey ? pokemonSpriteUrl(pk.speciesId, Boolean(pk.shiny), pkDex, pk.name) : '';
+        if (url) {
             const img = document.createElement('img');
-            img.src = `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${seg}${pk.speciesId}.png`;
             img.alt = '';
-            img.addEventListener('error', () => img.remove());
+            img.dataset.spriteFallbackText = '?';
+            setPokemonSpriteImg(img, pk.speciesId, Boolean(pk.shiny), pkDex, pk.name);
             box.replaceChildren(img);
         } else {
             box.textContent = '?';
@@ -1844,12 +1849,17 @@ function renderActivity(data) {
         for (const entry of feed) {
             const item = document.createElement('li');
             item.className = 'shiny-feed-item';
-            if (entry.speciesId) {
+            const entryDex = resolvePokemonSpriteDex(entry.speciesId, entry.name, entry.spriteDex);
+            const entryUrl = pokemonSpriteUrl(entry.speciesId, true, entryDex, entry.name);
+            if (entryUrl) {
                 const img = document.createElement('img');
                 img.className = 'shiny-feed-sprite';
                 img.alt = '';
                 img.loading = 'lazy';
-                img.src = pokemonSpriteUrl(entry.speciesId, true);
+                img.src = entryUrl;
+                img.dataset.spriteDex = String(entryDex);
+                img.dataset.spriteShiny = '1';
+                img.dataset.spriteStep = '0';
                 item.append(img);
             }
             const txt = document.createElement('span');
@@ -1947,11 +1957,103 @@ const POKEMON_DETAIL_LABELS = {
     tipo: 'Tipo', tipos: 'Tipos', types: 'Tipos', xp: 'XP', exp: 'XP', item: 'Item',
 };
 
-function pokemonSpriteUrl(speciesId, shiny = true) {
-    const id = Number(speciesId);
-    if (!Number.isInteger(id) || id <= 0) return '';
-    return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${shiny ? 'shiny/' : ''}${id}.png`;
+const OUTLAND_DEX_BY_POKE_ID = {
+    2001: 9, 2002: 160, 2003: 154, 2004: 3, 2005: 214, 2006: 123, 2007: 203, 2008: 26,
+    2009: 181, 2010: 125, 2011: 148, 2012: 91, 2013: 87, 2014: 124, 2015: 221, 2016: 241,
+    2017: 232, 2018: 28, 2019: 76, 2020: 112, 2021: 6, 2022: 157, 2023: 34, 2024: 31,
+    2025: 169, 2026: 94, 2027: 200, 2028: 107, 2029: 106, 2030: 237, 2031: 59, 2032: 126,
+    2033: 247, 2034: 208, 2035: 40, 2036: 178, 2037: 65, 2038: 97, 2039: 130, 2040: 226,
+    2041: 127, 2042: 36, 2043: 210, 2044: 227, 2045: 164, 2046: 18, 2047: 105, 2048: 248,
+    2049: 142, 2050: 212, 2051: 149, 2052: 547, 2053: 219, 2054: 454, 2055: 103, 2056: 429,
+    2057: 699, 2058: 560,
+};
+const OUTLAND_DEX_BY_BASE_NAME = {
+    blastoise: 9, feraligatr: 160, meganium: 154, venusaur: 3, heracross: 214, scyther: 123,
+    girafarig: 203, raichu: 26, ampharos: 181, electabuzz: 125, dragonair: 148, cloyster: 91,
+    dewgong: 87, jynx: 124, piloswine: 221, miltank: 241, donphan: 232, sandslash: 28,
+    golem: 76, rhydon: 112, charizard: 6, typhlosion: 157, nidoking: 34, nidoqueen: 31,
+    crobat: 169, gengar: 94, misdreavus: 200, hitmonchan: 107, hitmonlee: 106, hitmontop: 237,
+    arcanine: 59, magmar: 126, pupitar: 247, steelix: 208, wigglytuff: 40, xatu: 178,
+    alakazam: 65, hypno: 97, gyarados: 130, mantine: 226, pinsir: 127, clefable: 36,
+    granbull: 210, skarmory: 227, noctowl: 164, pidgeot: 18, marowak: 105, tyranitar: 248,
+    aerodactyl: 142, scizor: 212, dragonite: 149, whimsicott: 547, magcargo: 219, toxicroak: 454,
+    exeggutor: 103, mismagius: 429, aurorus: 699, scrafty: 560,
+};
+const SPECIAL_DEX_BY_POKE_ID = { 8017: 1017, 9017: 1017, 12017: 1017, 10001: 9 };
+const VARIANT_PREFIX_RE = /^(?:shiny|mega|alolan|galarian|hisuian|paldean|brave|tribal|ancient|war|furious|charged|magnetic|evil|freezing|psy|heavy|milch|roll|hard|brute|enraged|dark|trickmaster|banshee|taekwondo|enigmatic|magma|toxic)[\s-]+/i;
+
+function resolvePokemonSpriteDex(speciesId, name = '', spriteDex = null) {
+    const direct = Number(spriteDex);
+    if (Number.isInteger(direct) && direct >= 1 && direct <= 1025) return direct;
+    let id = Number(speciesId);
+    if (Number.isInteger(id) && id > 0) {
+        if (id >= 10501 && id <= 10548) id -= 8500;
+        if (SPECIAL_DEX_BY_POKE_ID[id]) return SPECIAL_DEX_BY_POKE_ID[id];
+        if (OUTLAND_DEX_BY_POKE_ID[id]) return OUTLAND_DEX_BY_POKE_ID[id];
+        if (id <= 1025) return id;
+        const mod = id % 1000;
+        if (mod >= 1 && mod <= 999) return mod;
+    }
+    let stripped = String(name || '').trim().toLowerCase();
+    for (let i = 0; i < 3 && stripped; i++) {
+        const next = stripped.replace(VARIANT_PREFIX_RE, '').trim();
+        if (next === stripped) break;
+        stripped = next;
+    }
+    return OUTLAND_DEX_BY_BASE_NAME[stripped] || 0;
 }
+
+function pokemonSpriteFallbacks(dex, shiny = true) {
+    const id = Number(dex);
+    if (!Number.isInteger(id) || id <= 0) return [];
+    const base = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon';
+    return shiny
+        ? [`${base}/shiny/${id}.png`, `${base}/other/home/shiny/${id}.png`, `${base}/other/official-artwork/shiny/${id}.png`, `${base}/${id}.png`]
+        : [`${base}/${id}.png`, `${base}/other/home/${id}.png`, `${base}/other/official-artwork/${id}.png`];
+}
+
+function pokemonSpriteUrl(speciesId, shiny = true, spriteDex = null, name = '') {
+    const dex = resolvePokemonSpriteDex(speciesId, name, spriteDex);
+    return pokemonSpriteFallbacks(dex, Boolean(shiny))[0] || '';
+}
+
+function setPokemonSpriteImg(img, speciesId, shiny = false, spriteDex = null, name = '') {
+    if (!img) return false;
+    const dex = resolvePokemonSpriteDex(speciesId, name, spriteDex);
+    const isShiny = Boolean(shiny);
+    const src = pokemonSpriteFallbacks(dex, isShiny)[0] || '';
+    const key = `${dex}:${isShiny ? 1 : 0}`;
+    if (img.dataset.spriteKey !== key) {
+        img.dataset.spriteKey = key;
+        img.dataset.spriteDex = dex ? String(dex) : '';
+        img.dataset.spriteShiny = isShiny ? '1' : '0';
+        img.dataset.spriteStep = '0';
+        if (src) img.src = src;
+        else img.removeAttribute('src');
+    }
+    img.hidden = !src;
+    return Boolean(src);
+}
+
+document.addEventListener('error', (ev) => {
+    const img = ev.target;
+    if (!img || img.tagName !== 'IMG' || !img.dataset?.spriteDex) return;
+    const dex = Number(img.dataset.spriteDex);
+    const shiny = img.dataset.spriteShiny === '1';
+    const urls = pokemonSpriteFallbacks(dex, shiny);
+    const nextIdx = Number(img.dataset.spriteStep || 0) + 1;
+    if (nextIdx < urls.length) {
+        img.dataset.spriteStep = String(nextIdx);
+        img.src = urls[nextIdx];
+        return;
+    }
+    img.dataset.spriteDex = '';
+    if (img.dataset.spriteFallbackText) {
+        img.replaceWith(document.createTextNode(img.dataset.spriteFallbackText));
+    } else {
+        img.hidden = true;
+    }
+}, true);
 
 function labelPokemonDetail(key) {
     if (POKEMON_DETAIL_LABELS[key]) return POKEMON_DETAIL_LABELS[key];
@@ -1964,14 +2066,23 @@ function buildToastCard(card) {
     wrap.className = 'toast-card';
     const art = document.createElement('div');
     art.className = 'toast-card-art';
-    if (card.sprite) {
+    const dex = resolvePokemonSpriteDex(card.speciesId, card.name, card.spriteDex);
+    const spriteSrc = card.sprite || pokemonSpriteUrl(card.speciesId, true, dex, card.name);
+    if (spriteSrc) {
         const img = document.createElement('img');
-        img.src = card.sprite;
+        img.src = spriteSrc;
         img.alt = '';
-        img.addEventListener('error', () => {
-            img.remove();
-            art.prepend('★');
-        });
+        if (dex > 0) {
+            img.dataset.spriteDex = String(dex);
+            img.dataset.spriteShiny = '1';
+            img.dataset.spriteStep = '0';
+            img.dataset.spriteFallbackText = '★';
+        } else {
+            img.addEventListener('error', () => {
+                img.remove();
+                art.prepend('★');
+            });
+        }
         art.append(img);
     } else {
         art.textContent = '★';
@@ -2245,16 +2356,19 @@ function processActivityToasts(allSnaps) {
                 .filter((sh) => Number(sh?.ts || 0) > base.lastOwnShinyTs)
                 .reverse();
             for (const sh of fresh) {
+                const shDex = resolvePokemonSpriteDex(sh.speciesId, sh.name, sh.spriteDex);
                 showToast({
                     kind: 'shiny',
                     title: `Shiny capturado · ${accLabel}`,
                     account: acc,
                     event: 'shinyCaught',
                     card: {
-                        sprite: pokemonSpriteUrl(sh.speciesId, true),
+                        speciesId: sh.speciesId,
+                        spriteDex: shDex,
+                        sprite: pokemonSpriteUrl(sh.speciesId, true, shDex, sh.name),
                         name: sh.name,
                         level: sh.level,
-                        subtitle: [sh.hunt ? `Hunt ${sh.hunt}` : '', sh.speciesId ? `#${sh.speciesId}` : ''].filter(Boolean).join(' · '),
+                        subtitle: [sh.hunt ? `Hunt ${sh.hunt}` : '', shDex ? `#${shDex}` : (sh.speciesId ? `#${sh.speciesId}` : '')].filter(Boolean).join(' · '),
                         rows: sh.details,
                     },
                 });
@@ -2275,12 +2389,15 @@ function processActivityToasts(allSnaps) {
             lastServerShinyToastKey = shinyKey;
         } else if (shinyKey !== lastServerShinyToastKey) {
             lastServerShinyToastKey = shinyKey;
+            const nsDex = resolvePokemonSpriteDex(newestShiny.speciesId, newestShiny.name, newestShiny.spriteDex);
             showToast({
                 kind: 'shiny',
                 title: 'Shiny no servidor',
                 duration: 9_000,
                 card: {
-                    sprite: pokemonSpriteUrl(newestShiny.speciesId, true),
+                    speciesId: newestShiny.speciesId,
+                    spriteDex: nsDex,
+                    sprite: pokemonSpriteUrl(newestShiny.speciesId, true, nsDex, newestShiny.name),
                     name: newestShiny.name,
                     subtitle: `${newestShiny.egg ? 'Chocado de ovo' : 'Capturado'} por ${newestShiny.trainer}`,
                 },
@@ -2434,7 +2551,7 @@ function renderUpdateUi(st) {
     const btnCheck = $('btnUpdateCheck');
     const brandVer = document.querySelector('.brand-ver');
 
-    const curVer = st.currentVersion || '1.0.8';
+    const curVer = st.currentVersion || '1.0.9';
     const shortCur = curVer.replace(/\.0$/, '');
     if (brandVer) brandVer.textContent = `v${shortCur}`;
     document.title = `Nexo PokeBot v${shortCur}`;

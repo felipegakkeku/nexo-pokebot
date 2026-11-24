@@ -733,12 +733,34 @@
         ? data.huntGuide?.note ?? 'Use Jogar com o bot em um perfil com a extensão /hunt.'
         : '';
 
-      const spKey = pk ? `${pk.speciesId}:${pk.shiny ? 1 : 0}` : '';
+      const spDex = Number(pk?.spriteDex) || (() => {
+        let id = Number(pk?.speciesId || 0);
+        if (!Number.isInteger(id) || id <= 0) return 0;
+        if (id >= 10501 && id <= 10548) id -= 8500;
+        if (id === 8017 || id === 9017 || id === 12017) return 1017;
+        if (id === 10001) return 9;
+        if (id <= 1025) return id;
+        const mod = id % 1000;
+        return mod >= 1 && mod <= 999 ? mod : 0;
+      })();
+      const spKey = pk && spDex > 0 ? `${spDex}:${pk.shiny ? 1 : 0}` : '';
       if (spKey && spKey !== lastSpriteKey) {
         lastSpriteKey = spKey;
         const box = document.getElementById('pokeSprite');
-        const shinySeg = pk.shiny ? 'shiny/' : '';
-        box.innerHTML = `<img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${shinySeg}${pk.speciesId}.png" alt="${pk.name}" onerror="this.remove()" />`;
+        const base = 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon';
+        const urls = pk.shiny
+          ? [`${base}/shiny/${spDex}.png`, `${base}/other/home/shiny/${spDex}.png`, `${base}/other/official-artwork/shiny/${spDex}.png`, `${base}/${spDex}.png`]
+          : [`${base}/${spDex}.png`, `${base}/other/home/${spDex}.png`, `${base}/other/official-artwork/${spDex}.png`];
+        const img = document.createElement('img');
+        let step = 0;
+        img.src = urls[0];
+        img.alt = pk.name || '';
+        img.onerror = () => {
+          step += 1;
+          if (step < urls.length) img.src = urls[step];
+          else img.remove();
+        };
+        box.replaceChildren(img);
       }
 
       const hunts = data.hunts || [];

@@ -23,6 +23,7 @@ import {
     createStateMerger,
     createFieldTracker,
     isWildCampoMob,
+    resolvePokemonSpriteDex,
     evaluateHeadlessTick,
     computeModeWarnings,
 } from './protocol-engine.mjs';
@@ -567,7 +568,14 @@ function ingestWelcomeCatalog(welcomeMsg, catalog) {
         let primaryWeight = -1;
         for (const sp of especies) {
             if (!sp || sp.pokeId == null) continue;
-            if (sp.nome) catalog.pokemonNames[sp.pokeId] = String(sp.nome);
+            if (sp.nome) {
+                catalog.pokemonNames[sp.pokeId] = String(sp.nome);
+                const dex = resolvePokemonSpriteDex(sp.pokeId, sp.nome);
+                if (dex > 0) {
+                    catalog.pokemonDexByName ??= {};
+                    catalog.pokemonDexByName[String(sp.nome).trim().toLowerCase()] = dex;
+                }
+            }
             const weight = Number(sp.pontos || 0);
             if (primarySpecies == null || weight > primaryWeight) {
                 primarySpecies = sp.pokeId;
@@ -2859,9 +2867,12 @@ export function createHeadlessController(options = {}) {
                 pushLog(isShiny ? 'shiny' : 'catch', `Capturado${isShiny ? ' SHINY' : ''}: ${name} (Nv ${level})`);
                 if (isShiny) {
                     const curSlug = merger.getState()?.huntSlug || '';
+                    const spId = Number(e.pokemon?.speciesId) || null;
+                    const spriteDex = resolvePokemonSpriteDex(spId, name, catalog.pokemonDexByName) || null;
                     ownShinies.unshift({
                         ts,
-                        speciesId: Number(e.pokemon?.speciesId) || null,
+                        speciesId: spId,
+                        spriteDex,
                         name,
                         level,
                         hunt: curSlug ? (catalog.huntNames?.[curSlug] || curSlug) : '',
@@ -2927,7 +2938,9 @@ export function createHeadlessController(options = {}) {
         }
 
         if (m.t === 'shiny.captura' && typeof m.pokemon?.nome === 'string') {
-            recentShinies.unshift({ ts: lastMsgAt, name: m.pokemon.nome, speciesId: Number(m.pokemon.speciesId ?? m.pokemon.pokeId) || null, trainer: m.nick || 'Desconhecido', egg: Boolean(m.ovo) });
+            const spId = Number(m.pokemon.speciesId ?? m.pokemon.pokeId) || null;
+            const spriteDex = resolvePokemonSpriteDex(spId, m.pokemon.nome, catalog.pokemonDexByName) || null;
+            recentShinies.unshift({ ts: lastMsgAt, name: m.pokemon.nome, speciesId: spId, spriteDex, trainer: m.nick || 'Desconhecido', egg: Boolean(m.ovo) });
             if (recentShinies.length > 30) recentShinies.pop();
             return;
         }
@@ -4308,6 +4321,7 @@ export function createHeadlessController(options = {}) {
             activePokemon: active ? {
                 id: active.id,
                 speciesId: Number(active.speciesId || 0),
+                spriteDex: resolvePokemonSpriteDex(active.speciesId, active.nome || active.name || catalog.pokemonNames?.[active.speciesId] || '', catalog.pokemonDexByName) || null,
                 name: active.nome || active.name || catalog.pokemonNames?.[active.speciesId] || `#${active.speciesId ?? '?'}`,
                 level: Number(active.level || 0),
                 hp: Number(active.hp || 0),

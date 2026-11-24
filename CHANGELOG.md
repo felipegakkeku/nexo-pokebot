@@ -2,6 +2,13 @@
 
 Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova versão (o workflow usa o texto da seção como nota da Release).
 
+## 1.0.9
+
+Correção definitiva das fotos/sprites de Pokémon e Shinies em todo o Hub, notificações, Mini-HUD e Painel Web:
+
+- **Conversão completa dos IDs internos do PokeIdle para a National Dex (`src/headless/protocol-engine.mjs`, `gui-server.mjs`, `renderer.js`, `hub-ui.js`, `minihud.js`, `gui-dashboard.html`)**: resolve automaticamente Pokémon de Hoenn e gerações seguintes (`13xxx`, como Snorunt `#13361 -> #361`), todas as 58 variantes de Outland (`2001..2058` e legadas `10501..10547`, como Ancient Pupitar `#2033 -> #247`), Megas (`3xxx`, `9xxx`, `14xxx`), formas regionais/especiais (`1479`, `4xxx..12xxx`, Ogerpon `8017/9017/12017 -> #1017`) e fallback por nome quando o anúncio não informa `speciesId`.
+- **Fallback automático em 4 níveis para sprites**: se um sprite pixel falhar ao carregar, qualquer imagem de Pokémon no Hub (abas, Desempenho, Atividade, toasts, Painéis, Headless, barra do jogo e Mini-HUD) tenta automaticamente `other/home/shiny`, `other/official-artwork/shiny` e sprite normal antes de desistir, sem quebrar ícones.
+
 ## 1.0.8
 
 Correção de falso positivo no alerta **"Shiny visto e não capturado"** e controle de **volume individual por alerta**:

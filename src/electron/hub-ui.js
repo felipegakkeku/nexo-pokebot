@@ -131,7 +131,11 @@
             <div class="hero-top"><span class="hero-lbl">${IC('sparkles')}Shinies</span></div>
             <div class="hero-val">${Number(st.shiniesCaptured || 0)}<small> / ${Number(st.shiniesSeen || 0)} vistos</small></div>
             <div class="hero-sprites">${own.length
-                ? own.map((o) => `<img src="${pokemonSpriteUrl(o.speciesId, true)}" alt="${esc(o.name)}" title="${esc(o.name)} · ${relTime(o.ts)}" loading="lazy" />`).join('')
+                ? own.map((o) => {
+                    const dex = resolvePokemonSpriteDex(o.speciesId, o.name, o.spriteDex);
+                    const url = pokemonSpriteUrl(o.speciesId, true, dex, o.name);
+                    return url ? `<img src="${url}" data-sprite-dex="${dex}" data-sprite-shiny="1" alt="${esc(o.name)}" title="${esc(o.name)} · ${relTime(o.ts)}" loading="lazy" />` : '';
+                }).join('')
                 : '<span class="hero-sub">Nenhum capturado ainda</span>'}${missed ? `<span class="miss-tag" title="Vistos e não capturados">${missed} escap${missed > 1 ? 'aram' : 'ou'}</span>` : ''}</div>
           </div>`;
     }
@@ -179,9 +183,7 @@
             const img = $(`tabSprite-${acc}`);
             const poke = s.activePokemon;
             if (img) {
-                const src = poke?.speciesId ? pokemonSpriteUrl(poke.speciesId, poke.shiny) : '';
-                if (src && img.dataset.src !== src) { img.dataset.src = src; img.src = src; }
-                img.hidden = !src;
+                setPokemonSpriteImg(img, poke?.speciesId, poke?.shiny, poke?.spriteDex, poke?.name);
             }
             const st = s.stats || {};
             const hunt = s.trainer?.huntName && s.trainer.huntName !== '-' ? s.trainer.huntName : '';
@@ -254,9 +256,7 @@
         q('.sl-pill').className = `sl-pill ${status}`;
         q('.sl-hunt').textContent = [hunt ? `Hunt ${hunt}` : 'Sem hunt', s.trainer?.level ? `Nv ${s.trainer.level}` : '', s.trainer?.gold != null ? `${fmtCompact(s.trainer.gold)} gold` : '', s.huntGuide?.note ? `/hunt: ${s.huntGuide.note}` : ''].filter(Boolean).join(' · ');
         const img = q('.sl-sprite');
-        const src = poke?.speciesId ? pokemonSpriteUrl(poke.speciesId, poke.shiny) : '';
-        if (img.dataset.src !== src) { img.dataset.src = src; if (src) img.src = src; }
-        img.hidden = !src;
+        setPokemonSpriteImg(img, poke?.speciesId, poke?.shiny, poke?.spriteDex, poke?.name);
         const hp = poke ? Math.max(0, Math.min(100, Number(poke.hpPercent || 0))) : 0;
         q('.sl-ring').style.setProperty('--hp', `${hp}`);
         q('.sl-ring').className = `sl-ring ${hp > 50 ? 'ok' : hp > 20 ? 'mid' : 'low'}`;
@@ -332,9 +332,7 @@
         const poke = s.activePokemon;
         hud.querySelector('.acc-dot').className = `acc-dot ${statusOf(acc)}`;
         const img = hud.querySelector('.hud-sprite');
-        const src = poke?.speciesId ? pokemonSpriteUrl(poke.speciesId, poke.shiny) : '';
-        if (img.dataset.src !== src) { img.dataset.src = src; if (src) img.src = src; }
-        img.hidden = !src;
+        setPokemonSpriteImg(img, poke?.speciesId, poke?.shiny, poke?.spriteDex, poke?.name);
         hud.querySelector('.hud-poke b').textContent = poke ? `${poke.name} ${poke.level}` : nickOf(acc);
         const hp = poke ? Number(poke.hpPercent || 0) : 0;
         const bar = hud.querySelector('.hud-hp i');
@@ -1078,7 +1076,11 @@
             if (d.kills < 0 || d.xp < 0) continue; // sessão foi zerada no meio
             if (!d.kills && !d.xp && !d.caps) continue;
             rows.push(`<tr><th>${acc} · ${escapeHtml(nickOf(acc))}</th><td>${fmtCompact(d.xp)}</td><td class="${d.gold < 0 ? 'neg' : 'pos'}">${signed(d.gold)}</td><td>${fmtCompact(d.kills)}</td><td>${fmtCompact(d.caps)}</td></tr>`);
-            for (const o of s.ownShinies || []) if (Number(o.ts) > since) highlights.push({ ts: o.ts, cls: 'shiny', icon: 'star', html: `<img src="${pokemonSpriteUrl(o.speciesId, true)}" alt="" /><span><b>${escapeHtml(o.name)}</b> capturado · Conta ${acc}</span>` });
+            for (const o of s.ownShinies || []) if (Number(o.ts) > since) {
+                const dex = resolvePokemonSpriteDex(o.speciesId, o.name, o.spriteDex);
+                const url = pokemonSpriteUrl(o.speciesId, true, dex, o.name);
+                highlights.push({ ts: o.ts, cls: 'shiny', icon: 'star', html: `${url ? `<img src="${url}" data-sprite-dex="${dex}" data-sprite-shiny="1" alt="" />` : ''}<span><b>${escapeHtml(o.name)}</b> capturado · Conta ${acc}</span>` });
+            }
             for (const m of s.missedShinies || []) if (Number(m.ts) > since) highlights.push({ ts: m.ts, cls: 'miss', icon: 'alert', html: `<span><b>${escapeHtml(m.name || 'Shiny')}</b> escapou · Conta ${acc}</span>` });
         }
         for (const e of eventLog) {
