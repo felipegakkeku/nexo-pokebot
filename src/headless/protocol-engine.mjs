@@ -132,6 +132,8 @@ export function createStateMerger() {
 export function createFieldTracker() {
     const mobs = new Map();
     let serverNow = Date.now();
+    let lastBattleSlot = null;
+    let lastBattleSlotAt = 0;
 
     const applyCampo = (m, nowMs) => {
         serverNow = Number(m?.ts || nowMs || serverNow);
@@ -159,10 +161,48 @@ export function createFieldTracker() {
 
     const applyCampoInit = (m, nowMs) => {
         mobs.clear();
+        lastBattleSlot = null;
+        lastBattleSlotAt = 0;
         serverNow = Number(m?.ts || nowMs || Date.now());
         if (m?.mobs || m?.fora) {
             applyCampo(m, nowMs);
         }
+    };
+
+    const applyBattleEvent = (e, nowMs = Date.now()) => {
+        if (!e || typeof e !== 'object') return false;
+        const ts = Number(nowMs || Date.now());
+        const kind = e.k || e.t || e.tipo || e.acao;
+        if (kind === 'ataque' && e.slot != null) {
+            lastBattleSlot = e.slot;
+            lastBattleSlotAt = ts;
+            return false;
+        }
+        if (kind === 'morte' && e.quem === 'selvagem' && !e.safari) {
+            const usedFallbackSlot = e.slot == null;
+            const slot = e.slot != null
+                ? e.slot
+                : (lastBattleSlot != null && ts - lastBattleSlotAt <= 15_000 ? lastBattleSlot : null);
+            if (slot == null) return false;
+            if (usedFallbackSlot) lastBattleSlot = null;
+            const prev = mobs.get(slot) || {};
+            if (prev.morto && Number(prev.expiraEm || 0) > ts) return false;
+            mobs.set(slot, {
+                ...prev,
+                slot,
+                nome: e.nome ?? prev.nome ?? '',
+                level: Number(e.level ?? e.nivel ?? prev.level ?? 1) || 1,
+                shiny: e.shiny !== undefined ? Boolean(e.shiny) : Boolean(prev.shiny),
+                morto: true,
+                ehTreinador: false,
+                expiraEm: ts + Number(e.xr || 25_000),
+            });
+            return true;
+        }
+        if (kind === 'bola' || kind === 'capturado' || kind === 'fugiu') {
+            if (e.slot != null) mobs.delete(e.slot);
+        }
+        return false;
     };
 
     const getFallenCorpses = (nowMs = serverNow, prioritizeExpiring = true) => {
@@ -193,9 +233,13 @@ export function createFieldTracker() {
     };
 
     const getMobs = () => [...mobs.values()];
-    const reset = () => mobs.clear();
+    const reset = () => {
+        mobs.clear();
+        lastBattleSlot = null;
+        lastBattleSlotAt = 0;
+    };
 
-    return { applyCampoInit, applyCampo, getFallenCorpses, getMobs, reset };
+    return { applyCampoInit, applyCampo, applyBattleEvent, getFallenCorpses, getMobs, reset };
 }
 
 const SHINY_BALL_ORDERS = {

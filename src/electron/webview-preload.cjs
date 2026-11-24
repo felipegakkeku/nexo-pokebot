@@ -14,6 +14,9 @@ const MAIN_WORLD_HOOK = `(() => {
         }
     };
 
+    window.__pbNeedCampoFeed = true;
+
+    const origSend = NativeWS.prototype.send;
     const bindSocket = (sock) => {
         try {
             if (!sock || sock.__pbBound || !isPokeWsUrl(sock.url)) return;
@@ -24,13 +27,44 @@ const MAIN_WORLD_HOOK = `(() => {
                 if (!ev.data.includes('"t":')) return;
                 window.postMessage({ __pbHub: 'ws-frame', data: ev.data }, '*');
             });
+            if (window.__pbNeedCampoFeed !== false && sock.readyState === 1) {
+                try {
+                    origSend.call(sock, JSON.stringify({ t: 'cliente.economia', ativo: false }));
+                } catch {}
+            }
         } catch {}
     };
 
-    const origSend = NativeWS.prototype.send;
-    NativeWS.prototype.send = function () {
+    NativeWS.prototype.send = function (data) {
         bindSocket(this);
+        try {
+            if (
+                window.__pbNeedCampoFeed !== false &&
+                isPokeWsUrl(this?.url) &&
+                typeof data === 'string' &&
+                data.includes('"cliente.economia"') &&
+                data.includes('true')
+            ) {
+                const parsed = JSON.parse(data);
+                if (parsed && parsed.t === 'cliente.economia' && parsed.ativo === true) {
+                    // Mantem o Modo Economia visual do jogo (canvas desligado / 0% GPU),
+                    // mas preserva o feed leve de caidos no servidor para o Auto-Catch lancar Pokebolas.
+                    return origSend.call(this, JSON.stringify({ t: 'cliente.economia', ativo: false }));
+                }
+            }
+        } catch {}
         return origSend.apply(this, arguments);
+    };
+
+    window.__pbSetNeedCampoFeed = (need) => {
+        const next = Boolean(need);
+        const prev = window.__pbNeedCampoFeed !== false;
+        window.__pbNeedCampoFeed = next;
+        if (next && !prev && window.__pbGameWs && window.__pbGameWs.readyState === 1) {
+            try {
+                origSend.call(window.__pbGameWs, JSON.stringify({ t: 'cliente.economia', ativo: false }));
+            } catch {}
+        }
     };
 
     if (typeof NativeWS === 'function') {

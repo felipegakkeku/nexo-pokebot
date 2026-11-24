@@ -2852,3 +2852,146 @@ test('updater: semver, selecao de ZIP, checkForUpdate, script seguro e staging d
         rmSync(dir, { recursive: true, force: true });
     }
 });
+
+test('modo economia: Auto-Catch lanca pokebola via eventos batalha no headless e preserva feed campo no jogo embutido', async () => {
+    // 1) createFieldTracker.applyBattleEvent registra caido pelo slot do ataque + morte e limpa no bola/fugiu
+    const trackerField = createFieldTracker();
+    assert.equal(trackerField.applyBattleEvent({ k: 'ataque', por: 'jogador', slot: 4 }, 10_000), false);
+    assert.equal(trackerField.applyBattleEvent({ k: 'morte', quem: 'selvagem', nome: 'Zubat', level: 18 }, 10_200), true);
+    const corpses = trackerField.getFallenCorpses(10_500);
+    assert.equal(corpses.length, 1);
+    assert.equal(corpses[0].slot, 4);
+    assert.equal(corpses[0].nome, 'Zubat');
+    assert.equal(corpses[0].level, 18);
+    // Morte subsequente sem novo ataque nao reaproveita slot stale
+    assert.equal(trackerField.applyBattleEvent({ k: 'morte', quem: 'selvagem', nome: 'Outro', level: 19 }, 10_600), false);
+    // Evento bola (mesmo sucesso: false) remove o caido consumido
+    trackerField.applyBattleEvent({ k: 'bola', sucesso: false, slot: 4, ballId: 1 }, 10_800);
+    assert.equal(trackerField.getFallenCorpses(10_900).length, 0);
+
+    // 2) Headless com economyMode: 'on' (sem frames campo) lanca ball.throw ao receber batalha (ataque + morte)
+    const dir = makeTempDir('pokebot-eco-catch-');
+    const sent = [];
+    let sock = null;
+    try {
+        const controller = createHeadlessController({
+            cwd: dir,
+            configPath: join(dir, '.pokebot-headless-config.json'),
+            disableBrowserProfileSync: true,
+            disableHeadlessHuntGuide: true,
+            disableVotePolling: true,
+            initialConfig: {
+                economyMode: 'on',
+                caidosEnabled: true,
+                preferredBall: 'ultra',
+                restockEnabled: false,
+                dailyPassEnabled: false,
+                preyEnabled: false,
+                liveEnabled: false,
+                ensureNativeAutoHeal: false,
+            },
+            liveRunner: async () => {},
+            liveDisposer: () => {},
+            resolveSession: () => ({
+                nick: 'EcoCatcher',
+                token: makeFakeJwt({ nick: 'EcoCatcher', exp: Date.now() + 3_600_000 }),
+                dispositivo: 'uuid-eco',
+                prefs: {},
+                payload: { nick: 'EcoCatcher', exp: Date.now() + 3_600_000 },
+                source: 'mock',
+            }),
+            wsFactory: () => {
+                sock = {
+                    readyState: 1,
+                    send(raw) { sent.push(JSON.parse(raw)); },
+                    close() { this.readyState = 3; },
+                };
+                queueMicrotask(() => {
+                    sock.onopen?.();
+                    sock.onmessage?.({
+                        data: JSON.stringify({
+                            t: 'welcome',
+                            hunts: [],
+                            estado: {
+                                cheio: true,
+                                nick: 'EcoCatcher',
+                                level: 30,
+                                gold: 100_000,
+                                huntSlug: 'floresta',
+                                balls: { 1: 50, 4: 20 },
+                                items: {},
+                                automation: { autoRevive: true, autoPotion: true, autoVoltarHunt: true },
+                                pokemons: [{ id: 1, level: 30 }],
+                            },
+                        }),
+                    });
+                });
+                return sock;
+            },
+        });
+        try {
+            controller.start();
+            await new Promise((r) => setTimeout(r, 30));
+            assert.ok(sent.some((f) => f.t === 'cliente.economia' && f.ativo === true));
+            // Nenhum frame campo chega; apenas batalha (ataque com slot + morte selvagem)
+            sock.onmessage?.({
+                data: JSON.stringify({
+                    t: 'batalha',
+                    ev: [
+                        { k: 'ataque', por: 'jogador', slot: 9 },
+                        { k: 'morte', quem: 'selvagem', nome: 'Haunter', level: 28, xpPokemon: 200, ouro: 50 },
+                    ],
+                }),
+            });
+            assert.ok(
+                sent.some((f) => f.t === 'ball.throw' && f.slot === 9 && f.ballId === 4),
+                'Headless em economia do servidor deve lancar ball.throw via eventos de batalha'
+            );
+        } finally {
+            controller.stop();
+        }
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+
+    // 3) webview-preload.cjs: preserva cliente.economia=false no fio quando Auto-Catch ativo e libera quando desligado
+    const preloadSrc = readFileSync(join(process.cwd(), 'src', 'electron', 'webview-preload.cjs'), 'utf8');
+    const hookMatch = preloadSrc.match(/const MAIN_WORLD_HOOK = `([\s\S]*?)`;/);
+    assert.ok(hookMatch, 'MAIN_WORLD_HOOK deve existir em webview-preload.cjs');
+    const hookCode = hookMatch[1].replace(/\\\\/g, '\\');
+    const { runInNewContext } = await import('node:vm');
+    const wireSent = [];
+    class FakeWS {
+        constructor(url) {
+            this.url = url;
+            this.readyState = 0;
+        }
+        addEventListener() {}
+        send(data) { wireSent.push(JSON.parse(String(data))); }
+    }
+    const sandboxWindow = {
+        WebSocket: FakeWS,
+        location: { hostname: 'pokeidle.io' },
+        localStorage: { getItem: () => null },
+        postMessage() {},
+    };
+    sandboxWindow.window = sandboxWindow;
+    sandboxWindow.setInterval = () => 0;
+    sandboxWindow.setTimeout = () => 0;
+    runInNewContext(hookCode, sandboxWindow);
+
+    const gameWs = new sandboxWindow.WebSocket('wss://pokeidle.io/ws');
+    gameWs.readyState = 1;
+    // Jogo ativa Modo Economia com Auto-Catch ligado -> envia ativo: false no fio
+    gameWs.send(JSON.stringify({ t: 'cliente.economia', ativo: true }));
+    assert.deepEqual(wireSent[0], { t: 'cliente.economia', ativo: false });
+
+    // Usuario desliga Capturar caidos -> jogo consegue enviar ativo: true normalmente
+    sandboxWindow.__pbSetNeedCampoFeed(false);
+    gameWs.send(JSON.stringify({ t: 'cliente.economia', ativo: true }));
+    assert.deepEqual(wireSent[1], { t: 'cliente.economia', ativo: true });
+
+    // Usuario religa Capturar caidos -> preload reenvia ativo: false imediatamente
+    sandboxWindow.__pbSetNeedCampoFeed(true);
+    assert.deepEqual(wireSent[2], { t: 'cliente.economia', ativo: false });
+});

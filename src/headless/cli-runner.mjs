@@ -498,8 +498,13 @@ export async function runHeadlessFarm(argv = process.argv.slice(2), options = {}
             const eventos = Array.isArray(msg.ev)
                 ? msg.ev
                 : (Array.isArray(msg.eventos) ? msg.eventos : (msg.evento ? [msg.evento] : [msg]));
+            const ts = Date.now();
+            let addedCorpse = false;
             for (const e of eventos) {
                 if (!e || typeof e !== 'object') continue;
+                if (field.applyBattleEvent?.(e, ts)) {
+                    addedCorpse = true;
+                }
                 const kind = e.k || e.t || e.tipo || e.acao || e.evento;
                 if (kind === 'ataque') {
                     stats.attacks += 1;
@@ -519,6 +524,9 @@ export async function runHeadlessFarm(argv = process.argv.slice(2), options = {}
                     const level = e.pokemon?.level ?? e.pokemon?.nivel ?? '?';
                     console.log(`[Headless] Capturado${isShiny ? ' SHINY' : ''}: ${name} (Nv ${level})`);
                 }
+            }
+            if (addedCorpse && config.caidosEnabled !== false) {
+                runTickForState(merger.getState());
             }
         };
 

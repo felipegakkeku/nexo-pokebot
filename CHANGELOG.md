@@ -2,6 +2,13 @@
 
 Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova versão (o workflow usa o texto da seção como nota da Release).
 
+## 1.0.3
+
+Correção de captura automática (**Auto-Catch**) com o **Modo Economia / ULTRA Economia** do PokeIdle ativado:
+
+- **Auto-Catch ativo no Modo Economia / ULTRA Economia do jogo (`src/electron/webview-preload.cjs`, `src/electron/renderer.js`, `src/headless/gui-server.mjs`)**: mantém o canvas local do PokeIdle 100% desligado (0% GPU) quando o jogador ativa o Modo Economia do jogo, mas preserva o feed leve de caídos do servidor sempre que "Capturar Pokémon caídos" estiver ligado, garantindo o arremesso de Pokébolas (incluindo shinies).
+- **Fallback por eventos de batalha no Modo Headless (`src/headless/protocol-engine.mjs`, `src/headless/gui-server.mjs`, `src/headless/cli-runner.mjs`)**: quando `cliente.economia: true` está ativo no servidor e os frames `campo` são omitidos, o rastreador de campo passa a identificar o slot caído pelos eventos `batalha` (`ataque` + `morte`) e disparar `ball.throw` automaticamente.
+
 ## 1.0.2
 
 Popups leves direto na HUD para **Vote & Ganhe** e **Caixinha +50 da Twitch** sem abrir navegador externo nem player de vídeo:

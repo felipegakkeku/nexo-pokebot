@@ -137,6 +137,8 @@ async function openEmbeddedForAccount(acc) {
     let seedDone = false;
     wv.addEventListener('dom-ready', async () => {
         try { wv.setAudioMuted(true); } catch { /* ignore */ }
+        const needCampo = snapshots[acc]?.config?.caidosEnabled !== false;
+        wv.executeJavaScript(`window.__pbSetNeedCampoFeed && window.__pbSetNeedCampoFeed(${JSON.stringify(needCampo)})`).catch(() => {});
         if (!seedDone && res.seedSession) {
             seedDone = true;
             const script = buildSeedJs(res.seedSession);
@@ -319,6 +321,10 @@ async function saveConfig() {
     };
     setConfigDirty(false);
     const res = await sendAction('set-config', { config });
+    const activeWv = webviews.get(activeAccount);
+    if (activeWv) {
+        activeWv.executeJavaScript(`window.__pbSetNeedCampoFeed && window.__pbSetNeedCampoFeed(${JSON.stringify(Boolean(config.caidosEnabled))})`).catch(() => {});
+    }
     if (res?.ok) {
         $('cfgHint').textContent = 'Alterações salvas';
     }
@@ -1123,7 +1129,7 @@ function renderUpdateUi(st) {
     const btnCheck = $('btnUpdateCheck');
     const brandVer = document.querySelector('.brand-ver');
 
-    const curVer = st.currentVersion || '1.0.2';
+    const curVer = st.currentVersion || '1.0.3';
     const shortCur = curVer.replace(/\.0$/, '');
     if (brandVer) brandVer.textContent = `v${shortCur}`;
     document.title = `Nexo PokeBot v${shortCur}`;

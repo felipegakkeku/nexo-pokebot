@@ -1396,6 +1396,7 @@ export async function trySilentProfileCookieSync(options = {}) {
 const BROWSER_BRIDGE_HOOK_SCRIPT = `(() => {
     if (!window.__pbBridgeTap) {
         window.__pbBridgeTap = true;
+        window.__pbNeedCampoFeed = true;
         const origSend = WebSocket.prototype.send;
         const capture = (sock) => {
             try {
@@ -1406,6 +1407,20 @@ const BROWSER_BRIDGE_HOOK_SCRIPT = `(() => {
         };
         WebSocket.prototype.send = function(data) {
             capture(this);
+            try {
+                if (
+                    window.__pbNeedCampoFeed !== false &&
+                    /pokeidle\\.io/i.test(String(this?.url || '')) &&
+                    typeof data === 'string' &&
+                    data.includes('"cliente.economia"') &&
+                    data.includes('true')
+                ) {
+                    const parsed = JSON.parse(data);
+                    if (parsed && parsed.t === 'cliente.economia' && parsed.ativo === true) {
+                        return origSend.call(this, JSON.stringify({ t: 'cliente.economia', ativo: false }));
+                    }
+                }
+            } catch {}
             return origSend.apply(this, arguments);
         };
         const NativeWS = window.WebSocket;
@@ -2563,8 +2578,12 @@ export function createHeadlessController(options = {}) {
             ? msg.ev
             : (Array.isArray(msg.eventos) ? msg.eventos : [msg]);
         const ts = nowFn();
+        let addedCorpse = false;
         for (const e of eventos) {
             if (!e || typeof e !== 'object') continue;
+            if (field.applyBattleEvent?.(e, ts)) {
+                addedCorpse = true;
+            }
             const kind = e.k || e.t || e.tipo || e.acao;
             if (kind === 'ataque') {
                 stats.attacks += 1;
@@ -2630,6 +2649,9 @@ export function createHeadlessController(options = {}) {
                 pushLog('reward', `+${qtd} diamante${qtd === 1 ? '' : 's'} creditado${qtd === 1 ? '' : 's'} pelo voto no IdleHub.io!`);
                 void refreshVoteStatus({ force: true });
             }
+        }
+        if (addedCorpse && config.caidosEnabled !== false) {
+            runTickForState(merger.getState());
         }
     };
 
@@ -3955,7 +3977,7 @@ export function createHeadlessController(options = {}) {
             : (config.browserProfile && activeExistingProfile?.id ? activeExistingProfile.id : (config.browserProfile || ''));
 
         return {
-            version: '1.0.2',
+            version: '1.0.3',
             status,
             mode: connectionMode,
             lastError,
