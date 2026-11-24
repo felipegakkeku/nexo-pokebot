@@ -1238,11 +1238,31 @@ const ALERT_DEFAULTS = {
     chest: { enabled: false, toast: true, os: false },
     vote: { enabled: false, toast: true, os: false },
 };
+// Sons padrao por alerta (baixados e cacheados localmente em .pokebot-sounds na primeira execucao).
+const DEFAULT_SOUND_PRESETS = {
+    shinyMiss: {
+        url: 'https://www.myinstants.com/pt/instant/pokemon-escape-27107/',
+        title: 'Pokemon Escape',
+    },
+    shinyCaught: {
+        url: 'https://www.myinstants.com/pt/instant/pokemon-item-received-55816/',
+        title: 'Pokemon Item Received',
+    },
+    rareDrop: {
+        url: 'https://www.myinstants.com/pt/instant/ex-pull-36121/',
+        title: 'Ex Pull',
+    },
+    error: {
+        url: 'https://www.myinstants.com/pt/instant/low-hp-pokemon-64176/',
+        title: 'Low HP Pokemon',
+    },
+};
 const SOUND_MAX_BYTES = 5 * 1024 * 1024;
 const SOUND_TICK_MS = 2_000;
 const SOUND_EXT_BY_TYPE = { 'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/ogg': 'ogg', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav', 'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a', 'audio/aac': 'aac', 'audio/webm': 'webm' };
 const SOUND_MIME_BY_EXT = { mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', m4a: 'audio/mp4', aac: 'audio/aac', webm: 'audio/webm' };
 const SOUND_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
+const presetFetchInFlight = new Map();
 let soundTimer = null;
 let soundStartedAt = Date.now();
 let soundCfg = loadSoundCfg();
@@ -1285,6 +1305,8 @@ function publicSoundCfg() {
     const events = {};
     for (const ev of SOUND_EVENTS) {
         const e = soundCfg.events[ev] || {};
+        const preset = DEFAULT_SOUND_PRESETS[ev] || null;
+        const hasCustom = Boolean(e.file && existsSync(join(SOUND_DIR, e.file)));
         events[ev] = {
             enabled: e.enabled !== false,
             toast: e.toast !== false,
@@ -1292,9 +1314,12 @@ function publicSoundCfg() {
             volume: e.volume != null && Number.isFinite(Number(e.volume))
                 ? Math.min(1, Math.max(0, Number(e.volume)))
                 : 1,
-            url: e.url || '',
-            title: e.title || '',
-            custom: Boolean(e.file && existsSync(join(SOUND_DIR, e.file))),
+            url: hasCustom ? (e.url || '') : '',
+            title: hasCustom ? (e.title || '') : (preset?.title || ''),
+            defaultTitle: preset?.title || '',
+            defaultUrl: preset?.url || '',
+            custom: hasCustom,
+            hasAudio: Boolean(hasCustom || preset),
         };
     }
     return { enabled: soundCfg.enabled, volume: soundCfg.volume, events };
@@ -1390,8 +1415,59 @@ async function setSoundFromLink(event, url) {
     }
 }
 
-function soundDataUrl(event) {
-    const file = soundCfg.events[event]?.file;
+function findCachedPresetFile(event) {
+    const preset = DEFAULT_SOUND_PRESETS[event];
+    if (!preset?.url) return null;
+    const hash = createHash('sha1').update(String(preset.url)).digest('hex').slice(0, 10);
+    for (const ext of Object.keys(SOUND_MIME_BY_EXT)) {
+        const candidate = `preset-${event}-${hash}.${ext}`;
+        if (existsSync(join(SOUND_DIR, candidate))) return candidate;
+    }
+    return null;
+}
+
+async function ensureDefaultPresetFile(event) {
+    const preset = DEFAULT_SOUND_PRESETS[event];
+    if (!preset?.url) return null;
+    const cached = findCachedPresetFile(event);
+    if (cached) return cached;
+    if (presetFetchInFlight.has(event)) return presetFetchInFlight.get(event);
+    const task = (async () => {
+        try {
+            const { buf, ext } = await resolveSoundLink(preset.url);
+            mkdirSync(SOUND_DIR, { recursive: true });
+            const hash = createHash('sha1').update(String(preset.url)).digest('hex').slice(0, 10);
+            const file = `preset-${event}-${hash}.${ext}`;
+            writeFileSync(join(SOUND_DIR, file), buf);
+            return file;
+        } catch {
+            return null;
+        } finally {
+            presetFetchInFlight.delete(event);
+        }
+    })();
+    presetFetchInFlight.set(event, task);
+    return task;
+}
+
+function warmDefaultSounds() {
+    for (const ev of Object.keys(DEFAULT_SOUND_PRESETS)) {
+        const e = soundCfg.events[ev];
+        const hasCustom = Boolean(e?.file && existsSync(join(SOUND_DIR, e.file)));
+        if (!hasCustom && !findCachedPresetFile(ev)) {
+            void ensureDefaultPresetFile(ev);
+        }
+    }
+}
+
+async function soundDataUrl(event) {
+    let file = soundCfg.events[event]?.file || null;
+    if (file && !existsSync(join(SOUND_DIR, file))) {
+        file = null;
+    }
+    if (!file && DEFAULT_SOUND_PRESETS[event]) {
+        file = await ensureDefaultPresetFile(event);
+    }
     if (!file) return null;
     try {
         const ext = file.split('.').pop().toLowerCase();
@@ -2044,6 +2120,8 @@ app.whenReady().then(async () => {
     startAutoChestWatcher();
     startLiveWatchManager();
     startSoundWatcher();
+    const warmTimer = setTimeout(() => warmDefaultSounds(), 1500);
+    warmTimer.unref?.();
     updateBootTimer = setTimeout(() => {
         updateBootTimer = null;
         void runUpdateCheck();

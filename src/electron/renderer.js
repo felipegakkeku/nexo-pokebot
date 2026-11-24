@@ -750,8 +750,10 @@ function renderSoundCard() {
         if (evVolRow) evVolRow.classList.toggle('is-muted', ev.enabled === false);
         const cur = document.querySelector(`[data-snd-current="${event}"]`);
         if (cur) {
-            cur.textContent = ev.custom ? (ev.title || 'Som escolhido') : 'Som padrão';
-            cur.title = ev.custom ? ev.url : 'Bipe do Nexo';
+            cur.textContent = ev.custom
+                ? (ev.title || 'Som escolhido')
+                : (ev.defaultTitle ? `Padrão · ${ev.defaultTitle}` : 'Som padrão');
+            cur.title = ev.custom ? ev.url : (ev.defaultUrl || 'Bipe do Nexo');
             cur.classList.toggle('custom', Boolean(ev.custom));
         }
         const input = document.querySelector(`[data-snd-url="${event}"]`);
@@ -759,7 +761,7 @@ function renderSoundCard() {
     }
 }
 
-// Bipe padrao quando nao ha som escolhido: tres notas descendo ("perdeu").
+// Bipe de contingencia quando nao ha som padrao ou sem internet no primeiro cache.
 const DEFAULT_BEEPS = {
     shinyMiss: [880, 660, 440],
     shinyCaught: [523, 659, 784, 1047],
@@ -802,7 +804,7 @@ async function playSoundEvent(event, { force = false } = {}) {
     const eventVol = Math.min(1, Math.max(0, Number(ev?.volume ?? 1)));
     const volume = Math.min(1, Math.max(0, masterVol * eventVol));
     if (volume <= 0) return false;
-    if (ev?.custom) {
+    if (ev?.custom || ev?.hasAudio) {
         let src = soundDataCache.get(event);
         if (!src) {
             src = await window.pokeHub.getSoundData?.(event).catch(() => null);
@@ -894,7 +896,8 @@ async function initSoundControls() {
                 const input = document.querySelector(`[data-snd-url="${event}"]`);
                 if (input) { input.value = ''; delete input.dataset.touched; }
                 renderSoundCard();
-                setSoundStatus(event, 'Voltou para o som padrão.', 'ok');
+                const defTitle = soundCfg?.events?.[event]?.defaultTitle;
+                setSoundStatus(event, defTitle ? `Voltou para o padrão (${defTitle}).` : 'Voltou para o som padrão.', 'ok');
                 return;
             }
             if (act === 'save') {

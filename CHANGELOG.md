@@ -2,6 +2,10 @@
 
 Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova versão (o workflow usa o texto da seção como nota da Release).
 
+## Unreleased
+
+- **Novos sons padrão de alerta (`src/electron/main.mjs`, `src/electron/renderer.js`)**: os 4 alertas principais agora vêm pré-configurados com os sons do MyInstants (baixados e cacheados automaticamente em `.pokebot-sounds/` no primeiro uso, com fallback para bipe caso esteja sem internet): **Erro** (`Low HP Pokemon`), **Shiny capturado** (`Pokemon Item Received`), **Drop raro** (`Ex Pull`) e **Shiny fugiu** (`Pokemon Escape`).
+
 ## 1.0.9
 
 Correção definitiva das fotos/sprites de Pokémon e Shinies em todo o Hub, notificações, Mini-HUD e Painel Web:
