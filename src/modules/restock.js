@@ -12,6 +12,20 @@ const SEL_LOCAL = {
     categoryBtns: '#mk-corpo .mk-lado button.mk-cat',
     categoryText: '.mk-cat-txt',
     marketTab: (abaKey) => `#mk-modos .cmp-op[data-aba="${abaKey}"]`,
+    nativeAutoChecks: ['#auto-revive', '#auto-potion', '#auto-voltar-hunt'],
+};
+
+export const ensureNativeAutomations = ({ CONFIG, dom }) => {
+    if (CONFIG.restock?.ensureNativeAutoHeal === false) return 0;
+    let reenabled = 0;
+    for (const sel of SEL_LOCAL.nativeAutoChecks) {
+        const el = dom.$(sel);
+        if (el && el.checked === false && dom.isInteractable(el)) {
+            el.click();
+            reenabled++;
+        }
+    }
+    return reenabled;
 };
 
 const getVisibleMarketCards = ({ dom }) => dom.$$(SEL_LOCAL.marketCards).filter(dom.isInteractable);
@@ -78,6 +92,7 @@ const switchMarketCategory = async ({ CONFIG, dom, sleep, randomDelay }, categor
 
 export const smartRestock = async (ctx, { force = false } = {}) => {
     const { CONFIG, state, dom, sleep, randomDelay, withModalLock } = ctx;
+    ensureNativeAutomations(ctx);
     if (!CONFIG.restock.enabled && !force) return;
 
     const ballTier = dom.getTargetBallTier();

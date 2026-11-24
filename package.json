@@ -1,20 +1,49 @@
 {
-  "name": "pokebot",
-  "version": "6.6.0",
+  "name": "nexo-pokebot",
+  "version": "1.0.0",
   "private": true,
-  "description": "PokeBot - automação para o Pokeidle (userscript)",
+  "description": "Nexo PokeBot: Hub multi-contas, modo Eco headless e userscript desenvolvidos especificamente para o PokeIdle (pokeidle.io)",
+  "keywords": [
+    "pokeidle",
+    "poke-idle",
+    "poke-idle-world",
+    "pokeidle-io",
+    "pokebot",
+    "nexo-pokebot",
+    "pokeidle-bot",
+    "pokeidle-hub",
+    "pokeidle-automation",
+    "pokeidle-multi-account",
+    "pokegrid",
+    "pokeidle-deck",
+    "hunt-for-pokeidle",
+    "userscript",
+    "tampermonkey",
+    "electron",
+    "websocket"
+  ],
   "type": "module",
   "scripts": {
     "build": "node build.mjs",
     "test": "node --test tests/*.test.mjs",
     "check": "npm run lint && node build.mjs && node --test tests/*.test.mjs",
     "check-tag": "node build.mjs --check-tag",
-    "lint": "eslint src/modules"
+    "lint": "eslint src/modules src/headless src/desktop src/electron headless-farm.mjs",
+    "headless": "node headless-farm.mjs",
+    "headless:check": "node headless-farm.mjs --check-session",
+    "gui": "node src/headless/gui-server.mjs --open-app",
+    "hub": "node src/desktop/launch-hub.mjs",
+    "eco": "node src/headless/multi-daemon.mjs",
+    "brand:runtime": "node src/desktop/brand-runtime.mjs",
+    "build:exe": "node src/desktop/build-exe.mjs",
+    "package:friend": "node src/desktop/build-friend-zip.mjs"
   },
   "devDependencies": {
+    "electron": "^43.8.12",
     "esbuild": "^0.28.2",
     "eslint": "^9.39.5",
     "globals": "^17.14.0",
-    "jsdom": "^24.1.3"
+    "jsdom": "^24.1.3",
+    "resedit": "^3.1.1"
   }
 }

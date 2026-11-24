@@ -11,6 +11,51 @@
         }
     };
 
+    const gmFetch = (url, options = {}) => {
+        const gmReq = typeof GM_xmlhttpRequest === 'function' ? GM_xmlhttpRequest : window.GM_xmlhttpRequest;
+        if (typeof gmReq === 'function') {
+            return new Promise((resolve, reject) => {
+                gmReq({
+                    method: options.method || 'GET',
+                    url,
+                    headers: options.headers || {},
+                    data: options.body ?? undefined,
+                    timeout: options.timeoutMs || 15000,
+                    onload: (res) => {
+                        const textVal = res.responseText ?? '';
+                        resolve({
+                            ok: res.status >= 200 && res.status < 300,
+                            status: res.status,
+                            text: async () => textVal,
+                            json: async () => JSON.parse(textVal),
+                        });
+                    },
+                    onerror: (err) => reject(new Error(err?.error || 'GM_xmlhttpRequest failed')),
+                    ontimeout: () => reject(new Error('GM_xmlhttpRequest timeout')),
+                });
+            });
+        }
+        return fetch(url, options);
+    };
+
+    const gmReadCookie = (domain, name) => {
+        const gmCookie = typeof GM_cookie !== 'undefined' ? GM_cookie : window.GM_cookie;
+        if (!gmCookie || typeof gmCookie.list !== 'function') return Promise.resolve(null);
+        return new Promise((resolve) => {
+            try {
+                gmCookie.list({ domain, name }, (cookies, err) => {
+                    if (err || !Array.isArray(cookies) || cookies.length === 0) {
+                        resolve(null);
+                        return;
+                    }
+                    resolve(cookies[0]?.value || null);
+                });
+            } catch {
+                resolve(null);
+            }
+        });
+    };
+
     const escapeHtml = (str) =>
         String(str ?? '')
             .replace(/&/g, '&amp;')

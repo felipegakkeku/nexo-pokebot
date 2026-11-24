@@ -93,8 +93,37 @@
         );
     };
 
+    const BALL_KEY_TO_INDEX = { poke: 0, great: 1, super: 2, ultra: 3 };
+    const CAIDOS_BALL_MATCHERS = [
+        { idx: 0, token: 'poke ball', img: 'ball-poke' },
+        { idx: 1, token: 'great ball', img: 'ball-great' },
+        { idx: 2, token: 'super ball', img: 'ball-super' },
+        { idx: 3, token: 'ultra ball', img: 'ball-ultra' },
+        { idx: 4, token: 'beast ball', img: 'ball-beast' },
+    ];
+
+    const readCaidosBallsFallback = () => {
+        const host = document.getElementById('caidos-bolas');
+        if (!host) return null;
+        const buttons = Array.from(host.querySelectorAll('button.caidos-bola'));
+        if (buttons.length === 0) return null;
+        const counts = [0, 0, 0, 0, 0];
+        let matched = 0;
+        for (const btn of buttons) {
+            const title = normalizeText(btn.getAttribute('title') || '');
+            const imgSrc = normalizeText(btn.querySelector('img')?.getAttribute('src') || '');
+            const found = CAIDOS_BALL_MATCHERS.find((m) => title.includes(m.token) || imgSrc.includes(m.img));
+            if (!found) continue;
+            matched++;
+            counts[found.idx] = parseNumber(btn.getAttribute('title') || btn.textContent) ?? 0;
+        }
+        return matched > 0 ? counts : null;
+    };
+
     const getInventorySnapshot = () => {
-        const balls = readChipsByContainer('auto-ball-opts');
+        const autoBalls = readChipsByContainer('auto-ball-opts');
+        const hasAutoBalls = Boolean(autoBalls && autoBalls.length > 0);
+        const balls = hasAutoBalls ? autoBalls : readCaidosBallsFallback();
         const revives = readChipsByContainer('auto-revive-opts');
         const potions = readChipsByContainer('auto-potion-opts');
         const sumValid = (arr) => {
@@ -103,7 +132,7 @@
             return valid.length ? valid.reduce((a, b) => a + b, 0) : null;
         };
         return {
-            panelOpen: Boolean(balls),
+            panelOpen: Boolean(hasAutoBalls || balls),
             balls,
             revives,
             potions,
@@ -117,6 +146,8 @@
     };
 
     const getTargetBallTier = () => {
+        const prefIdx = BALL_KEY_TO_INDEX[CONFIG.caidos.preferredBall];
+        if (prefIdx !== undefined && BALL_TIERS[prefIdx]) return BALL_TIERS[prefIdx];
         if (!CONFIG.restock.autoUpgradeBalls) return BALL_TIERS[0];
         const { gold } = getTrainerHeaderInfo();
         const available = Math.max(0, (gold ?? 0) - CONFIG.restock.minGoldReserve);

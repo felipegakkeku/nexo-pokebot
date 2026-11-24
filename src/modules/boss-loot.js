@@ -6,6 +6,12 @@ import { normalizeText } from './pure.js';
 
 const SEL_LOCAL = {
     lootOk: '#boss-loot-ok',
+    rcBox: '#recompensa:not(.hidden)',
+    rcMistico: '#recompensa.rc-mistico:not(.hidden)',
+    mstBestBall: '.mst-bolas button.mst-bola.melhor:not([disabled])',
+    mstAnyBall: '.mst-bolas button.mst-bola:not([disabled])',
+    rcTodos: '#rc-todos:not([hidden])',
+    rcOk: '#rc-ok',
     bossList: '#boss-lista',
     bossItems: 'button.boss-item:not([data-key="@raid"])',
     modalBody: '#modal-corpo',
@@ -15,10 +21,32 @@ const SEL_LOCAL = {
 
 export const dismissBossLoot = ({ CONFIG, state, dom }) => {
     if (!state.running || !CONFIG.boss.autoDismissLoot) return;
+
     const okBtn = dom.$(SEL_LOCAL.lootOk);
     if (okBtn && dom.isInteractable(okBtn)) {
         okBtn.click();
         state.lastActionNote = 'Loot de Boss coletado!';
+        return;
+    }
+
+    const misticoBox = dom.$(SEL_LOCAL.rcMistico);
+    if (misticoBox && dom.isVisible(misticoBox)) {
+        const ballBtn = dom.$(SEL_LOCAL.mstBestBall) || dom.$(SEL_LOCAL.mstAnyBall) || dom.$(SEL_LOCAL.rcOk);
+        if (ballBtn && dom.isInteractable(ballBtn)) {
+            ballBtn.click();
+            state.stats.mysticBallsThrown = (state.stats.mysticBallsThrown || 0) + 1;
+            state.lastActionNote = 'Bola lançada no Mítico!';
+            return;
+        }
+    }
+
+    const rcBox = dom.$(SEL_LOCAL.rcBox);
+    if (rcBox && dom.isVisible(rcBox)) {
+        const dismissBtn = dom.$(SEL_LOCAL.rcTodos) || dom.$(SEL_LOCAL.rcOk);
+        if (dismissBtn && dom.isInteractable(dismissBtn)) {
+            dismissBtn.click();
+            state.lastActionNote = 'Loot de Boss coletado!';
+        }
     }
 };
 

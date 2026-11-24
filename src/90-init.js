@@ -19,5 +19,5 @@
     runtime.start();
 
     updateHud();
-    console.log(`[PokeBot v${VERSION}] Ativo!`);
+    console.log(`[Nexo PokeBot v${VERSION}] Ativo!`);
 })();

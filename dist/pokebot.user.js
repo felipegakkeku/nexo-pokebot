@@ -1,11 +1,20 @@
 // ==UserScript==
-// @name         PokeBot (Pokeidle)
+// @name         Nexo PokeBot (PokeIdle)
 // @namespace    https://github.com/felipegakkeku/pokebotfarm
-// @version      6.6
-// @description  Automação para o Pokeidle: captura, bolas, equipe, evolução, mapa e fila /hunt com HUD flutuante
+// @version      1.0
+// @description  Automação desenvolvida especificamente para o PokeIdle (pokeidle.io): captura, restock, equipe, auto-evoluir, bosses, mapa/hunt, lives e HUD flutuante
 // @match        https://pokeidle.io/app*
 // @run-at       document-idle
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @grant        GM_cookie
+// @grant        unsafeWindow
+// @connect      twitch.tv
+// @connect      gql.twitch.tv
+// @connect      usher.ttvnw.net
+// @connect      ttvnw.net
+// @connect      kick.com
+// @connect      websockets.kick.com
+// @connect      *
 // @updateURL    https://raw.githubusercontent.com/felipegakkeku/pokebotfarm/main/dist/pokebot.user.js
 // @downloadURL  https://raw.githubusercontent.com/felipegakkeku/pokebotfarm/main/dist/pokebot.user.js
 // ==/UserScript==
@@ -33,29 +42,47 @@
   // src/modules/index.js
   var index_exports = {};
   __export(index_exports, {
+    DEFAULT_KICK_OFFICIALS: () => DEFAULT_KICK_OFFICIALS,
+    DEFAULT_TWITCH_OFFICIALS: () => DEFAULT_TWITCH_OFFICIALS,
     SEL: () => SEL,
     SEL_ALWAYS_PRESENT: () => SEL_ALWAYS_PRESENT,
     autoEvolve: () => autoEvolve,
     bossLoot: () => bossLoot,
     bosses: () => bosses,
     capture: () => capture,
+    checkPrey: () => checkPrey,
+    checkTwitchLiveBatch: () => checkTwitchLiveBatch,
     createRuntime: () => createRuntime,
     createScheduler: () => createScheduler,
     dailyPass: () => dailyPass,
     depot: () => depot,
     dexNumberToRegion: () => dexNumberToRegion,
+    encodeSpadePayload: () => encodeSpadePayload,
     evaluateEvolveRequirements: () => evaluateEvolveRequirements,
+    generateUlid: () => generateUlid,
     getTeamCards: () => getTeamCards,
     hatchery: () => hatchery,
     hubSheet: () => hubSheet,
     huntQueue: () => huntQueue,
+    liveRewards: () => liveRewards,
     mapHop: () => mapHop,
     miniGames: () => miniGames,
     normalizeText: () => normalizeText,
     parseRmtPriceEl: () => parseRmtPriceEl,
+    pickBestPreyCell: () => pickBestPreyCell,
+    pickBonusGuardCandidate: () => pickBonusGuardCandidate,
+    pickCheapestReward: () => pickCheapestReward,
+    prey: () => prey,
     pure: () => pure_exports,
     restock: () => restock,
+    rewardRegexForKind: () => rewardRegexForKind,
     rmtRadar: () => rmtRadar,
+    runLiveCycle: () => runLiveCycle,
+    selectChannelsToWatch: () => selectChannelsToWatch,
+    shouldRedeemBonus: () => shouldRedeemBonus,
+    stepKickChannel: () => stepKickChannel,
+    stepTwitchChannel: () => stepTwitchChannel,
+    syncChannelsFromModal: () => syncChannelsFromModal,
     teamSeason: () => teamSeason,
     telemetry: () => telemetry,
     triggerTeamSwap: () => triggerTeamSwap
@@ -106,7 +133,7 @@
       if (disposed || timer !== null) return;
       timer = setIntervalFn(tick4, tickMs);
     };
-    const dispose2 = () => {
+    const dispose3 = () => {
       disposed = true;
       if (timer !== null) clearIntervalFn(timer);
       timer = null;
@@ -117,7 +144,7 @@
       remove,
       tick: tick4,
       start,
-      dispose: dispose2,
+      dispose: dispose3,
       pause: () => {
         paused = true;
       },
@@ -147,7 +174,7 @@
       if (!mod || typeof mod[method] !== "function") return void 0;
       return mod[method](ctx, ...args);
     };
-    const dispose2 = () => {
+    const dispose3 = () => {
       scheduler.dispose();
       for (const mod of mods.values()) {
         try {
@@ -158,7 +185,7 @@
       }
       mods.clear();
     };
-    return { register, call, start: () => scheduler.start(), dispose: dispose2, scheduler, has: (id) => mods.has(id) };
+    return { register, call, start: () => scheduler.start(), dispose: dispose3, scheduler, has: (id) => mods.has(id) };
   };
 
   // src/modules/selectors.js
@@ -367,7 +394,20 @@
     cardShortcuts: ".mk-atalhos button",
     categoryBtns: "#mk-corpo .mk-lado button.mk-cat",
     categoryText: ".mk-cat-txt",
-    marketTab: (abaKey) => `#mk-modos .cmp-op[data-aba="${abaKey}"]`
+    marketTab: (abaKey) => `#mk-modos .cmp-op[data-aba="${abaKey}"]`,
+    nativeAutoChecks: ["#auto-revive", "#auto-potion", "#auto-voltar-hunt"]
+  };
+  var ensureNativeAutomations = ({ CONFIG, dom }) => {
+    if (CONFIG.restock?.ensureNativeAutoHeal === false) return 0;
+    let reenabled = 0;
+    for (const sel of SEL_LOCAL.nativeAutoChecks) {
+      const el = dom.$(sel);
+      if (el && el.checked === false && dom.isInteractable(el)) {
+        el.click();
+        reenabled++;
+      }
+    }
+    return reenabled;
   };
   var getVisibleMarketCards = ({ dom }) => dom.$$(SEL_LOCAL.marketCards).filter(dom.isInteractable);
   var isMarketOpen = ({ dom }) => Boolean(dom.$(SEL_LOCAL.marketModes) && dom.isVisible(dom.$(SEL_LOCAL.marketModes)));
@@ -420,6 +460,7 @@
   };
   var smartRestock = async (ctx, { force = false } = {}) => {
     const { CONFIG, state, dom, sleep, randomDelay, withModalLock } = ctx;
+    ensureNativeAutomations(ctx);
     if (!CONFIG.restock.enabled && !force) return;
     const ballTier = dom.getTargetBallTier();
     const inv = dom.getInventorySnapshot();
@@ -513,7 +554,68 @@
     ballOpts: "#auto-ball-opts",
     ballChip: ".auto-chip",
     chipQty: ".q",
+    caidosBallsHost: "#caidos-bolas",
+    caidosBallBtn: "button.caidos-bola",
     caidoWho: ".caido-quem"
+  };
+  var BALL_INDEX_BY_KEY = { poke: 0, great: 1, super: 2, ultra: 3, beast: 4 };
+  var BALL_MATCHERS = [
+    { idx: 0, key: "poke", token: "poke ball", img: "ball-poke" },
+    { idx: 1, key: "great", token: "great ball", img: "ball-great" },
+    { idx: 2, key: "super", token: "super ball", img: "ball-super" },
+    { idx: 3, key: "ultra", token: "ultra ball", img: "ball-ultra" },
+    { idx: 4, key: "beast", token: "beast ball", img: "ball-beast" }
+  ];
+  var resolveDesiredBallOrder = (CONFIG, { isShiny = false, targetLv = 1 } = {}) => {
+    const caidosCfg = CONFIG?.caidos || {};
+    if (isShiny) {
+      const base = [4, 3, 2, 1, 0];
+      const pref2 = BALL_INDEX_BY_KEY[caidosCfg.shinyBall];
+      return pref2 !== void 0 ? [pref2, ...base.filter((i) => i !== pref2)] : base;
+    }
+    const pref = BALL_INDEX_BY_KEY[caidosCfg.preferredBall];
+    if (pref !== void 0) {
+      const fallback = [0, 1, 2, 3, 4];
+      return [pref, ...fallback.filter((i) => i !== pref)];
+    }
+    if (caidosCfg.smartBallSelect) {
+      return targetLv >= (caidosCfg.highLevelUltraThreshold ?? 20) ? [3, 2, 1, 0] : [0, 1, 2, 3];
+    }
+    return null;
+  };
+  var detectBallIndexFromBtn = (btn) => {
+    if (!btn) return null;
+    const title = normalizeText2(btn.getAttribute?.("title") ?? btn.title ?? "");
+    const imgSrc = normalizeText2(btn.querySelector?.("img")?.getAttribute?.("src") ?? "");
+    const matched = BALL_MATCHERS.find((m) => title.includes(m.token) || imgSrc.includes(m.img));
+    return matched ? matched.idx : null;
+  };
+  var syncCaidosBallHost = (ctx, order, preferredIdx) => {
+    const { dom } = ctx;
+    const host = dom.$(SEL_LOCAL2.caidosBallsHost);
+    if (!host) return;
+    const btns = Array.from(host.querySelectorAll(SEL_LOCAL2.caidosBallBtn));
+    if (btns.length === 0) return;
+    const byIdx = /* @__PURE__ */ new Map();
+    btns.forEach((btn, pos) => {
+      const idx = detectBallIndexFromBtn(btn) ?? pos;
+      byIdx.set(idx, btn);
+    });
+    let targetBtn = preferredIdx !== -1 && preferredIdx !== null ? byIdx.get(preferredIdx) : null;
+    if (!targetBtn && Array.isArray(order)) {
+      for (const idx of order) {
+        if (byIdx.has(idx)) {
+          targetBtn = byIdx.get(idx);
+          break;
+        }
+      }
+    }
+    if (!targetBtn && !btns.some((b) => b.classList?.contains?.("on"))) {
+      targetBtn = btns[0];
+    }
+    if (targetBtn && !targetBtn.classList?.contains?.("on") && dom.isInteractable(targetBtn)) {
+      targetBtn.click();
+    }
   };
   var isShinyCaidoButton = (btn) => {
     if (!btn) return false;
@@ -523,37 +625,32 @@
   };
   var ensureBestBallSelected = (ctx, targetBtn) => {
     const { CONFIG, dom } = ctx;
-    const container = dom.$(SEL_LOCAL2.ballOpts);
-    if (!container) return;
-    const chips = Array.from(container.querySelectorAll(SEL_LOCAL2.ballChip));
-    if (chips.length === 0) return;
-    const counts = chips.map((c) => parseNumber(c.querySelector(SEL_LOCAL2.chipQty)?.textContent ?? c.textContent) ?? 0);
-    const currentIdx = chips.findIndex((c) => c.classList.contains("on"));
     const isShiny = isShinyCaidoButton(targetBtn);
-    let desiredIdx = currentIdx;
-    if (isShiny) {
-      for (const idx of [4, 3, 2, 1, 0]) {
-        if (chips[idx] && counts[idx] > 0) {
-          desiredIdx = idx;
-          break;
+    const targetLv = parseNumber(targetBtn?.textContent) ?? dom.getCurrentHunt()?.targetLevel ?? 1;
+    const order = resolveDesiredBallOrder(CONFIG, { isShiny, targetLv });
+    const container = dom.$(SEL_LOCAL2.ballOpts);
+    const chips = container ? Array.from(container.querySelectorAll(SEL_LOCAL2.ballChip)) : [];
+    let desiredIdx = -1;
+    if (chips.length > 0) {
+      const counts = chips.map((c) => parseNumber(c.querySelector(SEL_LOCAL2.chipQty)?.textContent ?? c.textContent) ?? 0);
+      const currentIdx = chips.findIndex((c) => c.classList.contains("on"));
+      desiredIdx = currentIdx;
+      if (order) {
+        for (const idx of order) {
+          if (chips[idx] && counts[idx] > 0) {
+            desiredIdx = idx;
+            break;
+          }
         }
+      } else if (currentIdx === -1 || counts[currentIdx] <= 0) {
+        const firstAvailable = counts.findIndex((n) => n > 0);
+        if (firstAvailable !== -1) desiredIdx = firstAvailable;
       }
-    } else if (CONFIG.caidos.smartBallSelect) {
-      const targetLv = parseNumber(targetBtn?.textContent) ?? dom.getCurrentHunt()?.targetLevel ?? 1;
-      const order = targetLv >= CONFIG.caidos.highLevelUltraThreshold ? [3, 2, 1, 0] : [0, 1, 2, 3];
-      for (const idx of order) {
-        if (chips[idx] && counts[idx] > 0) {
-          desiredIdx = idx;
-          break;
-        }
+      if (desiredIdx !== -1 && desiredIdx !== currentIdx && chips[desiredIdx] && dom.isInteractable(chips[desiredIdx])) {
+        chips[desiredIdx].click();
       }
-    } else if (currentIdx === -1 || counts[currentIdx] <= 0) {
-      const firstAvailable = counts.findIndex((n) => n > 0);
-      if (firstAvailable !== -1) desiredIdx = firstAvailable;
     }
-    if (desiredIdx !== -1 && desiredIdx !== currentIdx && chips[desiredIdx] && dom.isInteractable(chips[desiredIdx])) {
-      chips[desiredIdx].click();
-    }
+    syncCaidosBallHost(ctx, order, desiredIdx);
   };
   var processCaidos = (ctx, container) => {
     const { CONFIG, state, dom, randomDelay, playBeep, updateHud } = ctx;
@@ -584,7 +681,12 @@
       return;
     }
     const now = Date.now();
-    const ordered = shinyButtons.length > 0 ? [...shinyButtons, ...allButtons] : allButtons;
+    const normalButtons = allButtons.filter((b) => !isShinyCaidoButton(b));
+    const orderedNormals = CONFIG.caidos.prioritizeExpiring !== false ? [
+      ...normalButtons.filter((b) => b.classList?.contains?.("acabando")),
+      ...normalButtons.filter((b) => !b.classList?.contains?.("acabando"))
+    ] : normalButtons;
+    const ordered = shinyButtons.length > 0 ? [...shinyButtons, ...orderedNormals] : orderedNormals;
     const nextBtn = ordered.find((btn) => {
       const lastTry = parseInt(btn.dataset.pbTriedAt || "0", 10);
       const retryMs = isShinyCaidoButton(btn) ? 1400 : CONFIG.caidos.retryAfterMs;
@@ -847,6 +949,12 @@
   // src/modules/boss-loot.js
   var SEL_LOCAL5 = {
     lootOk: "#boss-loot-ok",
+    rcBox: "#recompensa:not(.hidden)",
+    rcMistico: "#recompensa.rc-mistico:not(.hidden)",
+    mstBestBall: ".mst-bolas button.mst-bola.melhor:not([disabled])",
+    mstAnyBall: ".mst-bolas button.mst-bola:not([disabled])",
+    rcTodos: "#rc-todos:not([hidden])",
+    rcOk: "#rc-ok",
     bossList: "#boss-lista",
     bossItems: 'button.boss-item:not([data-key="@raid"])',
     modalBody: "#modal-corpo",
@@ -859,6 +967,25 @@
     if (okBtn && dom.isInteractable(okBtn)) {
       okBtn.click();
       state.lastActionNote = "Loot de Boss coletado!";
+      return;
+    }
+    const misticoBox = dom.$(SEL_LOCAL5.rcMistico);
+    if (misticoBox && dom.isVisible(misticoBox)) {
+      const ballBtn = dom.$(SEL_LOCAL5.mstBestBall) || dom.$(SEL_LOCAL5.mstAnyBall) || dom.$(SEL_LOCAL5.rcOk);
+      if (ballBtn && dom.isInteractable(ballBtn)) {
+        ballBtn.click();
+        state.stats.mysticBallsThrown = (state.stats.mysticBallsThrown || 0) + 1;
+        state.lastActionNote = "Bola lan\xE7ada no M\xEDtico!";
+        return;
+      }
+    }
+    const rcBox = dom.$(SEL_LOCAL5.rcBox);
+    if (rcBox && dom.isVisible(rcBox)) {
+      const dismissBtn = dom.$(SEL_LOCAL5.rcTodos) || dom.$(SEL_LOCAL5.rcOk);
+      if (dismissBtn && dom.isInteractable(dismissBtn)) {
+        dismissBtn.click();
+        state.lastActionNote = "Loot de Boss coletado!";
+      }
     }
   };
   var bossMatchesPriority = (detailEl, priority) => {
@@ -2275,6 +2402,1352 @@
     openCsvPicker,
     parsePokedexCsv
   };
+
+  // src/modules/prey.js
+  var SEL_LOCAL12 = {
+    preyRoot: "#pry",
+    cards: ".pry-cartela:not(.bloqueada)",
+    spinBtn: "button.pry-girar",
+    chooseBox: ".pry-quad-pokemon.escolhivel",
+    pokeCells: ".pry-c-pk[data-pk]:not(.vazio)"
+  };
+  var pickBestPreyCell = (cells, { targetName = null, queueNames = [], activeLevel = null } = {}) => {
+    if (!Array.isArray(cells) || cells.length === 0) return null;
+    const getCellText = (cell) => normalizeText2(`${cell.getAttribute?.("title") ?? cell.title ?? ""} ${cell.textContent ?? ""}`);
+    const needle = normalizeText2(targetName);
+    if (needle) {
+      const directMatch = cells.find((c) => getCellText(c).includes(needle));
+      if (directMatch) return directMatch;
+    }
+    if (Array.isArray(queueNames) && queueNames.length > 0) {
+      for (const qName of queueNames) {
+        const qNeedle = normalizeText2(qName);
+        if (!qNeedle) continue;
+        const queueMatch = cells.find((c) => getCellText(c).includes(qNeedle));
+        if (queueMatch) return queueMatch;
+      }
+    }
+    const withLevels = cells.map((cell) => ({
+      cell,
+      level: parseNumber(cell.textContent ?? cell.getAttribute?.("title") ?? cell.title ?? "")
+    }));
+    if (activeLevel !== null && activeLevel !== void 0) {
+      const safe = withLevels.filter((x) => x.level !== null && x.level <= activeLevel).sort((a, b) => b.level - a.level);
+      if (safe.length > 0) return safe[0].cell;
+    }
+    const validLevels = withLevels.filter((x) => x.level !== null).sort((a, b) => a.level - b.level);
+    return validLevels[0]?.cell || cells[0];
+  };
+  var checkPrey = async (ctx, { force = false } = {}) => {
+    const { CONFIG, state, dom, storage, keys, sleep, randomDelay, withModalLock } = ctx;
+    if (!CONFIG.prey?.enabled && !force) return;
+    const savedDay = storage?.get && keys?.preyDay ? storage.get(keys.preyDay) : "";
+    if (!force && state.preyDoneDay && savedDay && state.preyDoneDay === savedDay && Date.now() - (state.lastPreyCheckAt || 0) < 3e5) {
+      return;
+    }
+    await withModalLock(
+      "Prey",
+      async () => {
+        try {
+          const corpo = await openBackpackPocket(ctx, "prey");
+          if (!corpo) return;
+          const root = await dom.waitFor(() => dom.$(SEL_LOCAL12.preyRoot), 2500);
+          if (!root) return;
+          const dia = root.getAttribute?.("data-dia") || "";
+          if (!force && dia && savedDay === dia) {
+            state.preyDoneDay = dia;
+            return;
+          }
+          const cards = Array.from(root.querySelectorAll(SEL_LOCAL12.cards));
+          for (const card of cards) {
+            if (!state.running) break;
+            const spinBtn = card.querySelector(SEL_LOCAL12.spinBtn);
+            if (spinBtn && !spinBtn.hidden && !spinBtn.disabled && dom.isInteractable(spinBtn)) {
+              spinBtn.click();
+              state.stats.preyRolls = (state.stats.preyRolls || 0) + 1;
+              state.lastActionNote = "Prey: roletada gr\xE1tis!";
+              await dom.waitFor(() => card.querySelector(SEL_LOCAL12.chooseBox), 2500);
+              await sleep(randomDelay(200, 340));
+            }
+            const chooseBox = card.querySelector(SEL_LOCAL12.chooseBox);
+            if (chooseBox) {
+              const cells = Array.from(card.querySelectorAll(SEL_LOCAL12.pokeCells)).filter(dom.isInteractable);
+              const chosen = pickBestPreyCell(cells, {
+                targetName: dom.getCurrentHunt()?.targetName,
+                queueNames: (state.huntQueue || []).map((q) => q.name),
+                activeLevel: dom.getActivePokemon()?.level
+              });
+              if (chosen) {
+                chosen.click();
+                await sleep(randomDelay(220, 360));
+                await dom.confirmModalDialog(["escolher", "confirmar", "sim"]);
+                state.lastActionNote = "Prey: Pok\xE9mon escolhido!";
+                await sleep(randomDelay(260, 420));
+              }
+            }
+          }
+          const allComplete = cards.length > 0 && cards.every((c) => c.classList?.contains?.("completa"));
+          if (allComplete && dia && keys?.preyDay) {
+            storage?.set?.(keys.preyDay, dia);
+            state.preyDoneDay = dia;
+          }
+        } finally {
+          state.lastPreyCheckAt = Date.now();
+          await dom.closeActiveModal();
+        }
+      },
+      { force }
+    );
+  };
+  var prey = {
+    id: "prey",
+    everyMs: (ctx) => ctx.CONFIG.prey?.checkIntervalMs ?? 6e4,
+    tick: (ctx) => checkPrey(ctx, { force: false }),
+    check: checkPrey
+  };
+
+  // src/modules/live-rewards.js
+  var TWITCH_CLIENT_ID = "kimne78kx3ncx6brgo4mv6wki5h1ko";
+  var TWITCH_GQL_URL = "https://gql.twitch.tv/gql";
+  var TWITCH_INTEGRITY_URL = "https://gql.twitch.tv/integrity";
+  var TWITCH_USHER_URL = "https://usher.ttvnw.net";
+  var TWITCH_FALLBACK_SPADE = "https://video-edge-c2a8bc.pdx01.abs.hls.ttvnw.net/v1/segment";
+  var PLAYBACK_PERSISTED_HASH = "ed230aa1e33e07eebb8928504583da78a5173989fadfb1ac94be06a04f3cdbe9";
+  var KICK_API_URL = "https://kick.com";
+  var KICK_WS_API_URL = "https://websockets.kick.com";
+  var KICK_WS_URL = "wss://websockets.kick.com/viewer/v1/connect";
+  var KICK_CLIENT_TOKEN = "e1393935a959b4020a4491574f6490129f678acdaa92760471263db43487f823";
+  var DEFAULT_TWITCH_OFFICIALS = Object.freeze([
+    "tftoddy",
+    "clovaobengala",
+    "axtlol",
+    "patopapao",
+    "matta",
+    "guaxilol1",
+    "rodil",
+    "cogu",
+    "luccatv",
+    "faasii",
+    "biscoitao",
+    "techzz",
+    "dersin2k",
+    "denissnidertv"
+  ]);
+  var DEFAULT_KICK_OFFICIALS = Object.freeze(["biscoitao", "yetz", "surskity"]);
+  var ULID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+  var SPADE_CACHE_MS = 6 * 3600 * 1e3;
+  var CONFIRM_WITHIN_MS = 5 * 60 * 1e3;
+  var RETRY_WAIT_MS = 30 * 60 * 1e3;
+  var GUARD_READ_TTL_MS = 30 * 60 * 1e3;
+  var LIVE_REWARD_KINDS = Object.freeze(["xp", "captura", "shiny"]);
+  var LIVE_REWARD_TIERS = Object.freeze(["smart", "cheapest", "largest", "1h", "3h", "5h", "10h"]);
+  var parseRewardKinds = (value, fallback = ["xp"]) => {
+    if (value == null) return [...fallback];
+    if (Array.isArray(value)) {
+      const seen2 = /* @__PURE__ */ new Set();
+      const out2 = [];
+      for (const item of value) {
+        const clean = String(item || "").trim().toLowerCase();
+        if (LIVE_REWARD_KINDS.includes(clean) && !seen2.has(clean)) {
+          seen2.add(clean);
+          out2.push(clean);
+        }
+      }
+      return out2;
+    }
+    const raw = String(value).trim().toLowerCase();
+    if (!raw) return [...fallback];
+    if (raw === "off" || raw === "none" || raw === "nenhum") return [];
+    if (raw === "all" || raw === "todos") return [...LIVE_REWARD_KINDS];
+    const parts = raw.split(/[\s,;|+]+/).filter(Boolean);
+    const seen = /* @__PURE__ */ new Set();
+    const out = [];
+    for (const part of parts) {
+      if (LIVE_REWARD_KINDS.includes(part) && !seen.has(part)) {
+        seen.add(part);
+        out.push(part);
+      }
+    }
+    return out.length > 0 ? out : [...fallback];
+  };
+  var resolveChannelRewardKinds = (liveConfig = {}, platform = "twitch", channel = "") => {
+    const cfg = liveConfig && typeof liveConfig === "object" ? liveConfig : {};
+    const low = String(channel || "").trim().toLowerCase();
+    const overrides = cfg.channelRewards && typeof cfg.channelRewards === "object" ? cfg.channelRewards : null;
+    if (overrides && low) {
+      const specific = overrides[`${platform}:${low}`] ?? overrides[low];
+      if (specific !== void 0 && specific !== null && String(specific).trim() !== "") {
+        return parseRewardKinds(specific, []);
+      }
+    }
+    const platformPref = platform === "twitch" ? cfg.twitchRewards : cfg.kickRewards;
+    if (platformPref !== void 0 && platformPref !== null) {
+      return parseRewardKinds(platformPref, []);
+    }
+    return parseRewardKinds(cfg.rewardType, ["xp"]);
+  };
+  var extractRewardHours = (reward) => {
+    const text = `${reward?.title || ""} ${reward?.prompt || reward?.description || ""}`;
+    const paren = text.match(/\((\d+)\s*h\)/i);
+    if (paren) return Number(paren[1]) || 1;
+    const words = text.match(/\b(\d+)\s*horas?\b/i);
+    if (words) return Number(words[1]) || 1;
+    return 1;
+  };
+  var rewardRegexForKind = (kind) => {
+    if (kind === "captura") return /\bcaptur/i;
+    if (kind === "shiny") return /\b(lure|shiny)\b/i;
+    return /\bxp\b/i;
+  };
+  var pickRewardForChannel = (rewards, kind = "xp", platform = "twitch", { tier = "cheapest", balance = null, deficitMin = null, preferQuickTurnOn = false } = {}) => {
+    if (!Array.isArray(rewards) || rewards.length === 0) return null;
+    const word = rewardRegexForKind(kind);
+    const isTwitch = platform === "twitch";
+    const matching = rewards.filter((r) => {
+      if (!r || typeof r !== "object") return false;
+      const enabled = isTwitch ? r.isEnabled !== false : r.is_enabled !== false;
+      if (!enabled) return false;
+      const title = String(r.title || "");
+      const extra = String(isTwitch ? r.prompt || "" : r.description || "");
+      if (!word.test(title)) return false;
+      if (!/pokeidle/i.test(`${title} ${extra}`)) return false;
+      return typeof r.cost === "number" && r.cost > 0;
+    }).sort((a, b) => a.cost - b.cost);
+    if (matching.length === 0) return null;
+    const isUnavailable = (r) => isTwitch ? Boolean(r.isPaused || r.isInStock === false || r.cooldownExpiresAt) : Boolean(r.is_paused);
+    const available = matching.filter((r) => !isUnavailable(r));
+    const pool = available.length > 0 ? available : matching;
+    const cleanTier = String(tier || "cheapest").toLowerCase();
+    if (cleanTier === "smart") {
+      if (preferQuickTurnOn) return pool[0];
+      if (typeof balance === "number") {
+        const affordable = pool.filter((r) => r.cost <= balance);
+        if (affordable.length === 0) return pool[0];
+        if (typeof deficitMin === "number" && deficitMin > 0) {
+          const deficitHours = Math.max(1, Math.ceil(deficitMin / 60));
+          const withinDeficit = affordable.filter((r) => extractRewardHours(r) <= deficitHours);
+          if (withinDeficit.length > 0) return withinDeficit[withinDeficit.length - 1];
+          return affordable[0];
+        }
+        return affordable[affordable.length - 1];
+      }
+      return pool[0];
+    }
+    if (cleanTier === "largest") {
+      if (typeof balance === "number") {
+        const affordable = pool.filter((r) => r.cost <= balance);
+        if (affordable.length > 0) return affordable[affordable.length - 1];
+      }
+      return pool[0];
+    }
+    const hourMatch = cleanTier.match(/^(1|3|5|10)h$/);
+    if (hourMatch) {
+      const targetHours = Number(hourMatch[1]);
+      const exact = pool.find((r) => extractRewardHours(r) === targetHours);
+      if (exact) return exact;
+    }
+    return pool[0];
+  };
+  var pickCheapestReward = (rewards, kind = "xp", platform = "twitch") => pickRewardForChannel(rewards, kind, platform, { tier: "cheapest" });
+  var toBase64Utf8 = (str) => {
+    if (typeof TextEncoder !== "undefined" && typeof btoa === "function") {
+      const bytes = new TextEncoder().encode(str);
+      let bin = "";
+      for (const b of bytes) bin += String.fromCharCode(b);
+      return btoa(bin);
+    }
+    return btoa(str);
+  };
+  var encodeSpadePayload = ({ channelId, broadcastId, userId, login, game, gameId }) => {
+    const properties = {
+      channel_id: channelId,
+      broadcast_id: broadcastId,
+      player: "site",
+      user_id: userId,
+      live: true,
+      channel: login,
+      hidden: false,
+      muted: false,
+      volume: 0.5
+    };
+    if (game && gameId) {
+      properties.game = game;
+      properties.game_id = gameId;
+    }
+    return toBase64Utf8(JSON.stringify([{ event: "minute-watched", properties }]));
+  };
+  var generateUlid = (now = Date.now(), rand = Math.random) => {
+    let t = Math.max(0, Math.floor(now));
+    let timePart = "";
+    for (let i = 0; i < 10; i++) {
+      timePart = ULID_ALPHABET[t % 32] + timePart;
+      t = Math.floor(t / 32);
+    }
+    let randPart = "";
+    for (let i = 0; i < 16; i++) {
+      randPart += ULID_ALPHABET[Math.floor(rand() * 32) % 32];
+    }
+    return timePart + randPart;
+  };
+  var getBonusRemainingMin = (bonusState, kind = "xp", now = Date.now()) => {
+    const until = Number(bonusState?.bonus?.[kind]) || 0;
+    return Math.max(0, (until - now) / 6e4);
+  };
+  var shouldRedeemBonus = (bonusState, kind = "xp", guardThresholdMin = 30, now = Date.now()) => {
+    const minsLeft = getBonusRemainingMin(bonusState, kind, now);
+    return minsLeft <= Math.max(0, Number(guardThresholdMin) || 0);
+  };
+  var resolveEffectiveThresholdMin = (liveConfig = {}) => {
+    const baseGuard = Math.max(0, Number(liveConfig?.guardThresholdMin ?? 30) || 0);
+    if (liveConfig?.smartBalance === true) {
+      const targetHours = Number(liveConfig?.targetHours ?? 24);
+      if (Number.isFinite(targetHours) && targetHours > 0) {
+        return Math.max(baseGuard, Math.round(targetHours * 60));
+      }
+    }
+    return baseGuard;
+  };
+  var orderBuffsForRedeem = (kinds = [], bonusState = null, liveConfig = {}, now = Date.now()) => {
+    const list = Array.isArray(kinds) ? [...kinds] : [];
+    if (list.length <= 1 || liveConfig?.smartBalance !== true) return list;
+    const criticalMin = Math.max(15, Number(liveConfig?.guardThresholdMin ?? 30) || 30);
+    const indexMap = new Map(list.map((k, idx) => [k, idx]));
+    return list.sort((a, b) => {
+      const minA = getBonusRemainingMin(bonusState, a, now);
+      const minB = getBonusRemainingMin(bonusState, b, now);
+      const critA = minA <= criticalMin ? 0 : 1;
+      const critB = minB <= criticalMin ? 0 : 1;
+      if (critA !== critB) return critA - critB;
+      if (Math.abs(minA - minB) > 0.5) return minA - minB;
+      return (indexMap.get(a) ?? 0) - (indexMap.get(b) ?? 0);
+    });
+  };
+  var selectChannelsToWatch = (officials = [], customCsv = "", maxSlots = 2) => {
+    const seen = /* @__PURE__ */ new Set();
+    const out = [];
+    const add = (raw) => {
+      const clean = String(raw || "").trim();
+      if (!clean) return;
+      const key = clean.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.push(clean);
+    };
+    String(customCsv || "").split(/[\s,;]+/).forEach(add);
+    if (Array.isArray(officials)) {
+      officials.filter((o) => o && o.aoVivo && o.ativo !== false).forEach((o) => add(o.login || o.slug));
+    }
+    const cap = Math.max(1, Number(maxSlots) || 2);
+    return out.slice(0, cap);
+  };
+  var pickBonusGuardCandidate = (candidates = [], reads = /* @__PURE__ */ new Map(), liveSet = /* @__PURE__ */ new Set()) => {
+    const getRead = (ch) => reads instanceof Map ? reads.get(ch.toLowerCase()) || reads.get(ch) : reads?.[ch.toLowerCase()] || reads?.[ch];
+    const isLive = (ch) => liveSet instanceof Set ? liveSet.has(ch.toLowerCase()) || liveSet.has(ch) : Boolean(liveSet?.[ch]);
+    const eligible = [];
+    for (const channel of candidates) {
+      const r = getRead(channel);
+      if (!r || r.paused) continue;
+      if (typeof r.points !== "number" || typeof r.cost !== "number") continue;
+      if (r.points < r.cost) continue;
+      eligible.push({
+        channel,
+        points: r.points,
+        cost: r.cost,
+        live: isLive(channel)
+      });
+    }
+    if (eligible.length === 0) return null;
+    eligible.sort((a, b) => Number(a.live) - Number(b.live) || b.points - a.points);
+    return eligible[0];
+  };
+  var runtimeState = {
+    spadeCache: /* @__PURE__ */ new Map(),
+    twitchLastPingAt: /* @__PURE__ */ new Map(),
+    twitchSeenSegments: /* @__PURE__ */ new Map(),
+    kickSockets: /* @__PURE__ */ new Map(),
+    kickPointsCheckAt: /* @__PURE__ */ new Map(),
+    kickTimer: null,
+    lastPlatformRedeemAt: {},
+    redeemRetryAt: { twitch: /* @__PURE__ */ new Map(), kick: /* @__PURE__ */ new Map() },
+    claimRetryAt: /* @__PURE__ */ new Map(),
+    confirmedClaims: /* @__PURE__ */ new Map(),
+    guardReads: { twitch: /* @__PURE__ */ new Map(), kick: /* @__PURE__ */ new Map() },
+    twitchIntegrityCache: { token: null, expiresAt: 0 },
+    lastLiveProbeAt: { twitch: 0, kick: 0 },
+    cycleInFlight: false,
+    modalSyncDone: false
+  };
+  var getPageWindow = (ctx) => ctx.pageWin || (typeof window !== "undefined" ? window : null);
+  var canRedeemPlatform = (platform, kind, now, force = false) => force || now - (runtimeState.lastPlatformRedeemAt[`${platform}:${kind}`] || 0) >= CONFIRM_WITHIN_MS;
+  var recordChannelBalance = (state, platform, channel, points) => {
+    if (!state || typeof points !== "number") return;
+    if (!state.liveChannelBalances) state.liveChannelBalances = { twitch: {}, kick: {} };
+    state.liveChannelBalances[platform][String(channel || "").toLowerCase()] = points;
+  };
+  var guardKey = (channel, kind) => `${String(channel || "").toLowerCase()}::${kind}`;
+  var mergeGameWsMessage = (state, msg) => {
+    if (!msg || typeof msg !== "object") return;
+    if (msg.t !== "welcome" && msg.t !== "estado") return;
+    const st = msg.estado;
+    if (!st || typeof st !== "object") return;
+    if (!state.liveGameData) state.liveGameData = { twitch: null, kick: null, skew: 0 };
+    if (msg.t === "welcome" || st.cheio) {
+      state.liveGameData.twitch = null;
+      state.liveGameData.kick = null;
+    }
+    for (const platform of ["twitch", "kick"]) {
+      if (!(platform in st)) continue;
+      const next = st[platform];
+      state.liveGameData[platform] = next ? { ...state.liveGameData[platform], ...next } : next;
+    }
+    if (Number(st.servidorAgora) > 0) {
+      state.liveGameData.skew = Date.now() - Number(st.servidorAgora);
+    }
+  };
+  var installGameWsTap = (ctx) => {
+    const win = getPageWindow(ctx);
+    if (!win) return;
+    const attachSocket = (ws) => {
+      if (!ws || ws.__pbLiveAttached) return;
+      ws.__pbLiveAttached = true;
+      if (typeof ws.addEventListener === "function") {
+        ws.addEventListener("message", (ev) => {
+          if (typeof ev?.data !== "string" || !ev.data.includes('"estado"')) return;
+          try {
+            mergeGameWsMessage(ctx.state, JSON.parse(ev.data));
+          } catch {
+          }
+        });
+      }
+    };
+    if (win.__activeGameWs) attachSocket(win.__activeGameWs);
+    if (win.__pkSocket) attachSocket(win.__pkSocket);
+    if (!win.__pbLiveWsWrapped && typeof win.WebSocket === "function") {
+      const NativeWs = win.WebSocket;
+      win.__pbLiveWsWrapped = true;
+      try {
+        win.WebSocket = new Proxy(NativeWs, {
+          construct(target, args, newTarget) {
+            const ws = Reflect.construct(target, args, newTarget);
+            try {
+              const targetHost = win.location?.host;
+              const wsHost = new URL(String(args[0]), win.location?.href || "https://pokeidle.io").host;
+              if (!targetHost || wsHost === targetHost) attachSocket(ws);
+            } catch {
+            }
+            return ws;
+          }
+        });
+      } catch {
+      }
+    }
+  };
+  var readDomBonusFallback = (ctx) => {
+    const { dom, state } = ctx;
+    if (!state.liveGameData) state.liveGameData = { twitch: null, kick: null, skew: 0 };
+    const rewardType = ctx.CONFIG?.live?.rewardType || "xp";
+    const readBtn = (sel, attr, existing) => {
+      const btn = dom.$(sel);
+      if (!btn) return existing;
+      const until = Number(btn.getAttribute?.(attr) || btn.dataset?.[attr === "data-tw-fim" ? "twFim" : "kkFim"] || 0);
+      if (until > 0) {
+        return {
+          ...existing || {},
+          bonus: { ...existing?.bonus || {}, [rewardType]: until }
+        };
+      }
+      return existing;
+    };
+    state.liveGameData.twitch = readBtn("button.tr-ativo.twitch", "data-tw-fim", state.liveGameData.twitch);
+    state.liveGameData.kick = readBtn("button.tr-ativo.kick", "data-kk-fim", state.liveGameData.kick);
+  };
+  var syncChannelsFromModal = async (ctx, { force = false } = {}) => {
+    const { dom, state, sleep, withModalLock } = ctx;
+    if (!withModalLock) return { twitch: [], kick: [] };
+    const result = { twitch: [], kick: [] };
+    await withModalLock(
+      "LivesSync",
+      async () => {
+        const sites = [
+          { key: "twitch", btnSel: "button.tr-ativo.twitch", linkSel: "a.tw-canal.ao-vivo", hostRe: /twitch\.tv\/([^/?#]+)/i },
+          { key: "kick", btnSel: "button.tr-ativo.kick", linkSel: "a.kk-canal.ao-vivo", hostRe: /kick\.com\/([^/?#]+)/i }
+        ];
+        for (const s of sites) {
+          const btn = dom.$(s.btnSel);
+          if (!btn || !dom.isInteractable(btn)) continue;
+          try {
+            if (dom.getVisibleModal()) await dom.closeActiveModal();
+            btn.click();
+            const modal = await dom.waitFor(() => dom.getVisibleModal(), 2500);
+            if (modal) {
+              await sleep(220);
+              const links = Array.from(modal.querySelectorAll(s.linkSel));
+              const found = links.map((a) => {
+                const href = a.getAttribute?.("href") || "";
+                const m = href.match(s.hostRe);
+                return m ? decodeURIComponent(m[1]) : null;
+              }).filter(Boolean);
+              result[s.key] = found;
+              if (found.length > 0) {
+                if (!state.liveGameData) state.liveGameData = { twitch: null, kick: null, skew: 0 };
+                state.liveGameData[s.key] = {
+                  ...state.liveGameData[s.key] || {},
+                  oficiais: found.map(
+                    (id) => s.key === "twitch" ? { login: id, aoVivo: true, ativo: true } : { slug: id, aoVivo: true, ativo: true }
+                  )
+                };
+              }
+            }
+          } finally {
+            if (dom.getVisibleModal()) await dom.closeActiveModal();
+          }
+        }
+        runtimeState.modalSyncDone = true;
+        state.lastActionNote = `Lives lidas: TW=${result.twitch.length} KK=${result.kick.length}`;
+      },
+      { force }
+    );
+    return result;
+  };
+  var netFetch = (ctx, url, opts) => {
+    if (ctx.net?.fetch) return ctx.net.fetch(url, opts);
+    return fetch(url, opts);
+  };
+  var normalizeKickToken = (raw) => {
+    const clean = String(raw || "").trim();
+    if (!clean) return "";
+    if (!clean.includes("%")) return clean;
+    try {
+      return decodeURIComponent(clean);
+    } catch {
+      return clean;
+    }
+  };
+  var resolveCredentials = async (ctx) => {
+    const { CONFIG, net } = ctx;
+    let twitchToken = (CONFIG.live?.twitchToken || "").trim();
+    let twitchDeviceId = (CONFIG.live?.twitchDeviceId || "").trim();
+    let kickToken = normalizeKickToken(CONFIG.live?.kickToken || "");
+    if (net?.readCookie) {
+      if (!twitchToken) twitchToken = await net.readCookie(".twitch.tv", "auth-token") || "";
+      if (!twitchDeviceId) twitchDeviceId = await net.readCookie(".twitch.tv", "unique_id") || "";
+      if (!kickToken) kickToken = normalizeKickToken(await net.readCookie(".kick.com", "session_token") || "");
+    }
+    return { twitchToken, twitchDeviceId, kickToken };
+  };
+  var syncCookiesToConfig = async (ctx) => {
+    const { CONFIG } = ctx;
+    const creds = await resolveCredentials(ctx);
+    if (!CONFIG?.live) return creds;
+    let changed = false;
+    if (creds.twitchToken && !CONFIG.live.twitchToken) {
+      CONFIG.live.twitchToken = creds.twitchToken;
+      changed = true;
+    }
+    if (creds.twitchDeviceId && !CONFIG.live.twitchDeviceId) {
+      CONFIG.live.twitchDeviceId = creds.twitchDeviceId;
+      changed = true;
+    }
+    if (creds.kickToken && !CONFIG.live.kickToken) {
+      CONFIG.live.kickToken = creds.kickToken;
+      changed = true;
+    }
+    if (changed) {
+      (ctx.persistPrefs || ctx.storage?.persistPrefs)?.();
+    }
+    return creds;
+  };
+  var twitchGqlCall = async (ctx, { token, deviceId }, payload) => {
+    const headers = {
+      "Client-Id": TWITCH_CLIENT_ID,
+      "Content-Type": "text/plain;charset=UTF-8"
+    };
+    if (token) headers.Authorization = `OAuth ${token}`;
+    if (deviceId) headers["X-Device-Id"] = deviceId;
+    let integrity = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const reqHeaders = integrity ? { ...headers, "Client-Integrity": integrity } : headers;
+      const res = await netFetch(ctx, TWITCH_GQL_URL, {
+        method: "POST",
+        headers: reqHeaders,
+        body: JSON.stringify(payload)
+      });
+      if (!res.ok) return { failed: `erro ${res.status}` };
+      const json = await res.json();
+      const challenged = Boolean(json?.extensions?.challenge) || (json?.errors || []).some((e) => e?.extensions?.code === "IntegrityCheckFailed");
+      if (!challenged) return json;
+      if (integrity) {
+        runtimeState.twitchIntegrityCache = { token: null, expiresAt: 0 };
+        return { failed: "checagem anti-rob\xF4 da Twitch (IntegrityCheckFailed)" };
+      }
+      if (!token) return { failed: "checagem anti-rob\xF4 da Twitch" };
+      const now = Date.now();
+      if (runtimeState.twitchIntegrityCache.token && runtimeState.twitchIntegrityCache.expiresAt > now + 6e4) {
+        integrity = runtimeState.twitchIntegrityCache.token;
+        continue;
+      }
+      if (typeof ctx.getTwitchIntegrityToken === "function") {
+        try {
+          const browserInt = await ctx.getTwitchIntegrityToken({ token, deviceId });
+          if (browserInt?.token) {
+            integrity = browserInt.token;
+            runtimeState.twitchIntegrityCache = {
+              token: browserInt.token,
+              expiresAt: Number(browserInt.expiration) || now + 36e5
+            };
+            continue;
+          }
+        } catch {
+        }
+      }
+      const intRes = await netFetch(ctx, TWITCH_INTEGRITY_URL, { method: "POST", headers });
+      const intJson = intRes.ok ? await intRes.json().catch(() => null) : null;
+      if (!intJson?.token) return { failed: `checagem anti-rob\xF4 (${intRes.status})` };
+      integrity = intJson.token;
+      runtimeState.twitchIntegrityCache = {
+        token: intJson.token,
+        expiresAt: Number(intJson.expiration) || now + 36e5
+      };
+    }
+    return { failed: "sem resposta" };
+  };
+  var checkTwitchLiveBatch = async (ctx, channels = []) => {
+    const list = Array.from(new Set(channels.map((c) => String(c || "").trim().toLowerCase()).filter(Boolean)));
+    if (list.length === 0) return {};
+    const res = await twitchGqlCall(ctx, { token: "", deviceId: "" }, {
+      query: "query($l:[String!]){users(logins:$l){login id stream{id}}}",
+      variables: { l: list }
+    });
+    const users = res?.data?.users;
+    if (!Array.isArray(users)) return {};
+    const out = Object.fromEntries(list.map((ch) => [ch, false]));
+    for (const u of users) {
+      if (u?.login) out[String(u.login).toLowerCase()] = Boolean(u.stream?.id);
+    }
+    return out;
+  };
+  var discoverSpadeUrl = async (ctx, login) => {
+    const cached = runtimeState.spadeCache.get("twitch");
+    if (cached && Date.now() - cached.at < SPADE_CACHE_MS) return cached.url;
+    try {
+      const pageRes = await netFetch(ctx, `https://www.twitch.tv/${encodeURIComponent(login)}`, { method: "GET" });
+      if (pageRes.ok) {
+        const html = await pageRes.text();
+        const settingsMatch = html.match(/(https?:\/\/[^"'\s]+\/config\/settings[^"'\s]*?\.js)/);
+        if (settingsMatch) {
+          const cfgRes = await netFetch(ctx, settingsMatch[1], { method: "GET" });
+          if (cfgRes.ok) {
+            const js = await cfgRes.text();
+            const spadeMatch = js.match(/"spade_url"\s*:\s*"(.*?)"/);
+            if (spadeMatch) {
+              const raw = spadeMatch[1].replace(/\\\//g, "/");
+              runtimeState.spadeCache.set("twitch", { url: raw, at: Date.now() });
+              return raw;
+            }
+          }
+        }
+      }
+    } catch {
+    }
+    return TWITCH_FALLBACK_SPADE;
+  };
+  var touchTwitchHlsSegment = async (ctx, { token, deviceId }, login) => {
+    try {
+      const tokRes = await twitchGqlCall(
+        ctx,
+        { token, deviceId },
+        {
+          operationName: "PlaybackAccessToken",
+          variables: { login, isLive: true, isVod: false, vodID: "", playerType: "site", platform: "web" },
+          extensions: { persistedQuery: { version: 1, sha256Hash: PLAYBACK_PERSISTED_HASH } }
+        }
+      );
+      const access = tokRes?.data?.streamPlaybackAccessToken;
+      if (!access?.value || !access?.signature) return false;
+      const masterUrl = `${TWITCH_USHER_URL}/api/channel/hls/${encodeURIComponent(login)}.m3u8?sig=${encodeURIComponent(access.signature)}&token=${encodeURIComponent(access.value)}&allow_source=true&allow_audio_only=true&player=twitchweb&type=any&p=${Math.floor(Math.random() * 9e6) + 1e6}`;
+      const masterRes = await netFetch(ctx, masterUrl, { method: "GET" });
+      if (!masterRes.ok) return false;
+      const lines = (await masterRes.text()).replace(/\r\n/g, "\n").split("\n");
+      let chosenUri = null;
+      let bestBw = Infinity;
+      for (let i = 0; i < lines.length; i++) {
+        if (!lines[i].startsWith("#EXT-X-STREAM-INF:")) continue;
+        const uri = lines[i + 1]?.trim();
+        if (!uri || uri.startsWith("#")) continue;
+        const bwMatch = lines[i].match(/(?<![-A-Z])BANDWIDTH=(\d+)/);
+        const bw = bwMatch ? parseInt(bwMatch[1], 10) : Infinity;
+        if (lines[i].includes("RESOLUTION=") && bw < bestBw) {
+          bestBw = bw;
+          chosenUri = new URL(uri, masterUrl).toString();
+        } else if (!chosenUri) {
+          chosenUri = new URL(uri, masterUrl).toString();
+        }
+      }
+      if (!chosenUri) return false;
+      const mediaRes = await netFetch(ctx, chosenUri, { method: "GET" });
+      if (!mediaRes.ok) return false;
+      const segs = (await mediaRes.text()).replace(/\r\n/g, "\n").split("\n").filter((l) => l && !l.startsWith("#"));
+      const lastSeg = segs[segs.length - 1];
+      if (!lastSeg) return false;
+      const segUrl = new URL(lastSeg, chosenUri).toString();
+      let seen = runtimeState.twitchSeenSegments.get(login);
+      if (!seen) {
+        seen = /* @__PURE__ */ new Set();
+        runtimeState.twitchSeenSegments.set(login, seen);
+      }
+      if (seen.has(segUrl)) return true;
+      seen.add(segUrl);
+      if (seen.size > 100) seen.clear();
+      await netFetch(ctx, segUrl, { method: "HEAD" });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  var stepTwitchChannel = async (ctx, login, { token = "", deviceId = "", force = false, guardOnly = false, onlyKind = null, probeOnly = false } = {}) => {
+    var _a;
+    const { CONFIG, state } = ctx;
+    if (!state.liveStatus) state.liveStatus = { twitch: {}, kick: {} };
+    const status = guardOnly ? { balance: null, live: false, lastPingAt: 0, lastRedeemAt: 0, redeemedThisStep: false, error: null } : (_a = state.liveStatus.twitch)[login] || (_a[login] = { balance: null, live: false, lastPingAt: 0, lastRedeemAt: 0, redeemedThisStep: false, error: null });
+    status.redeemedThisStep = false;
+    const query = "query($login:String!){currentUser{id} user(login:$login){id stream{id game{id name}} channel{self{communityPoints{balance availableClaim{id}}} communityPointsSettings{customRewards{id title prompt cost isEnabled isPaused isInStock cooldownExpiresAt}}}}}";
+    const credentials = { token, deviceId };
+    let res = await twitchGqlCall(ctx, credentials, { query, variables: { login } });
+    if (!res?.data?.user && res?.errors?.length && !guardOnly && CONFIG.live?.autoClaimChest) {
+      res = await twitchGqlCall(ctx, credentials, {
+        query: "query($login:String!){currentUser{id} user(login:$login){id stream{id game{id name}} channel{self{communityPoints{balance availableClaim{id}}}}}}",
+        variables: { login }
+      });
+    }
+    if (res?.failed) {
+      status.error = res.failed;
+      return status;
+    }
+    const user = res?.data?.user;
+    if (!user?.id) {
+      status.error = res?.errors?.[0]?.message || "canal n\xE3o encontrado";
+      return status;
+    }
+    const userId = res?.data?.currentUser?.id || null;
+    const channelId = user.id;
+    const broadcastId = user.stream?.id || null;
+    const game = user.stream?.game?.name || null;
+    const gameId = user.stream?.game?.id || null;
+    const cp = user.channel?.self?.communityPoints;
+    const rewards = user.channel?.communityPointsSettings?.customRewards || [];
+    status.live = Boolean(broadcastId);
+    status.error = token && !userId ? "sess\xE3o Twitch n\xE3o reconhecida" : null;
+    let balance = typeof cp?.balance === "number" ? cp.balance : null;
+    const now = Date.now();
+    const channelKey = login.toLowerCase();
+    const tier = CONFIG.live?.rewardTier || "cheapest";
+    const configuredKinds = resolveChannelRewardKinds(CONFIG.live, "twitch", login);
+    const activeKinds = onlyKind ? configuredKinds.includes(onlyKind) ? [onlyKind] : [] : configuredKinds;
+    status.rewardKinds = configuredKinds;
+    if (balance !== null) {
+      recordChannelBalance(state, "twitch", login, balance);
+      for (const k of LIVE_REWARD_KINDS) {
+        if (!configuredKinds.includes(k)) {
+          runtimeState.guardReads.twitch.delete(guardKey(channelKey, k));
+          continue;
+        }
+        const rew = pickRewardForChannel(rewards, k, "twitch", { tier, balance });
+        if (rew) {
+          const unavail = Boolean(rew.isPaused || rew.isInStock === false || rew.cooldownExpiresAt);
+          runtimeState.guardReads.twitch.set(guardKey(channelKey, k), {
+            at: now,
+            points: balance,
+            cost: rew.cost,
+            paused: unavail
+          });
+        }
+      }
+    }
+    const claimId = cp?.availableClaim?.id;
+    if (cp && !claimId) status.manualChest = false;
+    const canClaim = now >= (runtimeState.claimRetryAt.get(channelKey) || 0);
+    if (!guardOnly && CONFIG.live?.autoClaimChest && token && claimId && runtimeState.confirmedClaims.get(channelKey) !== claimId && canClaim) {
+      const claimRes = await twitchGqlCall(ctx, { token, deviceId }, {
+        query: "mutation($i:ClaimCommunityPointsInput!){claimCommunityPoints(input:$i){claim{id}}}",
+        variables: { i: { channelID: channelId, claimID: claimId } }
+      });
+      const claimData = claimRes?.data?.claimCommunityPoints;
+      if (claimData?.claim?.id && !claimData.error && !claimRes?.errors?.length && !claimRes?.failed) {
+        status.manualChest = false;
+        runtimeState.confirmedClaims.set(channelKey, claimId);
+        state.stats.liveChestsClaimed = (state.stats.liveChestsClaimed || 0) + 1;
+        balance = typeof claimData.currentPoints === "number" ? claimData.currentPoints : (balance ?? 0) + 50;
+        recordChannelBalance(state, "twitch", login, balance);
+        state.lastActionNote = `Twitch ba\xFA +50 (${login})`;
+      } else {
+        const errCode = claimData?.error?.code || claimRes?.errors?.[0]?.message || claimRes?.failed || "erro desconhecido";
+        const isIntegrity = /integrity|anti-rob/i.test(String(errCode));
+        if (isIntegrity) status.manualChest = true;
+        status.error = isIntegrity ? "Twitch exige o resgate do ba\xFA +50 no navegador" : `ba\xFA +50: ${errCode}`;
+        state.lastActionNote = isIntegrity ? `Twitch (${login}): ba\xFA +50 exige clique no navegador` : `Twitch ba\xFA +50 (${login}): ${errCode}`;
+        if (errCode && errCode !== "NOT_FOUND") {
+          runtimeState.claimRetryAt.set(channelKey, now + (isIntegrity ? RETRY_WAIT_MS : 6e4));
+        }
+      }
+    }
+    const lastPing = runtimeState.twitchLastPingAt.get(login) || 0;
+    if (!guardOnly && CONFIG.live?.watchTwitch && broadcastId && userId && (force || now - lastPing >= 55e3)) {
+      const spadeUrl = await discoverSpadeUrl(ctx, login);
+      const encoded = encodeSpadePayload({ channelId, broadcastId, userId, login, game, gameId });
+      const pingRes = await netFetch(ctx, spadeUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: `data=${encodeURIComponent(encoded)}`
+      });
+      if (pingRes.ok) {
+        runtimeState.twitchLastPingAt.set(login, now);
+        status.lastPingAt = now;
+        state.stats.liveMinutesWatched = (state.stats.liveMinutesWatched || 0) + 1;
+      }
+      await touchTwitchHlsSegment(ctx, { token, deviceId }, login);
+    }
+    const canRetryRedeem = force || now >= (runtimeState.redeemRetryAt.twitch.get(login) || 0);
+    if (!probeOnly && CONFIG.live?.autoRedeem && token && balance !== null && canRetryRedeem && activeKinds.length > 0) {
+      const serverNow = Date.now() - (state.liveGameData?.skew || 0);
+      const bonusState = state.liveGameData?.twitch;
+      const thresholdMin = resolveEffectiveThresholdMin(CONFIG.live);
+      const criticalMin = Math.max(15, Number(CONFIG.live?.guardThresholdMin ?? 30) || 30);
+      const orderedKinds = orderBuffsForRedeem(activeKinds, bonusState, CONFIG.live, serverNow);
+      const criticalPending = new Set(
+        orderedKinds.filter((k) => getBonusRemainingMin(bonusState, k, serverNow) <= criticalMin)
+      );
+      for (const kind of orderedKinds) {
+        if (!canRedeemPlatform("twitch", kind, now, force)) continue;
+        const remainingMin = getBonusRemainingMin(bonusState, kind, serverNow);
+        const needsRedeem = force || remainingMin <= thresholdMin;
+        if (!needsRedeem) continue;
+        const deficitMin = Math.max(0, thresholdMin - remainingMin);
+        const preferQuickTurnOn = CONFIG.live?.smartBalance === true && criticalPending.has(kind) && criticalPending.size > 1;
+        const reward = pickRewardForChannel(rewards, kind, "twitch", {
+          tier,
+          balance,
+          deficitMin,
+          preferQuickTurnOn
+        });
+        const unavailable = reward ? Boolean(reward.isPaused || reward.isInStock === false || reward.cooldownExpiresAt) : true;
+        if (!reward || unavailable || balance < reward.cost) continue;
+        const txId = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
+        const redRes = await twitchGqlCall(ctx, { token, deviceId }, {
+          query: "mutation($i:RedeemCommunityPointsCustomRewardInput!){redeemCommunityPointsCustomReward(input:$i){redemption{id} error{code}}}",
+          variables: {
+            i: {
+              channelID: channelId,
+              cost: reward.cost,
+              prompt: reward.prompt ?? null,
+              rewardID: reward.id,
+              title: reward.title,
+              transactionID: txId
+            }
+          }
+        });
+        const p = redRes?.data?.redeemCommunityPointsCustomReward;
+        if (p?.redemption?.id && !p.error && !redRes?.errors?.length) {
+          balance -= reward.cost;
+          criticalPending.delete(kind);
+          recordChannelBalance(state, "twitch", login, balance);
+          status.lastRedeemAt = now;
+          status.redeemedThisStep = true;
+          runtimeState.lastPlatformRedeemAt[`twitch:${kind}`] = now;
+          state.stats.liveRewardsRedeemed = (state.stats.liveRewardsRedeemed || 0) + 1;
+          state.lastActionNote = `Twitch resgatou ${reward.title} (${login})`;
+        } else {
+          runtimeState.redeemRetryAt.twitch.set(login, now + RETRY_WAIT_MS);
+          status.error = p?.error?.code || redRes?.errors?.[0]?.message || redRes?.failed || "resgate recusado";
+          break;
+        }
+      }
+    }
+    status.balance = balance;
+    if (!guardOnly && !status.live) {
+      delete state.liveStatus.twitch[login];
+      runtimeState.lastLiveProbeAt.twitch = 0;
+    }
+    return status;
+  };
+  var kickHeaders = (token) => ({
+    Accept: "application/json",
+    "x-app-platform": "web",
+    ...token ? { Authorization: `Bearer ${token}` } : {}
+  });
+  var sendWsJson = (ws, obj) => {
+    if (ws && ws.readyState === 1) {
+      ws.send(JSON.stringify(obj));
+      return true;
+    }
+    return false;
+  };
+  var flushKickSocketEvents = (ctx, conn, force = false) => {
+    if (!conn?.ws || conn.ws.readyState !== 1) return false;
+    const { state } = ctx;
+    const now = Date.now();
+    if (force || now - conn.lastHandshakeAt >= 15e3) {
+      sendWsJson(conn.ws, { type: "channel_handshake", data: { message: { channelId: String(conn.channelId) } } });
+      conn.lastHandshakeAt = now;
+    }
+    if (force || now - conn.lastPingAt >= 3e4) {
+      sendWsJson(conn.ws, { type: "ping" });
+      conn.lastPingAt = now;
+    }
+    if (force || now - conn.lastWatchAt >= 115e3) {
+      const sent = sendWsJson(conn.ws, {
+        type: "user_event",
+        data: {
+          message: {
+            name: "tracking.user.watch.livestream",
+            channel_id: conn.channelId,
+            livestream_id: conn.livestreamId,
+            vod_id: conn.vodId
+          }
+        }
+      });
+      if (sent) {
+        conn.lastWatchAt = now;
+        state.stats.liveMinutesWatched = (state.stats.liveMinutesWatched || 0) + 2;
+      }
+    }
+    return true;
+  };
+  var ensureKickHeartbeatTimer = (ctx) => {
+    if (runtimeState.kickTimer) return;
+    runtimeState.kickTimer = setInterval(() => {
+      if (!ctx.state?.running || ctx.state?.paused || !ctx.CONFIG?.live?.enabled || !ctx.CONFIG?.live?.watchKick) return;
+      for (const [, conn] of runtimeState.kickSockets) {
+        flushKickSocketEvents(ctx, conn, false);
+      }
+    }, 15e3);
+  };
+  var ensureKickViewerSocket = async (ctx, slug, { token, channelId, livestreamId, vodId, force = false }) => {
+    const { net } = ctx;
+    const createWs = net?.createWebSocket || (typeof WebSocket === "function" ? (url) => new WebSocket(url) : null);
+    if (!createWs) return false;
+    let conn = runtimeState.kickSockets.get(slug);
+    if (!conn || !conn.ws || conn.ws.readyState > 1) {
+      const tokRes = await netFetch(ctx, `${KICK_WS_API_URL}/viewer/v1/token`, {
+        method: "GET",
+        headers: { ...kickHeaders(token), "X-CLIENT-TOKEN": KICK_CLIENT_TOKEN }
+      });
+      if (!tokRes.ok) return false;
+      const tokJson = await tokRes.json();
+      const viewerToken = tokJson?.data?.token;
+      if (!viewerToken) return false;
+      const ws = createWs(`${KICK_WS_URL}?token=${encodeURIComponent(viewerToken)}`);
+      conn = { ws, channelId, livestreamId, vodId, lastHandshakeAt: 0, lastPingAt: 0, lastWatchAt: 0 };
+      runtimeState.kickSockets.set(slug, conn);
+      const onOpen = () => flushKickSocketEvents(ctx, conn, true);
+      if (typeof ws.addEventListener === "function") {
+        ws.addEventListener("open", onOpen);
+      } else if ("onopen" in ws || typeof ws === "object") {
+        ws.onopen = onOpen;
+      }
+    } else {
+      conn.channelId = channelId;
+      conn.livestreamId = livestreamId;
+      conn.vodId = vodId;
+    }
+    ensureKickHeartbeatTimer(ctx);
+    return flushKickSocketEvents(ctx, conn, force);
+  };
+  var readKickPointsAndRewards = async (ctx, slug, headers) => {
+    const ptsRes = await netFetch(ctx, `${KICK_API_URL}/api/v2/channels/${encodeURIComponent(slug)}/points`, { method: "GET", headers });
+    if (!ptsRes.ok) return null;
+    const ptsJson = await ptsRes.json();
+    const points = ptsJson?.data?.points;
+    if (typeof points !== "number") return null;
+    const rewRes = await netFetch(ctx, `${KICK_API_URL}/api/v2/channels/${encodeURIComponent(slug)}/rewards`, { method: "GET", headers });
+    const rewards = rewRes.ok ? (await rewRes.json())?.data || [] : [];
+    return { points, rewards };
+  };
+  var stepKickChannel = async (ctx, slug, { token = "", force = false, guardOnly = false, onlyKind = null, probeOnly = false } = {}) => {
+    var _a;
+    const { CONFIG, state } = ctx;
+    if (!state.liveStatus) state.liveStatus = { twitch: {}, kick: {} };
+    const status = guardOnly ? { balance: null, live: false, wsOpen: false, lastPingAt: 0, lastRedeemAt: 0, redeemedThisStep: false, error: null } : (_a = state.liveStatus.kick)[slug] || (_a[slug] = { balance: null, live: false, wsOpen: false, lastPingAt: 0, lastRedeemAt: 0, redeemedThisStep: false, error: null });
+    status.redeemedThisStep = false;
+    const headers = kickHeaders(token);
+    let live = status.live;
+    if (!guardOnly) {
+      let infoRes = await netFetch(ctx, `${KICK_API_URL}/api/v2/channels/${encodeURIComponent(slug)}/info`, { method: "GET", headers });
+      if (!infoRes.ok) {
+        infoRes = await netFetch(ctx, `${KICK_API_URL}/api/v2/channels/${encodeURIComponent(slug)}`, { method: "GET", headers });
+      }
+      if (!infoRes.ok) {
+        status.error = `erro ${infoRes.status}`;
+        return status;
+      }
+      const rawInfo = await infoRes.json();
+      const info = rawInfo?.data && rawInfo?.id == null ? rawInfo.data : rawInfo;
+      const channelId = info?.id;
+      const stream = info?.livestream;
+      live = Boolean(stream && stream.is_live !== false);
+      const livestreamId = stream?.id || null;
+      const vodId = stream?.vod_id ?? null;
+      status.live = live;
+      status.error = null;
+      if (!live) {
+        const oldConn = runtimeState.kickSockets.get(slug);
+        if (oldConn) {
+          try {
+            oldConn.ws?.close?.();
+          } catch {
+          }
+          runtimeState.kickSockets.delete(slug);
+        }
+        status.wsOpen = false;
+        delete state.liveStatus.kick[slug];
+        runtimeState.lastLiveProbeAt.kick = 0;
+      } else if (CONFIG.live?.watchKick && token && channelId && livestreamId && vodId) {
+        const ok = await ensureKickViewerSocket(ctx, slug, { token, channelId, livestreamId, vodId, force });
+        status.wsOpen = ok;
+        if (ok) status.lastPingAt = Date.now();
+      }
+    }
+    const now = Date.now();
+    const channelKey = slug.toLowerCase();
+    const tier = CONFIG.live?.rewardTier || "cheapest";
+    const configuredKinds = resolveChannelRewardKinds(CONFIG.live, "kick", slug);
+    const activeKinds = onlyKind ? configuredKinds.includes(onlyKind) ? [onlyKind] : [] : configuredKinds;
+    status.rewardKinds = configuredKinds;
+    const lastCheck = runtimeState.kickPointsCheckAt.get(slug) || 0;
+    if (token && (force || guardOnly || now - lastCheck >= 29e4)) {
+      runtimeState.kickPointsCheckAt.set(slug, now);
+      const data = await readKickPointsAndRewards(ctx, slug, headers);
+      if (data) {
+        let { points, rewards } = data;
+        status.balance = points;
+        recordChannelBalance(state, "kick", slug, points);
+        for (const k of LIVE_REWARD_KINDS) {
+          if (!configuredKinds.includes(k)) {
+            runtimeState.guardReads.kick.delete(guardKey(channelKey, k));
+            continue;
+          }
+          const rew = pickRewardForChannel(rewards, k, "kick", { tier, balance: points });
+          if (rew) {
+            runtimeState.guardReads.kick.set(guardKey(channelKey, k), {
+              at: now,
+              points,
+              cost: rew.cost,
+              paused: Boolean(rew.is_paused)
+            });
+          }
+        }
+        const canRetryRedeem = force || now >= (runtimeState.redeemRetryAt.kick.get(slug) || 0);
+        if (!probeOnly && CONFIG.live?.autoRedeem && canRetryRedeem && activeKinds.length > 0) {
+          const serverNow = Date.now() - (state.liveGameData?.skew || 0);
+          const bonusState = state.liveGameData?.kick;
+          const thresholdMin = resolveEffectiveThresholdMin(CONFIG.live);
+          const criticalMin = Math.max(15, Number(CONFIG.live?.guardThresholdMin ?? 30) || 30);
+          const orderedKinds = orderBuffsForRedeem(activeKinds, bonusState, CONFIG.live, serverNow);
+          const criticalPending = new Set(
+            orderedKinds.filter((k) => getBonusRemainingMin(bonusState, k, serverNow) <= criticalMin)
+          );
+          for (const kind of orderedKinds) {
+            if (!canRedeemPlatform("kick", kind, now, force)) continue;
+            const remainingMin = getBonusRemainingMin(bonusState, kind, serverNow);
+            const needsRedeem = force || remainingMin <= thresholdMin;
+            if (!needsRedeem) continue;
+            const deficitMin = Math.max(0, thresholdMin - remainingMin);
+            const preferQuickTurnOn = CONFIG.live?.smartBalance === true && criticalPending.has(kind) && criticalPending.size > 1;
+            const reward = pickRewardForChannel(rewards, kind, "kick", {
+              tier,
+              balance: points,
+              deficitMin,
+              preferQuickTurnOn
+            });
+            if (!reward || reward.is_paused || points < reward.cost) continue;
+            const redRes = await netFetch(ctx, `${KICK_API_URL}/api/v2/channels/${encodeURIComponent(slug)}/rewards/${reward.id}/redeem`, {
+              method: "POST",
+              headers: { ...headers, "Content-Type": "application/json" },
+              body: JSON.stringify({ transaction_id: generateUlid(now), message: "" })
+            });
+            if (redRes.ok) {
+              points -= reward.cost;
+              criticalPending.delete(kind);
+              status.balance = points;
+              recordChannelBalance(state, "kick", slug, points);
+              status.lastRedeemAt = now;
+              status.redeemedThisStep = true;
+              runtimeState.lastPlatformRedeemAt[`kick:${kind}`] = now;
+              state.stats.liveRewardsRedeemed = (state.stats.liveRewardsRedeemed || 0) + 1;
+              state.lastActionNote = `Kick resgatou ${reward.title} (${slug})`;
+            } else {
+              runtimeState.redeemRetryAt.kick.set(slug, now + RETRY_WAIT_MS);
+              status.error = `resgate erro ${redRes.status}`;
+              break;
+            }
+          }
+        }
+      }
+    }
+    return status;
+  };
+  var runBonusGuard = async (ctx, platform, { token, deviceId = "", watched = [], officials = [], customCsv = "" }) => {
+    const { CONFIG, state } = ctx;
+    const now = Date.now();
+    if (!CONFIG.live?.autoRedeem || !token) return false;
+    const serverNow = now - (state.liveGameData?.skew || 0);
+    const bonusState = state.liveGameData?.[platform];
+    const watchedSet = new Set(watched.map((w) => w.toLowerCase()));
+    const defaults = platform === "twitch" ? DEFAULT_TWITCH_OFFICIALS : DEFAULT_KICK_OFFICIALS;
+    const liveSet = /* @__PURE__ */ new Set();
+    const candidates = [];
+    const seen = /* @__PURE__ */ new Set();
+    const addCandidate = (raw, isLive = false) => {
+      const clean = String(raw || "").trim();
+      if (!clean) return;
+      const low = clean.toLowerCase();
+      if (isLive) liveSet.add(low);
+      if (watchedSet.has(low) || seen.has(low)) return;
+      seen.add(low);
+      candidates.push(clean);
+    };
+    String(customCsv || "").split(/[\s,;]+/).forEach((c) => addCandidate(c, false));
+    if (Array.isArray(officials)) {
+      officials.forEach((o) => {
+        if (o && o.ativo !== false) addCandidate(o.login || o.slug, Boolean(o.aoVivo));
+      });
+    }
+    defaults.forEach((c) => addCandidate(c, false));
+    const thresholdMin = resolveEffectiveThresholdMin(CONFIG.live);
+    const eligibleKinds = LIVE_REWARD_KINDS.filter(
+      (kind) => canRedeemPlatform(platform, kind, now, false) && shouldRedeemBonus(bonusState, kind, thresholdMin, serverNow) && candidates.some((ch) => resolveChannelRewardKinds(CONFIG.live, platform, ch).includes(kind))
+    );
+    const kindsToCheck = orderBuffsForRedeem(eligibleKinds, bonusState, CONFIG.live, serverNow);
+    if (kindsToCheck.length === 0) return false;
+    const readsMap = runtimeState.guardReads[platform];
+    const tier = CONFIG.live?.rewardTier || "cheapest";
+    for (const ch of candidates) {
+      if (!state.running) return false;
+      const chKinds = resolveChannelRewardKinds(CONFIG.live, platform, ch).filter((k) => kindsToCheck.includes(k));
+      if (chKinds.length === 0) continue;
+      const allFresh = chKinds.every((k) => {
+        const cached = readsMap.get(guardKey(ch, k));
+        return cached && now - cached.at <= GUARD_READ_TTL_MS;
+      });
+      if (allFresh) continue;
+      if (platform === "twitch") {
+        await stepTwitchChannel(ctx, ch, { token, deviceId, force: false, guardOnly: true, probeOnly: true });
+      } else {
+        const data = await readKickPointsAndRewards(ctx, ch, kickHeaders(token));
+        if (data) {
+          recordChannelBalance(state, "kick", ch, data.points);
+          for (const k of chKinds) {
+            const rew = pickRewardForChannel(data.rewards, k, "kick", { tier, balance: data.points });
+            if (rew) {
+              readsMap.set(guardKey(ch, k), {
+                at: Date.now(),
+                points: data.points,
+                cost: rew.cost,
+                paused: Boolean(rew.is_paused)
+              });
+            }
+          }
+        }
+      }
+    }
+    let redeemedAny = false;
+    for (const kind of kindsToCheck) {
+      if (!state.running || !canRedeemPlatform(platform, kind, Date.now(), false)) continue;
+      const kindCandidates = candidates.filter(
+        (ch) => resolveChannelRewardKinds(CONFIG.live, platform, ch).includes(kind)
+      );
+      const kindReads = /* @__PURE__ */ new Map();
+      for (const ch of kindCandidates) {
+        const entry = readsMap.get(guardKey(ch, kind));
+        if (entry) kindReads.set(ch.toLowerCase(), entry);
+      }
+      const best = pickBonusGuardCandidate(kindCandidates, kindReads, liveSet);
+      if (!best) continue;
+      if (platform === "twitch") {
+        const st = await stepTwitchChannel(ctx, best.channel, { token, deviceId, force: false, guardOnly: true, onlyKind: kind });
+        if (st?.redeemedThisStep) redeemedAny = true;
+      } else {
+        const st = await stepKickChannel(ctx, best.channel, { token, force: false, guardOnly: true, onlyKind: kind });
+        if (st?.redeemedThisStep) redeemedAny = true;
+      }
+    }
+    return redeemedAny;
+  };
+  var runLiveCycle = async (ctx, { force = false } = {}) => {
+    const { CONFIG, state, updateHud } = ctx;
+    if (!state.running || !CONFIG.live?.enabled && !force) return;
+    if (runtimeState.cycleInFlight) return;
+    runtimeState.cycleInFlight = true;
+    try {
+      installGameWsTap(ctx);
+      readDomBonusFallback(ctx);
+      const { twitchToken, twitchDeviceId, kickToken } = await syncCookiesToConfig(ctx);
+      const probeNow = Date.now();
+      const shouldProbeTw = !Array.isArray(state.liveGameData?.twitch?.oficiais) && probeNow - runtimeState.lastLiveProbeAt.twitch >= 12e4;
+      if (shouldProbeTw) {
+        runtimeState.lastLiveProbeAt.twitch = probeNow;
+        const customTw = String(CONFIG.live?.customTwitchChannels || "").split(/[\s,;]+/).filter(Boolean);
+        const knownTw = (state.liveGameData?.twitch?.oficiais || []).map((o) => o?.login).filter(Boolean);
+        const poolTw = [.../* @__PURE__ */ new Set([...customTw, ...knownTw, ...DEFAULT_TWITCH_OFFICIALS])];
+        const liveMap = await checkTwitchLiveBatch(ctx, poolTw).catch(() => ({}));
+        if (Object.keys(liveMap).length > 0) {
+          if (!state.liveGameData) state.liveGameData = { twitch: null, kick: null, skew: 0 };
+          state.liveGameData.twitch = {
+            ...state.liveGameData.twitch || {},
+            canaisConsultados: poolTw.map((login) => ({ login, aoVivo: Boolean(liveMap[login.toLowerCase()]), ativo: true }))
+          };
+        }
+      }
+      const shouldProbeKk = !Array.isArray(state.liveGameData?.kick?.oficiais) && probeNow - runtimeState.lastLiveProbeAt.kick >= 12e4;
+      if (shouldProbeKk) {
+        const customKk = String(CONFIG.live?.customKickChannels || "").split(/[\s,;]+/).filter(Boolean);
+        const knownKk = (state.liveGameData?.kick?.oficiais || []).map((o) => o?.slug).filter(Boolean);
+        const poolKk = [.../* @__PURE__ */ new Set([...customKk, ...knownKk, ...DEFAULT_KICK_OFFICIALS])];
+        const probed = [];
+        for (const slug of poolKk) {
+          if (!state.running) break;
+          try {
+            const r = await netFetch(ctx, `${KICK_API_URL}/api/v2/channels/${encodeURIComponent(slug)}`, { method: "GET", headers: kickHeaders(kickToken) });
+            const j = r.ok ? await r.json().catch(() => null) : null;
+            probed.push({ slug, aoVivo: Boolean(j?.livestream && j.livestream.is_live !== false), ativo: true });
+          } catch {
+            probed.push({ slug, aoVivo: false, ativo: true });
+          }
+        }
+        if (!state.liveGameData) state.liveGameData = { twitch: null, kick: null, skew: 0 };
+        state.liveGameData.kick = { ...state.liveGameData.kick || {}, canaisConsultados: probed };
+        runtimeState.lastLiveProbeAt.kick = probeNow;
+      }
+      const twMaxSlots = Math.max(1, Number(CONFIG.live?.maxTwitchSlots ?? CONFIG.live?.maxSlots) || 4);
+      const kkMaxSlots = Math.max(1, Number(CONFIG.live?.maxKickSlots ?? CONFIG.live?.maxSlots) || 2);
+      const filterOnlyLiveCustom = (csv, oficiais) => {
+        if (!csv) return "";
+        if (!Array.isArray(oficiais) || oficiais.length === 0) return csv;
+        const liveMap = new Map(oficiais.map((o) => [String(o?.login || o?.slug || "").toLowerCase(), Boolean(o?.aoVivo)]));
+        return String(csv).split(/[\s,;]+/).filter((ch) => {
+          const low = ch.trim().toLowerCase();
+          if (!low) return false;
+          return liveMap.has(low) ? liveMap.get(low) : true;
+        }).join(",");
+      };
+      const liveCustomTw = filterOnlyLiveCustom(CONFIG.live?.customTwitchChannels, state.liveGameData?.twitch?.oficiais);
+      const liveCustomKk = filterOnlyLiveCustom(CONFIG.live?.customKickChannels, state.liveGameData?.kick?.oficiais);
+      const channelsFor = (platform) => {
+        const data = state.liveGameData?.[platform];
+        return data?.oficiais ?? data?.canaisConsultados;
+      };
+      const twChannels = selectChannelsToWatch(channelsFor("twitch"), liveCustomTw, twMaxSlots);
+      const kkChannels = selectChannelsToWatch(channelsFor("kick"), liveCustomKk, kkMaxSlots);
+      if (twChannels.length === 0 && kkChannels.length === 0 && force && !runtimeState.modalSyncDone) {
+        await syncChannelsFromModal(ctx, { force: true });
+      }
+      const finalTw = selectChannelsToWatch(channelsFor("twitch"), liveCustomTw, twMaxSlots);
+      const finalKk = selectChannelsToWatch(channelsFor("kick"), liveCustomKk, kkMaxSlots);
+      if (state.liveStatus?.twitch) {
+        const activeTwSet = new Set(finalTw.map((s) => s.toLowerCase()));
+        for (const key of Object.keys(state.liveStatus.twitch)) {
+          if (!activeTwSet.has(key.toLowerCase())) {
+            delete state.liveStatus.twitch[key];
+          }
+        }
+      }
+      if (state.liveStatus?.kick) {
+        const activeKkSet = new Set(finalKk.map((s) => s.toLowerCase()));
+        for (const key of Object.keys(state.liveStatus.kick)) {
+          if (!activeKkSet.has(key.toLowerCase()) || !state.liveStatus.kick[key]?.live) {
+            delete state.liveStatus.kick[key];
+          }
+        }
+      }
+      if (CONFIG.live?.watchTwitch || CONFIG.live?.autoClaimChest || CONFIG.live?.autoRedeem) {
+        for (const login of finalTw) {
+          if (!state.running) break;
+          await stepTwitchChannel(ctx, login, { token: twitchToken, deviceId: twitchDeviceId, force }).catch(() => {
+            const status = state.liveStatus?.twitch?.[login];
+            if (status) status.error || (status.error = "falha de comunica\xE7\xE3o com a Twitch");
+          });
+        }
+        await runBonusGuard(ctx, "twitch", {
+          token: twitchToken,
+          deviceId: twitchDeviceId,
+          watched: finalTw,
+          officials: state.liveGameData?.twitch?.oficiais,
+          customCsv: CONFIG.live?.customTwitchChannels
+        }).catch(() => {
+          state.lastActionNote = "Twitch: falha ao verificar b\xF4nus";
+        });
+      }
+      if (CONFIG.live?.watchKick || CONFIG.live?.autoRedeem) {
+        const activeKk = new Set(finalKk.map((s) => s.toLowerCase()));
+        for (const [slug, conn] of runtimeState.kickSockets.entries()) {
+          if (!activeKk.has(String(slug).toLowerCase())) {
+            try {
+              conn.ws?.close?.();
+            } catch {
+            }
+            runtimeState.kickSockets.delete(slug);
+          }
+        }
+        for (const slug of finalKk) {
+          if (!state.running) break;
+          await stepKickChannel(ctx, slug, { token: kickToken, force }).catch(() => {
+            const status = state.liveStatus?.kick?.[slug];
+            if (status) status.error || (status.error = "falha de comunica\xE7\xE3o com o Kick");
+          });
+        }
+        await runBonusGuard(ctx, "kick", {
+          token: kickToken,
+          watched: finalKk,
+          officials: state.liveGameData?.kick?.oficiais,
+          customCsv: CONFIG.live?.customKickChannels
+        });
+      }
+      if (!twitchToken && !kickToken && (finalTw.length > 0 || finalKk.length > 0)) {
+        state.lastActionNote = "Lives: informe token ou permita GM_cookie";
+      }
+      updateHud?.();
+    } finally {
+      runtimeState.cycleInFlight = false;
+    }
+  };
+  var dispose2 = () => {
+    if (runtimeState.kickTimer) {
+      clearInterval(runtimeState.kickTimer);
+      runtimeState.kickTimer = null;
+    }
+    for (const [, conn] of runtimeState.kickSockets) {
+      try {
+        conn.ws?.close?.();
+      } catch {
+      }
+    }
+    runtimeState.kickSockets.clear();
+    runtimeState.spadeCache.clear();
+    runtimeState.twitchLastPingAt.clear();
+    runtimeState.twitchSeenSegments.clear();
+    runtimeState.kickPointsCheckAt.clear();
+    runtimeState.lastPlatformRedeemAt = {};
+    runtimeState.redeemRetryAt = { twitch: /* @__PURE__ */ new Map(), kick: /* @__PURE__ */ new Map() };
+    runtimeState.claimRetryAt.clear();
+    runtimeState.confirmedClaims.clear();
+    runtimeState.guardReads = { twitch: /* @__PURE__ */ new Map(), kick: /* @__PURE__ */ new Map() };
+    runtimeState.twitchIntegrityCache = { token: null, expiresAt: 0 };
+    runtimeState.lastLiveProbeAt = { twitch: 0, kick: 0 };
+    runtimeState.cycleInFlight = false;
+    runtimeState.modalSyncDone = false;
+  };
+  var liveRewards = {
+    id: "liveRewards",
+    everyMs: (ctx) => ctx.CONFIG.live?.checkIntervalMs ?? 3e4,
+    init: (ctx) => {
+      installGameWsTap(ctx);
+      syncCookiesToConfig(ctx).catch(() => {
+      });
+    },
+    tick: (ctx) => runLiveCycle(ctx, { force: false }),
+    dispose: dispose2,
+    run: runLiveCycle,
+    sync: syncChannelsFromModal
+  };
   return __toCommonJS(index_exports);
 })();
     // Se o gerenciador de userscripts isolar o script (@grant), unsafeWindow é a janela real da página
@@ -2290,7 +3763,7 @@
         window.FarmAnalyzer.stop();
     }
 
-    const VERSION = '6.6'; // preenchido no build a partir do package.json
+    const VERSION = '1.0'; // preenchido no build a partir do package.json
     const HUD_ID = 'pokebot-hud';
     const STYLE_ID = 'pokebot-hud-style';
     // Mantém chaves v60 para preservar Pokédex importada, alertas e preferências
@@ -2299,6 +3772,7 @@
     const STORAGE_DEX_KEY = 'pokeidle_minigame_dex_v60';
     const STORAGE_PASS_NEXT_KEY = 'pokeidle_pass_next_ms_v60';
     const STORAGE_HUNT_QUEUE_KEY = 'pokeidle_hunt_queue_v63';
+    const STORAGE_PREY_DAY_KEY = 'pokeidle_prey_day_v67';
 
     const HUNT_GUIDE_URL = 'https://pokeidleguide.io/#hunt';
     const TETO_DEPOT = 3000;
@@ -2380,6 +3854,9 @@
     const DEPOT_MODES = ['off', 'venda', 'oferenda', 'sacrificio'];
     const TEAM_MODES = ['off', 'equilibrar', 'sazonal'];
     const BOSS_PRIORITIES = ['off', 'qualquer', 'mega', 'tm', 'tickets'];
+    const BALL_PREF_OPTIONS = ['auto', 'poke', 'great', 'super', 'ultra', 'beast'];
+    const SHINY_BALL_OPTIONS = ['best', 'beast', 'ultra', 'super', 'great', 'poke'];
+    const LIVE_REWARD_TYPES = ['xp', 'captura', 'shiny'];
 
     const loadJson = (key, fallback) => {
         try {
@@ -2406,7 +3883,10 @@
         caidos: {
             enabled: savedPrefs.caidosEnabled ?? true,
             smartBallSelect: savedPrefs.smartBallSelect ?? true,
-            highLevelUltraThreshold: 20,
+            preferredBall: BALL_PREF_OPTIONS.includes(savedPrefs.preferredBall) ? savedPrefs.preferredBall : 'auto',
+            shinyBall: SHINY_BALL_OPTIONS.includes(savedPrefs.shinyBall) ? savedPrefs.shinyBall : 'best',
+            highLevelUltraThreshold: typeof savedPrefs.highLevelUltraThreshold === 'number' ? savedPrefs.highLevelUltraThreshold : 20,
+            prioritizeExpiring: savedPrefs.prioritizeExpiring ?? true,
             containerSelector: '#caidos-lista',
             buttonSelector: 'button.caido',
             minThrowIntervalMs: 1200,
@@ -2422,13 +3902,14 @@
             autoUpgradeBalls: savedPrefs.autoUpgradeBalls ?? true,
             minGoldReserve: savedPrefs.minGoldReserve ?? 50000,
             minBalls: 10,
-            targetBalls: 50,
+            targetBalls: typeof savedPrefs.targetBalls === 'number' ? savedPrefs.targetBalls : 50,
             restockSmallPotion: true,
             minPotions: 10,
-            targetPotions: 40,
+            targetPotions: typeof savedPrefs.targetPotions === 'number' ? savedPrefs.targetPotions : 40,
             restockRevive: savedPrefs.restockRevive ?? false,
             minRevives: 5,
-            targetRevives: 20,
+            targetRevives: typeof savedPrefs.targetRevives === 'number' ? savedPrefs.targetRevives : 20,
+            ensureNativeAutoHeal: savedPrefs.ensureNativeAutoHeal ?? true,
             batchButton: '×10',
             maxPurchases: 6,
             buyConfirmTimeoutMs: 2600,
@@ -2447,6 +3928,30 @@
         dailyPass: {
             enabled: savedPrefs.dailyPassEnabled ?? true,
             checkIntervalMs: 60000,
+        },
+        prey: {
+            enabled: savedPrefs.preyEnabled ?? true,
+            checkIntervalMs: 60000,
+        },
+        live: {
+            enabled: savedPrefs.liveEnabled ?? false,
+            watchTwitch: savedPrefs.liveWatchTwitch ?? true,
+            watchKick: savedPrefs.liveWatchKick ?? true,
+            autoClaimChest: savedPrefs.liveAutoClaimChest ?? true,
+            autoRedeem: savedPrefs.liveAutoRedeem ?? true,
+            rewardType: LIVE_REWARD_TYPES.includes(savedPrefs.liveRewardType) ? savedPrefs.liveRewardType : 'xp',
+            guardThresholdMin: typeof savedPrefs.liveGuardThresholdMin === 'number' ? savedPrefs.liveGuardThresholdMin : 30,
+            maxSlots: typeof savedPrefs.liveMaxSlots === 'number' ? savedPrefs.liveMaxSlots : 4,
+            maxTwitchSlots: typeof savedPrefs.liveMaxTwitchSlots === 'number'
+                ? savedPrefs.liveMaxTwitchSlots
+                : (typeof savedPrefs.liveMaxSlots === 'number' ? savedPrefs.liveMaxSlots : 4),
+            maxKickSlots: typeof savedPrefs.liveMaxKickSlots === 'number' ? savedPrefs.liveMaxKickSlots : 2,
+            twitchToken: typeof savedPrefs.liveTwitchToken === 'string' ? savedPrefs.liveTwitchToken : '',
+            twitchDeviceId: typeof savedPrefs.liveTwitchDeviceId === 'string' ? savedPrefs.liveTwitchDeviceId : '',
+            kickToken: typeof savedPrefs.liveKickToken === 'string' ? savedPrefs.liveKickToken : '',
+            customTwitchChannels: typeof savedPrefs.liveCustomTwitch === 'string' ? savedPrefs.liveCustomTwitch : '',
+            customKickChannels: typeof savedPrefs.liveCustomKick === 'string' ? savedPrefs.liveCustomKick : '',
+            checkIntervalMs: 30000,
         },
         team: {
             mode: TEAM_MODES.includes(savedPrefs.teamMode) ? savedPrefs.teamMode : 'off',
@@ -2534,14 +4039,38 @@
             mode: CONFIG.mode,
             caidosEnabled: CONFIG.caidos.enabled,
             smartBallSelect: CONFIG.caidos.smartBallSelect,
+            preferredBall: CONFIG.caidos.preferredBall,
+            shinyBall: CONFIG.caidos.shinyBall,
+            highLevelUltraThreshold: CONFIG.caidos.highLevelUltraThreshold,
+            prioritizeExpiring: CONFIG.caidos.prioritizeExpiring,
             shinyGuardEnabled: CONFIG.shinyGuard.enabled,
             restockEnabled: CONFIG.restock.enabled,
             autoUpgradeBalls: CONFIG.restock.autoUpgradeBalls,
             minGoldReserve: CONFIG.restock.minGoldReserve,
+            targetBalls: CONFIG.restock.targetBalls,
+            targetPotions: CONFIG.restock.targetPotions,
+            targetRevives: CONFIG.restock.targetRevives,
             restockRevive: CONFIG.restock.restockRevive,
+            ensureNativeAutoHeal: CONFIG.restock.ensureNativeAutoHeal,
             topCatchHopEnabled: CONFIG.topCatchHop.enabled,
             depotMode: CONFIG.depot.mode,
             dailyPassEnabled: CONFIG.dailyPass.enabled,
+            preyEnabled: CONFIG.prey.enabled,
+            liveEnabled: CONFIG.live.enabled,
+            liveWatchTwitch: CONFIG.live.watchTwitch,
+            liveWatchKick: CONFIG.live.watchKick,
+            liveAutoClaimChest: CONFIG.live.autoClaimChest,
+            liveAutoRedeem: CONFIG.live.autoRedeem,
+            liveRewardType: CONFIG.live.rewardType,
+            liveGuardThresholdMin: CONFIG.live.guardThresholdMin,
+            liveMaxSlots: CONFIG.live.maxSlots,
+            liveMaxTwitchSlots: CONFIG.live.maxTwitchSlots,
+            liveMaxKickSlots: CONFIG.live.maxKickSlots,
+            liveTwitchToken: CONFIG.live.twitchToken,
+            liveTwitchDeviceId: CONFIG.live.twitchDeviceId,
+            liveKickToken: CONFIG.live.kickToken,
+            liveCustomTwitch: CONFIG.live.customTwitchChannels,
+            liveCustomKick: CONFIG.live.customKickChannels,
             teamMode: CONFIG.team.mode,
             incubatorEnabled: CONFIG.incubator.enabled,
             bossPriority: CONFIG.boss.priority,
@@ -2564,7 +4093,7 @@
         paused: false,
         modalLockOwner: null,
         statusText: 'Ativo',
-        lastActionNote: `Conectado (PokeBot v${VERSION})`,
+        lastActionNote: `Conectado (Nexo PokeBot v${VERSION})`,
         throwPending: false,
         lastThrowAt: 0,
         evolveNextAt: 0,
@@ -2578,6 +4107,10 @@
         unsafeTrainUntil: {},
         nextIncubatorCheckAt: 0,
         lastBossCheckAt: 0,
+        lastPreyCheckAt: 0,
+        preyDoneDay: '',
+        liveGameData: { twitch: null, kick: null, skew: 0 },
+        liveStatus: { twitch: {}, kick: {} },
         lastOptimizedTrainerLevel: null,
         lastMarkerMeta: null,
         huntQueue: Array.isArray(savedQueueStore?.items) ? savedQueueStore.items : [],
@@ -2617,6 +4150,11 @@
             eggsHandled: 0,
             bossEntries: 0,
             shiniesSpotted: 0,
+            preyRolls: 0,
+            mysticBallsThrown: 0,
+            liveMinutesWatched: 0,
+            liveChestsClaimed: 0,
+            liveRewardsRedeemed: 0,
         },
     };
 
@@ -2637,6 +4175,51 @@
         } else {
             setTimeout(fn, 0);
         }
+    };
+
+    const gmFetch = (url, options = {}) => {
+        const gmReq = typeof GM_xmlhttpRequest === 'function' ? GM_xmlhttpRequest : window.GM_xmlhttpRequest;
+        if (typeof gmReq === 'function') {
+            return new Promise((resolve, reject) => {
+                gmReq({
+                    method: options.method || 'GET',
+                    url,
+                    headers: options.headers || {},
+                    data: options.body ?? undefined,
+                    timeout: options.timeoutMs || 15000,
+                    onload: (res) => {
+                        const textVal = res.responseText ?? '';
+                        resolve({
+                            ok: res.status >= 200 && res.status < 300,
+                            status: res.status,
+                            text: async () => textVal,
+                            json: async () => JSON.parse(textVal),
+                        });
+                    },
+                    onerror: (err) => reject(new Error(err?.error || 'GM_xmlhttpRequest failed')),
+                    ontimeout: () => reject(new Error('GM_xmlhttpRequest timeout')),
+                });
+            });
+        }
+        return fetch(url, options);
+    };
+
+    const gmReadCookie = (domain, name) => {
+        const gmCookie = typeof GM_cookie !== 'undefined' ? GM_cookie : window.GM_cookie;
+        if (!gmCookie || typeof gmCookie.list !== 'function') return Promise.resolve(null);
+        return new Promise((resolve) => {
+            try {
+                gmCookie.list({ domain, name }, (cookies, err) => {
+                    if (err || !Array.isArray(cookies) || cookies.length === 0) {
+                        resolve(null);
+                        return;
+                    }
+                    resolve(cookies[0]?.value || null);
+                });
+            } catch {
+                resolve(null);
+            }
+        });
     };
 
     const escapeHtml = (str) =>
@@ -3018,8 +4601,37 @@
         );
     };
 
+    const BALL_KEY_TO_INDEX = { poke: 0, great: 1, super: 2, ultra: 3 };
+    const CAIDOS_BALL_MATCHERS = [
+        { idx: 0, token: 'poke ball', img: 'ball-poke' },
+        { idx: 1, token: 'great ball', img: 'ball-great' },
+        { idx: 2, token: 'super ball', img: 'ball-super' },
+        { idx: 3, token: 'ultra ball', img: 'ball-ultra' },
+        { idx: 4, token: 'beast ball', img: 'ball-beast' },
+    ];
+
+    const readCaidosBallsFallback = () => {
+        const host = document.getElementById('caidos-bolas');
+        if (!host) return null;
+        const buttons = Array.from(host.querySelectorAll('button.caidos-bola'));
+        if (buttons.length === 0) return null;
+        const counts = [0, 0, 0, 0, 0];
+        let matched = 0;
+        for (const btn of buttons) {
+            const title = normalizeText(btn.getAttribute('title') || '');
+            const imgSrc = normalizeText(btn.querySelector('img')?.getAttribute('src') || '');
+            const found = CAIDOS_BALL_MATCHERS.find((m) => title.includes(m.token) || imgSrc.includes(m.img));
+            if (!found) continue;
+            matched++;
+            counts[found.idx] = parseNumber(btn.getAttribute('title') || btn.textContent) ?? 0;
+        }
+        return matched > 0 ? counts : null;
+    };
+
     const getInventorySnapshot = () => {
-        const balls = readChipsByContainer('auto-ball-opts');
+        const autoBalls = readChipsByContainer('auto-ball-opts');
+        const hasAutoBalls = Boolean(autoBalls && autoBalls.length > 0);
+        const balls = hasAutoBalls ? autoBalls : readCaidosBallsFallback();
         const revives = readChipsByContainer('auto-revive-opts');
         const potions = readChipsByContainer('auto-potion-opts');
         const sumValid = (arr) => {
@@ -3028,7 +4640,7 @@
             return valid.length ? valid.reduce((a, b) => a + b, 0) : null;
         };
         return {
-            panelOpen: Boolean(balls),
+            panelOpen: Boolean(hasAutoBalls || balls),
             balls,
             revives,
             potions,
@@ -3042,6 +4654,8 @@
     };
 
     const getTargetBallTier = () => {
+        const prefIdx = BALL_KEY_TO_INDEX[CONFIG.caidos.preferredBall];
+        if (prefIdx !== undefined && BALL_TIERS[prefIdx]) return BALL_TIERS[prefIdx];
         if (!CONFIG.restock.autoUpgradeBalls) return BALL_TIERS[0];
         const { gold } = getTrainerHeaderInfo();
         const available = Math.max(0, (gold ?? 0) - CONFIG.restock.minGoldReserve);
@@ -3084,7 +4698,7 @@
                 border: none; background: rgba(255,255,255,0.12); color: #e8eef8;
                 width: 20px; height: 20px; border-radius: 5px; cursor: pointer; font-size: 12px; padding: 0;
             }
-            #${HUD_ID} .pb-tabs { display: grid; grid-template-columns: repeat(3, 1fr); background: rgba(255,255,255,0.04); }
+            #${HUD_ID} .pb-tabs { display: grid; grid-template-columns: repeat(4, 1fr); background: rgba(255,255,255,0.04); }
             #${HUD_ID} .pb-tab {
                 border: none; background: transparent; color: #94a3b8; padding: 6px 4px;
                 font-size: 11px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent;
@@ -3120,6 +4734,12 @@
             #${HUD_ID} .pb-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
             #${HUD_ID} .pb-actions3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
             #${HUD_ID} .pb-actions4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+            #${HUD_ID} .pb-actions5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+            #${HUD_ID} .pb-grid-cfg {
+                display: grid; grid-template-columns: 1fr 1fr; gap: 5px 6px;
+                background: rgba(255,255,255,0.04); padding: 6px 7px; border-radius: 6px;
+            }
+            #${HUD_ID} .pb-cfg-field { display: flex; flex-direction: column; gap: 2px; }
             #${HUD_ID} .pb-form { display: grid; grid-template-columns: 1fr 74px 54px; gap: 4px; }
             #${HUD_ID} input, #${HUD_ID} select, #${HUD_ID} textarea {
                 background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.15);
@@ -3195,7 +4815,7 @@
             <div class="pb-head" data-pb-drag="1">
                 <div class="pb-title">
                     <span class="pb-dot" data-pb="dot"></span>
-                    <span data-pb="headTitle">PokeBot v${VERSION}</span>
+                    <span data-pb="headTitle">Nexo PokeBot v${VERSION}</span>
                 </div>
                 <div class="pb-head-btns">
                     <button class="pb-icon-btn" data-pb-act="min" title="Minimizar">—</button>
@@ -3205,6 +4825,7 @@
             <div class="pb-tabs">
                 <button class="pb-tab" data-pb-tab="geral">Geral</button>
                 <button class="pb-tab" data-pb-tab="modulos">Módulos</button>
+                <button class="pb-tab" data-pb-tab="lives">Lives</button>
                 <button class="pb-tab" data-pb-tab="radar">Radar/Quiz</button>
             </div>
             <div class="pb-body">
@@ -3266,13 +4887,114 @@
                         <div class="pb-tog pb-span2" data-pb-tog="teamMode"><span>Equipe / Dia Sazonal</span><b data-pb-tval="teamMode">OFF</b></div>
                         <div class="pb-tog pb-span2" data-pb-tog="queueFallback"><span>Fila: Fallback Seguro</span><b data-pb-tval="queueFallback">ON</b></div>
                         <div class="pb-tog pb-span2" data-pb-tog="bossPriority"><span>Auto-Boss (Rotação)</span><b data-pb-tval="bossPriority">OFF</b></div>
+                        <div class="pb-tog pb-span2" data-pb-tog="prey"><span>Auto-Prey (Caçada)</span><b data-pb-tval="prey">ON</b></div>
+                    </div>
+                    <div class="pb-sec">Configurações (Bola &amp; Restock)</div>
+                    <div class="pb-grid-cfg">
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Bola Normal</span>
+                            <select data-pb-cfg="preferredBall">
+                                <option value="auto">Auto Intelig.</option>
+                                <option value="poke">Poke Ball</option>
+                                <option value="great">Great Ball</option>
+                                <option value="super">Super Ball</option>
+                                <option value="ultra">Ultra Ball</option>
+                                <option value="beast">Beast Ball</option>
+                            </select>
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Bola Shiny</span>
+                            <select data-pb-cfg="shinyBall">
+                                <option value="best">Melhor disp.</option>
+                                <option value="beast">Beast Ball</option>
+                                <option value="ultra">Ultra Ball</option>
+                                <option value="super">Super Ball</option>
+                                <option value="great">Great Ball</option>
+                                <option value="poke">Poke Ball</option>
+                            </select>
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Nv p/ Ultra</span>
+                            <input type="number" min="1" max="200" data-pb-cfg="highLevelUltraThreshold" />
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Alvo Bolas</span>
+                            <input type="number" min="10" max="5000" step="10" data-pb-cfg="targetBalls" />
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Alvo Poções</span>
+                            <input type="number" min="0" max="5000" step="10" data-pb-cfg="targetPotions" />
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Reserva Gold</span>
+                            <input type="number" min="0" step="10000" data-pb-cfg="minGoldReserve" />
+                        </label>
                     </div>
                     <div class="pb-sec">Executar Agora</div>
-                    <div class="pb-actions4">
+                    <div class="pb-actions5">
                         <button class="pb-btn" data-pb-act="runDepot">Depot</button>
                         <button class="pb-btn" data-pb-act="runPass">Passe</button>
+                        <button class="pb-btn" data-pb-act="runPrey">Prey</button>
                         <button class="pb-btn" data-pb-act="runEggs">Ovos</button>
                         <button class="pb-btn" data-pb-act="runBoss">Boss</button>
+                    </div>
+                </div>
+
+                <div class="pb-pane" data-pb-pane="lives">
+                    <div class="pb-grid">
+                        <div class="pb-row pb-span2"><span class="pb-lbl">Twitch</span><span class="pb-val" data-pb="liveTwitchInfo">-</span></div>
+                        <div class="pb-row pb-span2"><span class="pb-lbl">Kick</span><span class="pb-val" data-pb="liveKickInfo">-</span></div>
+                        <div class="pb-row pb-span2"><span class="pb-lbl">Pings / Baús / Resg.</span><span class="pb-val" data-pb="liveStatsInfo">0 / 0 / 0</span></div>
+                    </div>
+                    <div class="pb-toggles">
+                        <div class="pb-tog pb-span2" data-pb-tog="liveEnabled"><span>Auto-Lives (Ping &amp; Resgate)</span><b data-pb-tval="liveEnabled">OFF</b></div>
+                        <div class="pb-tog" data-pb-tog="liveWatchTwitch"><span>Twitch Leve</span><b data-pb-tval="liveWatchTwitch">ON</b></div>
+                        <div class="pb-tog" data-pb-tog="liveWatchKick"><span>Kick Leve</span><b data-pb-tval="liveWatchKick">ON</b></div>
+                        <div class="pb-tog" data-pb-tog="liveAutoClaimChest"><span>Baú +50 (TW)</span><b data-pb-tval="liveAutoClaimChest">ON</b></div>
+                        <div class="pb-tog" data-pb-tog="liveAutoRedeem"><span>Auto-Resgatar</span><b data-pb-tval="liveAutoRedeem">ON</b></div>
+                    </div>
+                    <div class="pb-grid-cfg">
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Bônus Alvo</span>
+                            <select data-pb-cfg="liveRewardType">
+                                <option value="xp">XP (+15%)</option>
+                                <option value="captura">Captura (+15%)</option>
+                                <option value="shiny">Shiny Lure (+15%)</option>
+                            </select>
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Guarda (min)</span>
+                            <input type="number" min="0" max="600" data-pb-cfg="liveGuardThresholdMin" />
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Lives Twitch</span>
+                            <input type="number" min="1" max="12" data-pb-cfg="liveMaxTwitchSlots" />
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Lives Kick</span>
+                            <input type="number" min="1" max="12" data-pb-cfg="liveMaxKickSlots" />
+                        </label>
+                        <label class="pb-cfg-field pb-span2">
+                            <span class="pb-lbl">Token Twitch (auth-token)</span>
+                            <input type="password" data-pb-cfg="liveTwitchToken" placeholder="Auto (cookie) ou cole auth-token" />
+                        </label>
+                        <label class="pb-cfg-field pb-span2">
+                            <span class="pb-lbl">Token Kick (session_token)</span>
+                            <input type="password" data-pb-cfg="liveKickToken" placeholder="Auto (cookie) ou cole session_token" />
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Canais TW (extra)</span>
+                            <input type="text" data-pb-cfg="liveCustomTwitch" placeholder="canal1, canal2" />
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Canais KK (extra)</span>
+                            <input type="text" data-pb-cfg="liveCustomKick" placeholder="slug1, slug2" />
+                        </label>
+                    </div>
+                    <div class="pb-actions">
+                        <button class="pb-btn" data-pb-act="runLives">Rodar Lives Agora</button>
+                        <button class="pb-btn" data-pb-act="syncLives">Ler Canais do Jogo</button>
+                        <button class="pb-btn pb-span2" data-pb-act="copyHeadless">Copiar Sessão Headless</button>
                     </div>
                 </div>
 
@@ -3377,6 +5099,12 @@
                 if (key === 'restockRevive') CONFIG.restock.restockRevive = !CONFIG.restock.restockRevive;
                 if (key === 'topCatchHop') CONFIG.topCatchHop.enabled = !CONFIG.topCatchHop.enabled;
                 if (key === 'dailyPass') CONFIG.dailyPass.enabled = !CONFIG.dailyPass.enabled;
+                if (key === 'prey') CONFIG.prey.enabled = !CONFIG.prey.enabled;
+                if (key === 'liveEnabled') CONFIG.live.enabled = !CONFIG.live.enabled;
+                if (key === 'liveWatchTwitch') CONFIG.live.watchTwitch = !CONFIG.live.watchTwitch;
+                if (key === 'liveWatchKick') CONFIG.live.watchKick = !CONFIG.live.watchKick;
+                if (key === 'liveAutoClaimChest') CONFIG.live.autoClaimChest = !CONFIG.live.autoClaimChest;
+                if (key === 'liveAutoRedeem') CONFIG.live.autoRedeem = !CONFIG.live.autoRedeem;
                 if (key === 'incubator') {
                     CONFIG.incubator.enabled = !CONFIG.incubator.enabled;
                     state.nextIncubatorCheckAt = 0;
@@ -3439,10 +5167,18 @@
                 }
             } else if (act === 'runPass') {
                 checkDailyPass(true);
+            } else if (act === 'runPrey') {
+                checkPrey(true);
             } else if (act === 'runEggs') {
                 checkIncubator(true);
             } else if (act === 'runBoss') {
                 checkBosses(true);
+            } else if (act === 'runLives') {
+                checkLives(true);
+            } else if (act === 'syncLives') {
+                syncLives(true);
+            } else if (act === 'copyHeadless') {
+                exportarSessaoHeadless(true);
             } else if (act === 'importDex') {
                 abrirSeletorCsvPokedex();
             } else if (act === 'addAlert') {
@@ -3463,6 +5199,54 @@
 
         hud.addEventListener('click', onHudClick);
         state.cleanupListeners.push(() => hud.removeEventListener('click', onHudClick));
+
+        const onHudChange = (e) => {
+            const cfgEl = e.target.closest('[data-pb-cfg]');
+            if (!cfgEl) return;
+            const key = cfgEl.getAttribute('data-pb-cfg');
+            if (key === 'preferredBall' && BALL_PREF_OPTIONS.includes(cfgEl.value)) {
+                CONFIG.caidos.preferredBall = cfgEl.value;
+            } else if (key === 'shinyBall' && SHINY_BALL_OPTIONS.includes(cfgEl.value)) {
+                CONFIG.caidos.shinyBall = cfgEl.value;
+            } else if (key === 'highLevelUltraThreshold') {
+                const v = parseInt(cfgEl.value, 10);
+                if (!Number.isNaN(v)) CONFIG.caidos.highLevelUltraThreshold = Math.max(1, Math.min(200, v));
+            } else if (key === 'targetBalls') {
+                const v = parseInt(cfgEl.value, 10);
+                if (!Number.isNaN(v)) CONFIG.restock.targetBalls = Math.max(10, Math.min(5000, v));
+            } else if (key === 'targetPotions') {
+                const v = parseInt(cfgEl.value, 10);
+                if (!Number.isNaN(v)) CONFIG.restock.targetPotions = Math.max(0, Math.min(5000, v));
+            } else if (key === 'minGoldReserve') {
+                const v = parseInt(cfgEl.value, 10);
+                if (!Number.isNaN(v)) CONFIG.restock.minGoldReserve = Math.max(0, v);
+            } else if (key === 'liveRewardType' && LIVE_REWARD_TYPES.includes(cfgEl.value)) {
+                CONFIG.live.rewardType = cfgEl.value;
+            } else if (key === 'liveGuardThresholdMin') {
+                const v = parseInt(cfgEl.value, 10);
+                if (!Number.isNaN(v)) CONFIG.live.guardThresholdMin = Math.max(0, Math.min(600, v));
+            } else if (key === 'liveMaxTwitchSlots') {
+                const v = parseInt(cfgEl.value, 10);
+                if (!Number.isNaN(v)) CONFIG.live.maxTwitchSlots = Math.max(1, Math.min(12, v));
+            } else if (key === 'liveMaxKickSlots') {
+                const v = parseInt(cfgEl.value, 10);
+                if (!Number.isNaN(v)) CONFIG.live.maxKickSlots = Math.max(1, Math.min(12, v));
+            } else if (key === 'liveTwitchToken') {
+                CONFIG.live.twitchToken = cfgEl.value.trim();
+            } else if (key === 'liveKickToken') {
+                CONFIG.live.kickToken = cfgEl.value.trim();
+            } else if (key === 'liveCustomTwitch') {
+                CONFIG.live.customTwitchChannels = cfgEl.value.trim();
+            } else if (key === 'liveCustomKick') {
+                CONFIG.live.customKickChannels = cfgEl.value.trim();
+            } else {
+                return;
+            }
+            persistPrefs();
+            updateHud();
+        };
+        hud.addEventListener('change', onHudChange);
+        state.cleanupListeners.push(() => hud.removeEventListener('change', onHudChange));
 
         // Digitar/colar nos campos do HUD não deve disparar atalhos do jogo
         const stopKeys = (e) => {
@@ -3522,7 +5306,7 @@
             );
         }
 
-        setText('headTitle', `PokeBot v${VERSION} · ${state.shinyAlertActive ? '✨ SHINY!' : state.statusText}`);
+        setText('headTitle', `Nexo PokeBot v${VERSION} · ${state.shinyAlertActive ? '✨ SHINY!' : state.statusText}`);
         setText('poke', poke ? `${poke.name} Nv${poke.level ?? '?'} (${poke.types.join('/') || '-'})` : '-');
         setText('regiao', farm ? farm.regiao : '-');
         setText(
@@ -3549,6 +5333,22 @@
         );
         setText('pauseBtn', state.paused ? 'Retomar' : 'Pausar');
         setText('dexCount', String(state.dexCatalog.length));
+        const fmtSiteStatus = (entries) => {
+            const list = Object.entries(entries || {});
+            if (list.length === 0) return '-';
+            return list
+                .map(([name, info]) => {
+                    const pts = info.balance !== null && info.balance !== undefined ? `${info.balance}pts` : '?';
+                    return `${name}:${info.live ? 'ON' : 'off'}(${pts})`;
+                })
+                .join(' · ');
+        };
+        setText('liveTwitchInfo', fmtSiteStatus(state.liveStatus?.twitch));
+        setText('liveKickInfo', fmtSiteStatus(state.liveStatus?.kick));
+        setText(
+            'liveStatsInfo',
+            `${state.stats.liveMinutesWatched}m / ${state.stats.liveChestsClaimed} / ${state.stats.liveRewardsRedeemed}`
+        );
         setText('note', isInSpecialArena() ? 'Arena especial (protegido)' : state.lastActionNote);
 
         if (state.hudCache.__mode !== CONFIG.mode) {
@@ -3567,6 +5367,12 @@
             restockRevive: [CONFIG.restock.restockRevive, CONFIG.restock.restockRevive ? 'ON' : 'OFF'],
             topCatchHop: [CONFIG.topCatchHop.enabled, CONFIG.topCatchHop.enabled ? 'ON' : 'OFF'],
             dailyPass: [CONFIG.dailyPass.enabled, CONFIG.dailyPass.enabled ? 'ON' : 'OFF'],
+            prey: [CONFIG.prey.enabled, CONFIG.prey.enabled ? 'ON' : 'OFF'],
+            liveEnabled: [CONFIG.live.enabled, CONFIG.live.enabled ? 'ON' : 'OFF'],
+            liveWatchTwitch: [CONFIG.live.watchTwitch, CONFIG.live.watchTwitch ? 'ON' : 'OFF'],
+            liveWatchKick: [CONFIG.live.watchKick, CONFIG.live.watchKick ? 'ON' : 'OFF'],
+            liveAutoClaimChest: [CONFIG.live.autoClaimChest, CONFIG.live.autoClaimChest ? 'ON' : 'OFF'],
+            liveAutoRedeem: [CONFIG.live.autoRedeem, CONFIG.live.autoRedeem ? 'ON' : 'OFF'],
             incubator: [CONFIG.incubator.enabled, CONFIG.incubator.enabled ? 'ON' : 'OFF'],
             autoRegion: [CONFIG.autoRegion.enabled, CONFIG.autoRegion.enabled ? 'ON' : 'OFF'],
             evolve: [CONFIG.evolve.enabled, CONFIG.evolve.enabled ? 'ON' : 'OFF'],
@@ -3585,6 +5391,29 @@
             const val = hud.querySelector(`[data-pb-tval="${key}"]`);
             if (box) box.classList.toggle('on', isOn);
             if (val) val.textContent = label;
+        });
+
+        const cfgValues = {
+            preferredBall: CONFIG.caidos.preferredBall,
+            shinyBall: CONFIG.caidos.shinyBall,
+            highLevelUltraThreshold: String(CONFIG.caidos.highLevelUltraThreshold),
+            targetBalls: String(CONFIG.restock.targetBalls),
+            targetPotions: String(CONFIG.restock.targetPotions),
+            minGoldReserve: String(CONFIG.restock.minGoldReserve),
+            liveRewardType: CONFIG.live.rewardType,
+            liveGuardThresholdMin: String(CONFIG.live.guardThresholdMin),
+            liveMaxTwitchSlots: String(CONFIG.live.maxTwitchSlots),
+            liveMaxKickSlots: String(CONFIG.live.maxKickSlots),
+            liveTwitchToken: CONFIG.live.twitchToken,
+            liveKickToken: CONFIG.live.kickToken,
+            liveCustomTwitch: CONFIG.live.customTwitchChannels,
+            liveCustomKick: CONFIG.live.customKickChannels,
+        };
+        Object.entries(cfgValues).forEach(([key, val]) => {
+            const el = hud.querySelector(`[data-pb-cfg="${key}"]`);
+            if (el && document.activeElement !== el && el.value !== val) {
+                el.value = val;
+            }
         });
 
         renderQuizCandidates();
@@ -3674,6 +5503,13 @@
             filaHuntProximo: state.huntQueue.length ? state.huntQueue[state.huntQueueIndex % state.huntQueue.length]?.name : '-',
             filaFallbackSeguro: CONFIG.huntQueue.fallbackToSafeArea,
             autoEvoluir: CONFIG.evolve.enabled,
+            bolaPreferida: CONFIG.caidos.preferredBall,
+            bolaShiny: CONFIG.caidos.shinyBall,
+            autoPrey: CONFIG.prey.enabled,
+            autoLives: CONFIG.live.enabled,
+            liveBonusAlvo: CONFIG.live.rewardType,
+            liveBaus: state.stats.liveChestsClaimed,
+            liveResgates: state.stats.liveRewardsRedeemed,
             xpPokeHora: native?.xpPokemonH ?? (farm ? farm.xpPokeMin * 60 : 0),
             lucroHora: native?.lucroH ?? (farm ? farm.lucroLiqMin * 60 : 0),
             capturasSessao: native?.capturas ?? state.stats.captures,
@@ -3682,6 +5518,73 @@
         };
         console.table(info);
         return info;
+    };
+
+    const readPageLocalStorage = (key) => {
+        try {
+            const val = pageWin?.localStorage?.getItem(key);
+            if (val !== null && val !== undefined) return val;
+        } catch {
+            // fallback para localStorage da janela atual
+        }
+        try {
+            return window.localStorage.getItem(key);
+        } catch {
+            return null;
+        }
+    };
+
+    const exportarSessaoHeadless = async (copyToClipboard = true) => {
+        let sessao = null;
+        try {
+            const raw = readPageLocalStorage('sessao');
+            sessao = raw ? JSON.parse(raw) : null;
+        } catch {
+            sessao = null;
+        }
+        if (!sessao?.token) {
+            state.lastActionNote = 'Faça login no jogo antes de exportar sessão.';
+            updateHud();
+            return { ok: false, error: 'Sessão ausente' };
+        }
+
+        const dispositivo = readPageLocalStorage('id-dispositivo') || '';
+        const nick = sessao.nick || '';
+        const provedor = sessao.provedor || '';
+        const data = {
+            nick,
+            token: sessao.token,
+            provedor,
+            dispositivo,
+            env: `POKEIDLE_NICK="${nick}" POKEIDLE_TOKEN="${sessao.token}"`,
+            command: `node headless-farm.mjs --nick ${nick} --token <token>`,
+        };
+        const json = JSON.stringify(
+            {
+                nick,
+                token: sessao.token,
+                provedor,
+                dispositivo,
+                updatedAt: Date.now(),
+            },
+            null,
+            2
+        );
+
+        let copied = false;
+        if (copyToClipboard && navigator.clipboard?.writeText) {
+            try {
+                await navigator.clipboard.writeText(json);
+                copied = true;
+            } catch {
+                // clipboard indisponivel ou sem permissao
+            }
+        }
+        state.lastActionNote = copied
+            ? 'Sessão Headless copiada (.pokebot-session.json)!'
+            : 'Sessão Headless pronta no objeto retornado.';
+        updateHud();
+        return { ok: true, json, data };
     };
 
     window.PokeBot = {
@@ -3703,6 +5606,10 @@
         hopTopCatch: () => hopNextTopCatchArea(true),
         rodarDepot: () => runDepotManager(true),
         checarPasse: () => checkDailyPass(true),
+        checarPrey: () => checkPrey(true),
+        checarLives: () => checkLives(true),
+        sincronizarLives: () => syncLives(true),
+        exportarSessaoHeadless,
         checarOvos: () => checkIncubator(true),
         checarBoss: () => checkBosses(true),
         restockNow: () => smartRestock(true),
@@ -3726,17 +5633,28 @@
     const moduleCtx = {
         CONFIG,
         state,
+        pageWin,
         sleep,
         randomDelay,
         withModalLock,
         updateHud,
+        persistPrefs,
         setStatus,
         playBeep,
+        net: {
+            fetch: gmFetch,
+            readCookie: gmReadCookie,
+            createWebSocket: (url) => {
+                const Ws = pageWin?.WebSocket || window.WebSocket;
+                return new Ws(url);
+            },
+        },
         keys: {
             passNext: STORAGE_PASS_NEXT_KEY,
             dex: STORAGE_DEX_KEY,
             history: STORAGE_HISTORY_KEY,
             huntQueue: STORAGE_HUNT_QUEUE_KEY,
+            preyDay: STORAGE_PREY_DAY_KEY,
         },
         storage: {
             get: (key) => localStorage.getItem(key),
@@ -3785,8 +5703,13 @@
     runtime.register(PokeBotModules.huntQueue);
     runtime.register(PokeBotModules.hubSheet);
     runtime.register(PokeBotModules.mapHop);
+    runtime.register(PokeBotModules.prey);
+    runtime.register(PokeBotModules.liveRewards);
 
     const checkDailyPass = (force = false) => runtime.call('dailyPass', 'claim', { force });
+    const checkPrey = (force = false) => runtime.call('prey', 'check', { force });
+    const checkLives = (force = false) => runtime.call('liveRewards', 'run', { force });
+    const syncLives = (force = true) => runtime.call('liveRewards', 'sync', { force });
     const autoEvolveCheck = () => runtime.call('autoEvolve', 'tick');
     const processCaidos = (container) => runtime.call('capture', 'process', container);
     const ensureCaidosObserver = () => runtime.call('capture', 'ensureObserver');
@@ -3835,5 +5758,5 @@
     runtime.start();
 
     updateHud();
-    console.log(`[PokeBot v${VERSION}] Ativo!`);
+    console.log(`[Nexo PokeBot v${VERSION}] Ativo!`);
 })();

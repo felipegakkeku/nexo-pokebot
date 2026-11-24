@@ -4,17 +4,28 @@
     const moduleCtx = {
         CONFIG,
         state,
+        pageWin,
         sleep,
         randomDelay,
         withModalLock,
         updateHud,
+        persistPrefs,
         setStatus,
         playBeep,
+        net: {
+            fetch: gmFetch,
+            readCookie: gmReadCookie,
+            createWebSocket: (url) => {
+                const Ws = pageWin?.WebSocket || window.WebSocket;
+                return new Ws(url);
+            },
+        },
         keys: {
             passNext: STORAGE_PASS_NEXT_KEY,
             dex: STORAGE_DEX_KEY,
             history: STORAGE_HISTORY_KEY,
             huntQueue: STORAGE_HUNT_QUEUE_KEY,
+            preyDay: STORAGE_PREY_DAY_KEY,
         },
         storage: {
             get: (key) => localStorage.getItem(key),
@@ -63,8 +74,13 @@
     runtime.register(PokeBotModules.huntQueue);
     runtime.register(PokeBotModules.hubSheet);
     runtime.register(PokeBotModules.mapHop);
+    runtime.register(PokeBotModules.prey);
+    runtime.register(PokeBotModules.liveRewards);
 
     const checkDailyPass = (force = false) => runtime.call('dailyPass', 'claim', { force });
+    const checkPrey = (force = false) => runtime.call('prey', 'check', { force });
+    const checkLives = (force = false) => runtime.call('liveRewards', 'run', { force });
+    const syncLives = (force = true) => runtime.call('liveRewards', 'sync', { force });
     const autoEvolveCheck = () => runtime.call('autoEvolve', 'tick');
     const processCaidos = (container) => runtime.call('capture', 'process', container);
     const ensureCaidosObserver = () => runtime.call('capture', 'ensureObserver');

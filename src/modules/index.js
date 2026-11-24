@@ -19,3 +19,21 @@ export { pure };
 export { teamSeason, getTeamCards, triggerTeamSwap } from './team-season.js';
 export { rmtRadar, parseRmtPriceEl } from './rmt-radar.js';
 export { miniGames, dexNumberToRegion } from './minigames.js';
+export { prey, pickBestPreyCell, checkPrey } from './prey.js';
+export {
+    liveRewards,
+    DEFAULT_TWITCH_OFFICIALS,
+    DEFAULT_KICK_OFFICIALS,
+    rewardRegexForKind,
+    pickCheapestReward,
+    pickBonusGuardCandidate,
+    encodeSpadePayload,
+    generateUlid,
+    shouldRedeemBonus,
+    selectChannelsToWatch,
+    checkTwitchLiveBatch,
+    stepTwitchChannel,
+    stepKickChannel,
+    syncChannelsFromModal,
+    runLiveCycle,
+} from './live-rewards.js';

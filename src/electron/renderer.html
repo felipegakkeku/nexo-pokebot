@@ -1,0 +1,545 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://raw.githubusercontent.com data:; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+  <title>Nexo PokeBot v1.0</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <img src="../../assets/nexo-pokebot-icon.png" width="28" height="28" alt="Nexo PokeBot" class="brand-icon" />
+        <span class="brand-title">Nexo PokeBot</span>
+        <span class="brand-ver">v1.0</span>
+      </div>
+
+      <nav class="account-tabs" id="accountTabs" aria-label="Contas">
+        <button type="button" class="acc-tab active" data-acc="1">
+          <span class="acc-dot" id="dot-1"></span>
+          <span class="acc-meta">
+            <span class="acc-name" id="tabName-1">Conta 1</span>
+            <span class="acc-sub" id="tabSub-1">Offline</span>
+          </span>
+        </button>
+        <button type="button" class="acc-tab" data-acc="2">
+          <span class="acc-dot" id="dot-2"></span>
+          <span class="acc-meta">
+            <span class="acc-name" id="tabName-2">Conta 2</span>
+            <span class="acc-sub" id="tabSub-2">Offline</span>
+          </span>
+        </button>
+        <button type="button" class="acc-tab" data-acc="3">
+          <span class="acc-dot" id="dot-3"></span>
+          <span class="acc-meta">
+            <span class="acc-name" id="tabName-3">Conta 3</span>
+            <span class="acc-sub" id="tabSub-3">Offline</span>
+          </span>
+        </button>
+        <button type="button" class="acc-tab" data-acc="4">
+          <span class="acc-dot" id="dot-4"></span>
+          <span class="acc-meta">
+            <span class="acc-name" id="tabName-4">Conta 4</span>
+            <span class="acc-sub" id="tabSub-4">Offline</span>
+          </span>
+        </button>
+      </nav>
+
+      <div class="segmented" role="group" aria-label="Modo de exibição">
+        <button type="button" class="seg-btn active" data-view="split">Painel + Jogo</button>
+        <button type="button" class="seg-btn" data-view="grid">Grade 2x2</button>
+        <button type="button" class="seg-btn" data-view="panel-only">Só Painel (Eco)</button>
+      </div>
+
+      <div class="top-actions">
+        <div class="pix-wrap hidden" id="pixSupport" data-pix-key="0a2a3538-4d9e-4eeb-836e-5ee6136ab7ff">
+          <button type="button" class="btn sm pix-btn" id="btnPixToggle" aria-expanded="false" aria-controls="pixPopover" title="Apoiar o desenvolvimento do Nexo PokeBot">Apoiar ♥</button>
+          <div class="pix-popover hidden" id="pixPopover" role="dialog" aria-label="Apoiar o Nexo PokeBot">
+            <div class="pix-pop-title">Apoiar o Nexo PokeBot</div>
+            <div class="pix-pop-sub">Chave Pix aleatória do projeto:</div>
+            <div class="pix-key-row">
+              <code id="pixKey"></code>
+              <button type="button" class="btn sm primary" id="copyPix">Copiar</button>
+            </div>
+            <div class="pix-pop-status" id="pixStatus" role="status"></div>
+            <div class="pix-pop-gold">Ou se preferir envie gold para "gake" no jogo kkkkkkk</div>
+          </div>
+        </div>
+        <button type="button" class="btn sm primary" id="btnAllHeadless" title="Fecha todos os jogos embutidos e mantém as contas farmando em Headless (~90% menos RAM/CPU)">Modo Eco</button>
+        <button type="button" class="btn sm" id="btnAwake" title="Impedir o Windows de suspender enquanto farma">PC Acordado</button>
+        <button type="button" class="btn sm" id="btnTray">Bandeja</button>
+      </div>
+    </header>
+
+    <main class="workspace mode-split" id="workspace">
+      <section class="control-pane">
+        <div class="acc-header">
+          <div class="acc-header-top">
+            <div class="acc-header-title">
+              <h2 id="hdrNick">Conta 1</h2>
+              <span class="status-pill" id="hdrStatus">OFFLINE</span>
+            </div>
+            <button type="button" class="btn sm" id="btnOpenWeb">Painel Web</button>
+          </div>
+          <div class="trainer-line" id="hdrTrainerLine">Carregando conta...</div>
+          <div class="acc-actions">
+            <button type="button" class="btn primary" id="btnStartHeadless">Iniciar Headless</button>
+            <button type="button" class="btn teal" id="btnToggleEmbedded">Abrir no Embutido</button>
+            <button type="button" class="btn" id="btnPause">Pausar</button>
+          </div>
+        </div>
+
+        <div class="subtabs" id="subtabs">
+          <button type="button" class="subtab active" data-subtab="overview">Visão geral</button>
+          <button type="button" class="subtab" data-subtab="automation">Automação</button>
+          <button type="button" class="subtab" data-subtab="connections">Conexões</button>
+          <button type="button" class="subtab" data-subtab="lives">Lives</button>
+          <button type="button" class="subtab" data-subtab="activity">Atividade</button>
+        </div>
+
+        <div class="pane-scroll">
+          <!-- VISÃO GERAL -->
+          <div id="tab-overview" class="tab-panel">
+            <div class="card">
+              <h3>Pokémon ativo e hunt</h3>
+              <div class="poke-row">
+                <div class="poke-sprite" id="pokeSprite">?</div>
+                <div style="flex:1;min-width:0;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;">
+                    <strong id="pokeName" style="font-size:14.5px;">Aguardando Pokémon</strong>
+                    <span id="pokeHpTxt" style="font-size:11px;color:var(--muted);">0 / 0 HP</span>
+                  </div>
+                  <div class="hp-track"><div class="hp-fill" id="pokeHpFill" style="width:0%"></div></div>
+                  <div class="hunt-note" id="huntLine">Hunt atual: -</div>
+                  <div class="hunt-guide-badge" id="huntGuideLine"></div>
+                </div>
+              </div>
+              <div class="hunt-row">
+                <select id="huntSelect"></select>
+                <button type="button" class="btn" id="btnChangeHunt">Trocar hunt</button>
+                <button type="button" class="btn center-btn" id="btnGoCenter" title="Ir para o Centro Médico (disponível ao sair de combate, mesma contagem da troca de hunt)">Centro Médico</button>
+              </div>
+              <div class="pending-hunt-bar hidden" id="pendingHuntBar">
+                <span id="pendingHuntText"></span>
+                <button type="button" class="btn sm" id="btnCancelPendingHunt">Cancelar</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-head-row">
+                <h3>Desempenho e eficiência</h3>
+                <button type="button" class="btn sm" id="btnResetStats" title="Zerar contadores e drops desta sessão">Zerar sessão</button>
+              </div>
+              <div class="kpis">
+                <div class="kpi green"><div class="lbl">Abates</div><div class="val" id="kKills">0</div><div class="sub" id="kKillsSub">0/min</div></div>
+                <div class="kpi"><div class="lbl">XP Ganho</div><div class="val" id="kXp">0</div><div class="sub" id="kXpSub">0/h</div></div>
+                <div class="kpi amber"><div class="lbl">Lucro Líquido</div><div class="val" id="kGold">0</div><div class="sub" id="kGoldSub">0/h</div></div>
+                <div class="kpi purple"><div class="lbl">Capturas</div><div class="val" id="kCaps">0</div><div class="sub" id="kCapsSub">0 shinies · 0 bolas</div></div>
+              </div>
+              <div class="eff-grid" id="effGrid">
+                <div class="eff-chip"><span>Tempo / abate</span><b id="eAvgKill">-</b><small id="eAvgKillSub">0/min</small></div>
+                <div class="eff-chip"><span>Capturas / abate</span><b id="eCapKill">-</b><small id="eCapKillSub">sem amostras</small></div>
+                <div class="eff-chip"><span>Bolas / captura</span><b id="eBallCap">-</b><small id="eBallCapSub">0% acerto</small></div>
+                <div class="eff-chip"><span>Gasto vs Bruto</span><b id="eSpent">0</b><small id="eBrutoSub">bruto: 0</small></div>
+                <div class="eff-chip"><span>Shinies sessão</span><b id="eShinies">0 / 0</b><small id="eShiniesSub">cap / vistos</small></div>
+                <div class="eff-chip"><span>Sobrevivência</span><b id="eSurv">0 poç · 0 rev</b><small id="eSurvSub">0 mortes</small></div>
+              </div>
+            </div>
+
+            <div class="card" id="dropsCard">
+              <div class="card-head-row">
+                <h3>Drops da sessão</h3>
+                <span class="focus-badge" id="dropsFocusBadge">XP / Gold / Shiny</span>
+              </div>
+              <div class="drop-filter-bar" id="dropFilterBar">
+                <button type="button" class="filter-pill active" data-drop-cat="outland">Outland</button>
+                <button type="button" class="filter-pill active" data-drop-cat="unova">Ovo Shiny</button>
+                <button type="button" class="filter-pill active" data-drop-cat="boss">Boss</button>
+                <button type="button" class="filter-pill" data-drop-cat="stone" title="Pedras de evolução comuns (Fire, Water, Thunder...)">Stones</button>
+                <button type="button" class="filter-pill active" data-drop-cat="other">Outros</button>
+                <button type="button" class="filter-pill restore hidden" id="btnRestoreDrops">Mostrar ocultos</button>
+              </div>
+              <div class="drops-grid" id="dropsGrid"></div>
+              <div class="recent-drops" id="recentDropsList"></div>
+            </div>
+
+            <div class="card">
+              <h3>Mochila</h3>
+              <div class="inv-grid" id="invGrid"></div>
+            </div>
+
+            <div class="card">
+              <h3>Ações rápidas</h3>
+              <div class="quick-grid">
+                <button type="button" class="btn" id="btnRestockNow">Repor itens</button>
+                <button type="button" class="btn" id="btnPassNow">Resgatar passe</button>
+                <button type="button" class="btn" id="btnPreyNow">Rolar Prey</button>
+                <button type="button" class="btn" id="btnLivesNow">Coletar das lives</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- AUTOMAÇÃO -->
+          <div id="tab-automation" class="tab-panel hidden">
+            <div class="card">
+              <h3>Rotinas automáticas</h3>
+              <div class="toggle-list" id="cfgToggles">
+                <label class="toggle-item"><input type="checkbox" id="cCaidos" /> Capturar Pokémon caídos</label>
+                <label class="toggle-item"><input type="checkbox" id="cNativeHeal" /> Usar cura e Revive do jogo</label>
+                <label class="toggle-item"><input type="checkbox" id="cRestock" /> Repor itens no mercado</label>
+                <label class="toggle-item"><input type="checkbox" id="cPass" /> Resgatar o passe diário</label>
+                <label class="toggle-item"><input type="checkbox" id="cPrey" /> Rolar o Prey diário</label>
+                <label class="toggle-item"><input type="checkbox" id="cLives" /> Coletar recompensas de lives</label>
+                <label class="toggle-item"><input type="checkbox" id="cLiveSmart" /> Balancear buffs das lives até a meta</label>
+                <label class="toggle-item"><input type="checkbox" id="cEconomy" /> Ativar economia do servidor</label>
+                <label class="toggle-item"><input type="checkbox" id="cEconomyPingOnly" /> Só enviar ping no modo economia</label>
+                <label class="toggle-item"><input type="checkbox" id="cStandby" /> Entrar em espera no erro 4001</label>
+              </div>
+            </div>
+
+            <div class="card">
+              <h3>Preferências e limites</h3>
+              <div class="form-grid" id="cfgFields">
+                <div class="field"><label for="cBall">Bola comum</label>
+                  <select id="cBall">
+                    <option value="auto">auto</option>
+                    <option value="poke">poke</option>
+                    <option value="great">great</option>
+                    <option value="super">super</option>
+                    <option value="ultra">ultra</option>
+                    <option value="beast">beast</option>
+                  </select>
+                </div>
+                <div class="field"><label for="cShinyBall">Bola shiny</label>
+                  <select id="cShinyBall">
+                    <option value="best">best</option>
+                    <option value="beast">beast</option>
+                    <option value="ultra">ultra</option>
+                    <option value="super">super</option>
+                    <option value="great">great</option>
+                    <option value="poke">poke</option>
+                  </select>
+                </div>
+                <div class="field"><label for="cTargetBalls">Alvo bolas</label><input type="number" id="cTargetBalls" min="10" max="5000" step="10" /></div>
+                <div class="field"><label for="cTargetPotions">Alvo poções</label><input type="number" id="cTargetPotions" min="0" max="5000" step="10" /></div>
+                <div class="field"><label for="cRestockPotion">Poção para comprar</label>
+                  <select id="cRestockPotion">
+                    <option value="0">Automático (1ª marcada)</option>
+                    <option value="200">Small Potion (50g)</option>
+                    <option value="201">Great Potion (150g)</option>
+                    <option value="202">Ultra Potion (400g)</option>
+                    <option value="203">Hyper Potion (800g)</option>
+                    <option value="204">Ultimate Potion (1.500g)</option>
+                  </select>
+                </div>
+                <div class="field"><label for="cReserve">Reserva mínima gold</label><input type="number" id="cReserve" min="0" max="100000000" step="5000" /></div>
+                <div class="field"><label for="cTargetRevives">Alvo revives</label><input type="number" id="cTargetRevives" min="0" max="5000" step="5" /></div>
+                <div class="field"><label for="cGuideMode">Acompanhamento /hunt</label>
+                  <select id="cGuideMode">
+                    <option value="off">Desligado</option>
+                    <option value="notify">Avisar</option>
+                    <option value="auto">Trocar automaticamente</option>
+                  </select>
+                </div>
+                <div class="field"><label for="cGuideMetric">Prioridade /hunt</label>
+                  <select id="cGuideMetric">
+                    <option value="xp">XP/h</option>
+                    <option value="ouro">Ouro/h</option>
+                    <option value="shiny">Shiny/h</option>
+                  </select>
+                </div>
+                <div class="field"><label for="cLiveTargetHours">Meta por buff (lives)</label>
+                  <select id="cLiveTargetHours">
+                    <option value="0.5">30 min (só manter ligado)</option>
+                    <option value="3">3 horas por buff</option>
+                    <option value="6">6 horas por buff</option>
+                    <option value="12">12 horas por buff</option>
+                    <option value="24">24 horas (1 dia por buff)</option>
+                    <option value="48">48 horas (2 dias por buff)</option>
+                    <option value="72">72 horas (3 dias por buff)</option>
+                    <option value="168">168 horas (7 dias por buff)</option>
+                  </select>
+                </div>
+                <div class="field"><label for="cLiveTier">Pacote das lives</label>
+                  <select id="cLiveTier">
+                    <option value="smart">Inteligente (preenche a meta)</option>
+                    <option value="cheapest">Mais barato (1h)</option>
+                    <option value="largest">Maior que couber (até 10h)</option>
+                    <option value="1h">Priorizar 1h</option>
+                    <option value="3h">Priorizar 3h</option>
+                    <option value="5h">Priorizar 5h</option>
+                    <option value="10h">Priorizar 10h</option>
+                  </select>
+                </div>
+                <div class="field"><label for="cLiveMaxTw">Lives Twitch</label><input type="number" id="cLiveMaxTw" min="1" max="12" /></div>
+                <div class="field"><label for="cLiveMaxKk">Lives Kick</label><input type="number" id="cLiveMaxKk" min="1" max="12" /></div>
+                <div class="field"><label for="cLiveCustomTw">Canais extras Twitch</label><input type="text" id="cLiveCustomTw" placeholder="ex: canal1, canal2" /></div>
+                <div class="field"><label for="cLiveCustomKk">Canais extras Kick</label><input type="text" id="cLiveCustomKk" placeholder="ex: canal1, canal2" /></div>
+              </div>
+
+              <div class="chip-section" id="cfgChips">
+                <div class="chip-group">
+                  <div class="chip-group-head">
+                    <span>Poções usadas no Auto-Heal</span>
+                    <span class="hint-text" id="activePotionsHint"></span>
+                  </div>
+                  <div class="chip-row">
+                    <label class="pill-chk"><input type="checkbox" data-potion="200" /> Small</label>
+                    <label class="pill-chk"><input type="checkbox" data-potion="201" /> Great</label>
+                    <label class="pill-chk"><input type="checkbox" data-potion="202" /> Ultra</label>
+                    <label class="pill-chk"><input type="checkbox" data-potion="203" /> Hyper</label>
+                    <label class="pill-chk"><input type="checkbox" data-potion="204" /> Ultimate</label>
+                    <label class="pill-chk"><input type="checkbox" data-potion="70070" /> Golden</label>
+                  </div>
+                </div>
+
+                <div class="chip-group">
+                  <div class="chip-group-head">
+                    <span>Buffs padrão na Twitch</span>
+                    <span class="hint-text">estacam juntos</span>
+                  </div>
+                  <div class="chip-row">
+                    <label class="pill-chk tw"><input type="checkbox" data-tw-reward="xp" /> XP (+15%)</label>
+                    <label class="pill-chk tw"><input type="checkbox" data-tw-reward="captura" /> Captura (+15%)</label>
+                    <label class="pill-chk tw"><input type="checkbox" data-tw-reward="shiny" /> Shiny (+15%)</label>
+                  </div>
+                </div>
+
+                <div class="chip-group">
+                  <div class="chip-group-head">
+                    <span>Buffs padrão na Kick</span>
+                    <span class="hint-text">estacam com Twitch</span>
+                  </div>
+                  <div class="chip-row">
+                    <label class="pill-chk kk"><input type="checkbox" data-kk-reward="xp" /> XP (+15%)</label>
+                    <label class="pill-chk kk"><input type="checkbox" data-kk-reward="captura" /> Captura (+15%)</label>
+                    <label class="pill-chk kk"><input type="checkbox" data-kk-reward="shiny" /> Shiny (+15%)</label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="save-bar">
+                <span class="hint-text" id="cfgHint"></span>
+                <button type="button" class="btn primary" id="btnSaveCfg" disabled>Salvar alterações</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- CONEXÕES -->
+          <div id="tab-connections" class="tab-panel hidden">
+            <div class="card">
+              <h3>Contas vinculadas</h3>
+              <div class="field" style="margin-bottom:8px;">
+                <label for="cBrowserProfile">Perfil externo do Chrome, Edge ou Brave (opcional)</label>
+                <select id="cBrowserProfile"></select>
+              </div>
+              <details class="card"><summary>O navegador pediu permissão para usar scripts?</summary>
+                <p>Se você usa o PokeBot pelo Tampermonkey, abra as extensões deste perfil. Em Tampermonkey, escolha <b>Detalhes</b>, ative <b>Permitir scripts de usuário</b> e recarregue a aba do jogo.</p>
+                <button type="button" class="btn sm" id="btnExtensions">Abrir extensões deste perfil</button>
+                <span id="extensionsStatus" role="status"></span>
+              </details>
+              <div class="conn-row">
+                <span class="conn-label" id="pokeLoginState">PokeIdle</span>
+                <button type="button" class="btn primary sm" id="btnLoginPokeIdle">Logar PokeIdle</button>
+              </div>
+              <div class="conn-row">
+                <span class="conn-label" id="twitchLoginState">Twitch</span>
+                <button type="button" class="btn purple sm" id="btnLoginTwitch">Conectar Twitch</button>
+              </div>
+              <div class="conn-row">
+                <span class="conn-label" id="kickLoginState">Kick</span>
+                <button type="button" class="btn green sm" id="btnLoginKick">Conectar Kick</button>
+              </div>
+              <div class="conn-tools">
+                <button type="button" class="btn sm" id="btnImportLiveToggle">Colar token Twitch/Kick</button>
+                <button type="button" class="btn sm" id="btnImportSessToggle">Colar sessão</button>
+                <button type="button" class="btn sm" id="btnReloadSess">Recarregar sessão</button>
+                <button type="button" class="btn sm danger" id="btnClearWebview">Limpar cache embutido</button>
+              </div>
+
+              <div class="inline-dialog hidden" id="importLiveBox">
+                <div class="hint-text" style="margin-bottom:6px;">F12 -> Application -> Cookies: cole auth-token (twitch.tv) e/ou session_token (kick.com):</div>
+                <div class="form-grid">
+                  <input type="password" id="importTwTok" placeholder="Twitch auth-token" />
+                  <input type="password" id="importKkTok" placeholder="Kick session_token" />
+                </div>
+                <div class="save-bar">
+                  <span class="hint-text" id="importLiveStatus"></span>
+                  <div style="display:flex;gap:6px;">
+                    <button type="button" class="btn sm" id="btnImportLiveCancel">Cancelar</button>
+                    <button type="button" class="btn sm primary" id="btnImportLiveSubmit">Salvar tokens</button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="inline-dialog hidden" id="importSessBox">
+                <div class="hint-text" style="margin-bottom:6px;">Cole o JSON de "Copiar Sessão Headless" ou localStorage.getItem('sessao'):</div>
+                <textarea id="importSessInput" rows="3"></textarea>
+                <div class="save-bar">
+                  <span class="hint-text" id="importSessStatus"></span>
+                  <div style="display:flex;gap:6px;">
+                    <button type="button" class="btn sm" id="btnImportSessCancel">Cancelar</button>
+                    <button type="button" class="btn sm primary" id="btnImportSessSubmit">Importar</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+          <div id="tab-lives" class="tab-panel hidden">
+            <div class="card live-overview">
+              <h3>Recompensas da conta</h3>
+              <div class="live-metrics">
+                <div><strong id="liveMinutes">—</strong><span>Minutos assistidos</span></div>
+                <div><strong id="liveChests">—</strong><span>Baús +50</span></div>
+                <div><strong id="liveRedeemed">—</strong><span>Resgates</span></div>
+              </div>
+              <div class="hunt-note" id="livesHead"></div>
+              <div class="hunt-note" id="livesBonuses" style="color:#93c5fd;">Buffs ativos: verificando...</div>
+              <div class="hunt-note" id="livesSmartLine" style="color:#fcd34d;"></div>
+            </div>
+            <div class="card">
+              <h3>Canais e chat</h3>
+              <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                <button type="button" class="btn sm" id="btnOpenLives">Abrir Lives Oficiais</button>
+                <span class="hint-text">Escolha um buff diferente por live abaixo (salva na hora):</span>
+              </div>
+              <div class="live-chan-list" id="liveChannelList"></div>
+              <label class="toggle-item"><input type="checkbox" id="chatReminder"> Lembrar de visitar o chat a cada 20 min</label>
+              <div id="chatReminderNote" role="status" class="hint-text"></div>
+            </div>
+          </div>
+
+          <!-- ATIVIDADE -->
+          <div id="tab-activity" class="tab-panel hidden">
+            <div class="card"><h3>Últimos shinies do servidor</h3><ul id="shinyFeed" class="shiny-feed"></ul></div>
+            <div class="card">
+              <div class="activity-head">
+                <h3>Registro de eventos</h3>
+                <label class="toast-toggle"><input type="checkbox" id="cToastEnabled" checked /> Notificações toast</label>
+              </div>
+              <div class="log-box" id="logBox"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- EMBEDDED BROWSER STAGE (4 ISOLATED PERSISTENT PARTITIONS) -->
+      <section class="browser-stage" id="browserStage">
+        <div class="wv-slot slot-active" id="wv-slot-1" data-slot="1">
+          <div class="wv-bar">
+            <div class="wv-bar-left">
+              <span class="acc-dot" id="slotDot-1"></span>
+              <span class="wv-title" id="slotTitle-1">Conta 1</span>
+              <span class="wv-hunt" id="slotHunt-1"></span>
+            </div>
+            <div class="wv-bar-actions">
+              <button type="button" class="btn sm" data-slot-act="mute" data-slot="1" title="Silenciar/ativar áudio desta aba">Mudo</button>
+              <button type="button" class="btn sm" data-slot-act="focus" data-slot="1">Focar</button>
+              <button type="button" class="btn sm" data-slot-act="reload" data-slot="1">Recarregar</button>
+              <button type="button" class="btn sm teal" data-slot-act="toggle" data-slot="1">Abrir Embutido</button>
+            </div>
+          </div>
+          <div class="wv-body" id="wv-body-1">
+            <div class="wv-placeholder" id="wv-ph-1">
+              <div class="wv-placeholder-title" id="phTitle-1">Conta 1 · Modo Headless</div>
+              <div class="wv-placeholder-sub" id="phSub-1">O bot pode farmar e trocar de hunt (/hunt) em 2º plano sem consumir RAM de navegador, ou abrir o jogo embutido aqui dentro.</div>
+              <div class="wv-placeholder-stats" id="phStats-1"></div>
+              <div class="wv-placeholder-btns">
+                <button type="button" class="btn teal" data-slot-act="open" data-slot="1">Abrir jogo embutido</button>
+                <button type="button" class="btn primary" data-slot-act="headless" data-slot="1">Iniciar Headless</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="wv-slot" id="wv-slot-2" data-slot="2">
+          <div class="wv-bar">
+            <div class="wv-bar-left">
+              <span class="acc-dot" id="slotDot-2"></span>
+              <span class="wv-title" id="slotTitle-2">Conta 2</span>
+              <span class="wv-hunt" id="slotHunt-2"></span>
+            </div>
+            <div class="wv-bar-actions">
+              <button type="button" class="btn sm" data-slot-act="mute" data-slot="2" title="Silenciar/ativar áudio desta aba">Mudo</button>
+              <button type="button" class="btn sm" data-slot-act="focus" data-slot="2">Focar</button>
+              <button type="button" class="btn sm" data-slot-act="reload" data-slot="2">Recarregar</button>
+              <button type="button" class="btn sm teal" data-slot-act="toggle" data-slot="2">Abrir Embutido</button>
+            </div>
+          </div>
+          <div class="wv-body" id="wv-body-2">
+            <div class="wv-placeholder" id="wv-ph-2">
+              <div class="wv-placeholder-title" id="phTitle-2">Conta 2 · Modo Headless</div>
+              <div class="wv-placeholder-sub" id="phSub-2">O bot pode farmar e trocar de hunt (/hunt) em 2º plano sem consumir RAM de navegador, ou abrir o jogo embutido aqui dentro.</div>
+              <div class="wv-placeholder-stats" id="phStats-2"></div>
+              <div class="wv-placeholder-btns">
+                <button type="button" class="btn teal" data-slot-act="open" data-slot="2">Abrir jogo embutido</button>
+                <button type="button" class="btn primary" data-slot-act="headless" data-slot="2">Iniciar Headless</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="wv-slot" id="wv-slot-3" data-slot="3">
+          <div class="wv-bar">
+            <div class="wv-bar-left">
+              <span class="acc-dot" id="slotDot-3"></span>
+              <span class="wv-title" id="slotTitle-3">Conta 3</span>
+              <span class="wv-hunt" id="slotHunt-3"></span>
+            </div>
+            <div class="wv-bar-actions">
+              <button type="button" class="btn sm" data-slot-act="mute" data-slot="3" title="Silenciar/ativar áudio desta aba">Mudo</button>
+              <button type="button" class="btn sm" data-slot-act="focus" data-slot="3">Focar</button>
+              <button type="button" class="btn sm" data-slot-act="reload" data-slot="3">Recarregar</button>
+              <button type="button" class="btn sm teal" data-slot-act="toggle" data-slot="3">Abrir Embutido</button>
+            </div>
+          </div>
+          <div class="wv-body" id="wv-body-3">
+            <div class="wv-placeholder" id="wv-ph-3">
+              <div class="wv-placeholder-title" id="phTitle-3">Conta 3 · Offline</div>
+              <div class="wv-placeholder-sub" id="phSub-3">Abra o jogo embutido aqui dentro para logar ou configure a conta na aba Conexões.</div>
+              <div class="wv-placeholder-stats" id="phStats-3"></div>
+              <div class="wv-placeholder-btns">
+                <button type="button" class="btn teal" data-slot-act="open" data-slot="3">Abrir jogo embutido</button>
+                <button type="button" class="btn primary" data-slot-act="headless" data-slot="3">Iniciar Headless</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="wv-slot" id="wv-slot-4" data-slot="4">
+          <div class="wv-bar">
+            <div class="wv-bar-left">
+              <span class="acc-dot" id="slotDot-4"></span>
+              <span class="wv-title" id="slotTitle-4">Conta 4</span>
+              <span class="wv-hunt" id="slotHunt-4"></span>
+            </div>
+            <div class="wv-bar-actions">
+              <button type="button" class="btn sm" data-slot-act="mute" data-slot="4" title="Silenciar/ativar áudio desta aba">Mudo</button>
+              <button type="button" class="btn sm" data-slot-act="focus" data-slot="4">Focar</button>
+              <button type="button" class="btn sm" data-slot-act="reload" data-slot="4">Recarregar</button>
+              <button type="button" class="btn sm teal" data-slot-act="toggle" data-slot="4">Abrir Embutido</button>
+            </div>
+          </div>
+          <div class="wv-body" id="wv-body-4">
+            <div class="wv-placeholder" id="wv-ph-4">
+              <div class="wv-placeholder-title" id="phTitle-4">Conta 4 · Offline</div>
+              <div class="wv-placeholder-sub" id="phSub-4">Abra o jogo embutido aqui dentro para logar ou configure a conta na aba Conexões.</div>
+              <div class="wv-placeholder-stats" id="phStats-4"></div>
+              <div class="wv-placeholder-btns">
+                <button type="button" class="btn teal" data-slot-act="open" data-slot="4">Abrir jogo embutido</button>
+                <button type="button" class="btn primary" data-slot-act="headless" data-slot="4">Iniciar Headless</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast-stack" id="toastStack" aria-live="polite"></div>
+  <script src="renderer.js"></script>
+</body>
+</html>

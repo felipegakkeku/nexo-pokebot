@@ -155,3 +155,49 @@ test('boss: runtime registra os dois módulos (60 s e 3 s) e chama os métodos e
     assert.deepEqual(log.locks, ['Bosses']);
     rt.dispose();
 });
+
+test('loot: Arena Mística (#recompensa.rc-mistico) escolhe melhor bola disponível', () => {
+    const clicks = [];
+    const elements = {
+        '#recompensa.rc-mistico:not(.hidden)': { visible: true },
+        '.mst-bolas button.mst-bola.melhor:not([disabled])': { click: () => clicks.push('mst-melhor') },
+    };
+    const ctx = {
+        CONFIG: { boss: { autoDismissLoot: true } },
+        state: { running: true, lastActionNote: '', stats: { mysticBallsThrown: 0 } },
+        dom: {
+            $: (sel) => elements[sel] || null,
+            isInteractable: () => true,
+            isVisible: () => true,
+        },
+    };
+    dismissBossLoot(ctx);
+    assert.deepEqual(clicks, ['mst-melhor']);
+    assert.equal(ctx.state.stats.mysticBallsThrown, 1);
+    assert.equal(ctx.state.lastActionNote, 'Bola lançada no Mítico!');
+});
+
+test('loot: modal #recompensa comum usa #rc-todos primeiro e fallback #rc-ok', () => {
+    const clicks = [];
+    const elements = {
+        '#recompensa:not(.hidden)': { visible: true },
+        '#rc-todos:not([hidden])': { click: () => clicks.push('rc-todos') },
+        '#rc-ok': { click: () => clicks.push('rc-ok') },
+    };
+    const ctx = {
+        CONFIG: { boss: { autoDismissLoot: true } },
+        state: { running: true, lastActionNote: '', stats: {} },
+        dom: {
+            $: (sel) => elements[sel] || null,
+            isInteractable: () => true,
+            isVisible: () => true,
+        },
+    };
+    dismissBossLoot(ctx);
+    assert.deepEqual(clicks, ['rc-todos']);
+    assert.equal(ctx.state.lastActionNote, 'Loot de Boss coletado!');
+
+    delete elements['#rc-todos:not([hidden])'];
+    dismissBossLoot(ctx);
+    assert.deepEqual(clicks, ['rc-todos', 'rc-ok']);
+});

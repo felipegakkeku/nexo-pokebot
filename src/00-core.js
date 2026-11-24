@@ -22,6 +22,7 @@
     const STORAGE_DEX_KEY = 'pokeidle_minigame_dex_v60';
     const STORAGE_PASS_NEXT_KEY = 'pokeidle_pass_next_ms_v60';
     const STORAGE_HUNT_QUEUE_KEY = 'pokeidle_hunt_queue_v63';
+    const STORAGE_PREY_DAY_KEY = 'pokeidle_prey_day_v67';
 
     const HUNT_GUIDE_URL = 'https://pokeidleguide.io/#hunt';
     const TETO_DEPOT = 3000;
@@ -103,6 +104,9 @@
     const DEPOT_MODES = ['off', 'venda', 'oferenda', 'sacrificio'];
     const TEAM_MODES = ['off', 'equilibrar', 'sazonal'];
     const BOSS_PRIORITIES = ['off', 'qualquer', 'mega', 'tm', 'tickets'];
+    const BALL_PREF_OPTIONS = ['auto', 'poke', 'great', 'super', 'ultra', 'beast'];
+    const SHINY_BALL_OPTIONS = ['best', 'beast', 'ultra', 'super', 'great', 'poke'];
+    const LIVE_REWARD_TYPES = ['xp', 'captura', 'shiny'];
 
     const loadJson = (key, fallback) => {
         try {
@@ -129,7 +133,10 @@
         caidos: {
             enabled: savedPrefs.caidosEnabled ?? true,
             smartBallSelect: savedPrefs.smartBallSelect ?? true,
-            highLevelUltraThreshold: 20,
+            preferredBall: BALL_PREF_OPTIONS.includes(savedPrefs.preferredBall) ? savedPrefs.preferredBall : 'auto',
+            shinyBall: SHINY_BALL_OPTIONS.includes(savedPrefs.shinyBall) ? savedPrefs.shinyBall : 'best',
+            highLevelUltraThreshold: typeof savedPrefs.highLevelUltraThreshold === 'number' ? savedPrefs.highLevelUltraThreshold : 20,
+            prioritizeExpiring: savedPrefs.prioritizeExpiring ?? true,
             containerSelector: '#caidos-lista',
             buttonSelector: 'button.caido',
             minThrowIntervalMs: 1200,
@@ -145,13 +152,14 @@
             autoUpgradeBalls: savedPrefs.autoUpgradeBalls ?? true,
             minGoldReserve: savedPrefs.minGoldReserve ?? 50000,
             minBalls: 10,
-            targetBalls: 50,
+            targetBalls: typeof savedPrefs.targetBalls === 'number' ? savedPrefs.targetBalls : 50,
             restockSmallPotion: true,
             minPotions: 10,
-            targetPotions: 40,
+            targetPotions: typeof savedPrefs.targetPotions === 'number' ? savedPrefs.targetPotions : 40,
             restockRevive: savedPrefs.restockRevive ?? false,
             minRevives: 5,
-            targetRevives: 20,
+            targetRevives: typeof savedPrefs.targetRevives === 'number' ? savedPrefs.targetRevives : 20,
+            ensureNativeAutoHeal: savedPrefs.ensureNativeAutoHeal ?? true,
             batchButton: '×10',
             maxPurchases: 6,
             buyConfirmTimeoutMs: 2600,
@@ -170,6 +178,30 @@
         dailyPass: {
             enabled: savedPrefs.dailyPassEnabled ?? true,
             checkIntervalMs: 60000,
+        },
+        prey: {
+            enabled: savedPrefs.preyEnabled ?? true,
+            checkIntervalMs: 60000,
+        },
+        live: {
+            enabled: savedPrefs.liveEnabled ?? false,
+            watchTwitch: savedPrefs.liveWatchTwitch ?? true,
+            watchKick: savedPrefs.liveWatchKick ?? true,
+            autoClaimChest: savedPrefs.liveAutoClaimChest ?? true,
+            autoRedeem: savedPrefs.liveAutoRedeem ?? true,
+            rewardType: LIVE_REWARD_TYPES.includes(savedPrefs.liveRewardType) ? savedPrefs.liveRewardType : 'xp',
+            guardThresholdMin: typeof savedPrefs.liveGuardThresholdMin === 'number' ? savedPrefs.liveGuardThresholdMin : 30,
+            maxSlots: typeof savedPrefs.liveMaxSlots === 'number' ? savedPrefs.liveMaxSlots : 4,
+            maxTwitchSlots: typeof savedPrefs.liveMaxTwitchSlots === 'number'
+                ? savedPrefs.liveMaxTwitchSlots
+                : (typeof savedPrefs.liveMaxSlots === 'number' ? savedPrefs.liveMaxSlots : 4),
+            maxKickSlots: typeof savedPrefs.liveMaxKickSlots === 'number' ? savedPrefs.liveMaxKickSlots : 2,
+            twitchToken: typeof savedPrefs.liveTwitchToken === 'string' ? savedPrefs.liveTwitchToken : '',
+            twitchDeviceId: typeof savedPrefs.liveTwitchDeviceId === 'string' ? savedPrefs.liveTwitchDeviceId : '',
+            kickToken: typeof savedPrefs.liveKickToken === 'string' ? savedPrefs.liveKickToken : '',
+            customTwitchChannels: typeof savedPrefs.liveCustomTwitch === 'string' ? savedPrefs.liveCustomTwitch : '',
+            customKickChannels: typeof savedPrefs.liveCustomKick === 'string' ? savedPrefs.liveCustomKick : '',
+            checkIntervalMs: 30000,
         },
         team: {
             mode: TEAM_MODES.includes(savedPrefs.teamMode) ? savedPrefs.teamMode : 'off',
@@ -257,14 +289,38 @@
             mode: CONFIG.mode,
             caidosEnabled: CONFIG.caidos.enabled,
             smartBallSelect: CONFIG.caidos.smartBallSelect,
+            preferredBall: CONFIG.caidos.preferredBall,
+            shinyBall: CONFIG.caidos.shinyBall,
+            highLevelUltraThreshold: CONFIG.caidos.highLevelUltraThreshold,
+            prioritizeExpiring: CONFIG.caidos.prioritizeExpiring,
             shinyGuardEnabled: CONFIG.shinyGuard.enabled,
             restockEnabled: CONFIG.restock.enabled,
             autoUpgradeBalls: CONFIG.restock.autoUpgradeBalls,
             minGoldReserve: CONFIG.restock.minGoldReserve,
+            targetBalls: CONFIG.restock.targetBalls,
+            targetPotions: CONFIG.restock.targetPotions,
+            targetRevives: CONFIG.restock.targetRevives,
             restockRevive: CONFIG.restock.restockRevive,
+            ensureNativeAutoHeal: CONFIG.restock.ensureNativeAutoHeal,
             topCatchHopEnabled: CONFIG.topCatchHop.enabled,
             depotMode: CONFIG.depot.mode,
             dailyPassEnabled: CONFIG.dailyPass.enabled,
+            preyEnabled: CONFIG.prey.enabled,
+            liveEnabled: CONFIG.live.enabled,
+            liveWatchTwitch: CONFIG.live.watchTwitch,
+            liveWatchKick: CONFIG.live.watchKick,
+            liveAutoClaimChest: CONFIG.live.autoClaimChest,
+            liveAutoRedeem: CONFIG.live.autoRedeem,
+            liveRewardType: CONFIG.live.rewardType,
+            liveGuardThresholdMin: CONFIG.live.guardThresholdMin,
+            liveMaxSlots: CONFIG.live.maxSlots,
+            liveMaxTwitchSlots: CONFIG.live.maxTwitchSlots,
+            liveMaxKickSlots: CONFIG.live.maxKickSlots,
+            liveTwitchToken: CONFIG.live.twitchToken,
+            liveTwitchDeviceId: CONFIG.live.twitchDeviceId,
+            liveKickToken: CONFIG.live.kickToken,
+            liveCustomTwitch: CONFIG.live.customTwitchChannels,
+            liveCustomKick: CONFIG.live.customKickChannels,
             teamMode: CONFIG.team.mode,
             incubatorEnabled: CONFIG.incubator.enabled,
             bossPriority: CONFIG.boss.priority,
@@ -287,7 +343,7 @@
         paused: false,
         modalLockOwner: null,
         statusText: 'Ativo',
-        lastActionNote: `Conectado (PokeBot v${VERSION})`,
+        lastActionNote: `Conectado (Nexo PokeBot v${VERSION})`,
         throwPending: false,
         lastThrowAt: 0,
         evolveNextAt: 0,
@@ -301,6 +357,10 @@
         unsafeTrainUntil: {},
         nextIncubatorCheckAt: 0,
         lastBossCheckAt: 0,
+        lastPreyCheckAt: 0,
+        preyDoneDay: '',
+        liveGameData: { twitch: null, kick: null, skew: 0 },
+        liveStatus: { twitch: {}, kick: {} },
         lastOptimizedTrainerLevel: null,
         lastMarkerMeta: null,
         huntQueue: Array.isArray(savedQueueStore?.items) ? savedQueueStore.items : [],
@@ -340,5 +400,10 @@
             eggsHandled: 0,
             bossEntries: 0,
             shiniesSpotted: 0,
+            preyRolls: 0,
+            mysticBallsThrown: 0,
+            liveMinutesWatched: 0,
+            liveChestsClaimed: 0,
+            liveRewardsRedeemed: 0,
         },
     };

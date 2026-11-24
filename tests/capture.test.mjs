@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { capture, isShinyCaidoButton, ensureBestBallSelected, processCaidos, ensureCaidosObserver } from '../src/modules/capture.js';
+import { capture, isShinyCaidoButton, ensureBestBallSelected, processCaidos, ensureCaidosObserver, resolveDesiredBallOrder } from '../src/modules/capture.js';
 import { createRuntime } from '../src/modules/runtime.js';
 
 // O módulo usa só globais de navegador (window, setTimeout, MutationObserver): fakes mínimos
@@ -292,4 +292,43 @@ test('capture: runtime registra com o período da config e dispose solta o obser
     assert.equal(observers[0].disconnected, true);
     assert.equal(ctx.state.caidosObserver, null);
     assert.equal(ctx.state.observedCaidosNode, null);
+});
+
+test('bola: resolveDesiredBallOrder respeita preferredBall, shinyBall e threshold', () => {
+    const cfg = {
+        caidos: { preferredBall: 'great', shinyBall: 'ultra', smartBallSelect: true, highLevelUltraThreshold: 20 },
+    };
+    assert.deepEqual(resolveDesiredBallOrder(cfg, { isShiny: false, targetLv: 5 }), [1, 0, 2, 3, 4]);
+    assert.deepEqual(resolveDesiredBallOrder(cfg, { isShiny: true, targetLv: 5 }), [3, 4, 2, 1, 0]);
+    cfg.caidos.preferredBall = 'auto';
+    cfg.caidos.shinyBall = 'best';
+    assert.deepEqual(resolveDesiredBallOrder(cfg, { isShiny: false, targetLv: 19 }), [0, 1, 2, 3]);
+    assert.deepEqual(resolveDesiredBallOrder(cfg, { isShiny: false, targetLv: 20 }), [3, 2, 1, 0]);
+    assert.deepEqual(resolveDesiredBallOrder(cfg, { isShiny: true, targetLv: 1 }), [4, 3, 2, 1, 0]);
+});
+
+test('bola: sincroniza a bola selecionada em #caidos-bolas mesmo sem #auto-ball-opts', () => {
+    const { ctx } = makeCtx();
+    ctx.CONFIG.caidos.preferredBall = 'super';
+    const caidosBallBtns = [
+        { title: 'Poke Ball — você tem 20', classList: { contains: (c) => c === 'on' }, clicks: 0, click() { this.clicks++; } },
+        { title: 'Great Ball — você tem 10', classList: { contains: () => false }, clicks: 0, click() { this.clicks++; } },
+        { title: 'Super Ball — você tem 5', classList: { contains: () => false }, clicks: 0, click() { this.clicks++; } },
+    ];
+    const caidosBolasHost = { querySelectorAll: () => caidosBallBtns };
+    const origDollar = ctx.dom.$;
+    ctx.dom.$ = (sel) => (sel === '#caidos-bolas' ? caidosBolasHost : sel === '#auto-ball-opts' ? null : origDollar(sel));
+
+    ensureBestBallSelected(ctx, caidoBtn());
+    assert.deepEqual(caidosBallBtns.map((b) => b.clicks), [0, 0, 1]);
+});
+
+test('captura: prioriza corpos com classe acabando na frente dos normais', async () => {
+    const { ctx } = makeCtx();
+    const normal = caidoBtn({ textContent: 'Pidgey Nv 4', classList: { contains: () => false } });
+    const expiring = caidoBtn({ textContent: 'Caterpie Nv 3', classList: { contains: (c) => c === 'acabando' } });
+    processCaidos(ctx, container([normal, expiring]));
+    await wait();
+    assert.equal(expiring.clicks, 1);
+    assert.equal(normal.clicks, 0);
 });

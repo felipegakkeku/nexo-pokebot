@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { restock, smartRestock, isMarketOpen, ensureMarketTab } from '../src/modules/restock.js';
+import { restock, smartRestock, isMarketOpen, ensureMarketTab, ensureNativeAutomations } from '../src/modules/restock.js';
 import { createRuntime } from '../src/modules/runtime.js';
 
 // Market falso: cards com contador, botão "Comprar" que soma +10, atalho ×10, categorias e abas
@@ -181,4 +181,28 @@ test('restock: runtime registra com o período da config e expõe run', async ()
     await rt.call('restock', 'run', { force: true });
     assert.deepEqual(log.locks, ['Restock']);
     rt.dispose();
+});
+
+test('restock: ensureNativeAutomations religa checkboxes desmarcados do jogo', () => {
+    const checkboxes = {
+        '#auto-revive': { checked: false, click() { this.checked = true; } },
+        '#auto-potion': { checked: true, click() { throw new Error('não deveria clicar'); } },
+        '#auto-voltar-hunt': { checked: false, click() { this.checked = true; } },
+    };
+    const ctx = {
+        CONFIG: { restock: { ensureNativeAutoHeal: true } },
+        dom: {
+            $: (sel) => checkboxes[sel] || null,
+            isInteractable: () => true,
+        },
+    };
+    const count = ensureNativeAutomations(ctx);
+    assert.equal(count, 2);
+    assert.equal(checkboxes['#auto-revive'].checked, true);
+    assert.equal(checkboxes['#auto-voltar-hunt'].checked, true);
+
+    checkboxes['#auto-revive'].checked = false;
+    ctx.CONFIG.restock.ensureNativeAutoHeal = false;
+    assert.equal(ensureNativeAutomations(ctx), 0);
+    assert.equal(checkboxes['#auto-revive'].checked, false);
 });

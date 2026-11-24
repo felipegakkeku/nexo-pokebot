@@ -1,0 +1,993 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nexo PokeBot v1.0</title>
+  <link rel="icon" href="/favicon.ico" />
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card: #131b2e;
+      --card-alt: #182238;
+      --border: #23304d;
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --green: #22c55e;
+      --blue: #3b82f6;
+      --amber: #f59e0b;
+      --red: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 18px;
+      background: radial-gradient(circle at top right, #16213c 0%, var(--bg) 55%);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      font-size: 13px;
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 16px;
+    }
+    .header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand h1 { margin: 0; font-size: 18px; font-weight: 700; }
+    .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+    .pill {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-weight: 700;
+      font-size: 11px;
+      letter-spacing: 0.4px;
+      background: #1e293b;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+    .pill.connected { background: rgba(34,197,94,0.16); color: #4ade80; border-color: rgba(34,197,94,0.4); }
+    .pill.connecting { background: rgba(59,130,246,0.16); color: #60a5fa; border-color: rgba(59,130,246,0.4); }
+    .pill.standby { background: rgba(245,158,11,0.16); color: #fbbf24; border-color: rgba(245,158,11,0.4); }
+    .pill.error { background: rgba(239,68,68,0.16); color: #f87171; border-color: rgba(239,68,68,0.4); }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 8px; }
+    button {
+      background: var(--card-alt);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 7px 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform 0.08s ease, background 0.15s ease;
+    }
+    button:hover { background: #22304f; }
+    button:active { transform: translateY(1px); }
+    button.primary { background: #1d4ed8; border-color: #2563eb; }
+    button.primary:hover { background: #2563eb; }
+    button.warn { background: #92400e; border-color: #b45309; }
+    .grid-main { display: grid; grid-template-columns: 1fr 1.1fr; gap: 14px; }
+    @media (max-width: 900px) { .grid-main { grid-template-columns: 1fr; } }
+    .col { display: flex; flex-direction: column; gap: 14px; }
+    .poke-box { display: flex; align-items: center; gap: 14px; }
+    .poke-sprite {
+      width: 68px;
+      height: 68px;
+      border-radius: 12px;
+      background: var(--card-alt);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+    .poke-sprite img { width: 64px; height: 64px; image-rendering: pixelated; }
+    .hp-track {
+      height: 14px;
+      border-radius: 999px;
+      background: #0a0f1c;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      margin-top: 6px;
+    }
+    .hp-fill { height: 100%; background: var(--green); transition: width 0.25s ease; }
+    .kpis { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+    .kpi { background: var(--card-alt); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+    .kpi .lbl { color: var(--muted); font-size: 11px; text-transform: uppercase; }
+    .kpi .val { font-size: 19px; font-weight: 700; margin-top: 3px; }
+    .kpi .rate { font-size: 11px; color: #60a5fa; margin-top: 2px; }
+    .eff-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; }
+    .eff-chip { background: var(--card-alt); border: 1px solid var(--border); border-radius: 8px; padding: 7px 9px; display: flex; flex-direction: column; gap: 2px; }
+    .eff-chip span { color: var(--muted); font-size: 10px; }
+    .eff-chip b { font-size: 13px; }
+    .eff-chip small { color: var(--muted); font-size: 10px; }
+    .focus-pill { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: rgba(16,185,129,0.16); color: #6ee7b7; }
+    .focus-pill.outland { background: rgba(245,158,11,0.18); border-color: rgba(245,158,11,0.45); color: #fcd34d; }
+    .focus-pill.unova { background: rgba(168,85,247,0.18); border-color: rgba(168,85,247,0.45); color: #d8b4fe; }
+    .focus-pill.boss { background: rgba(59,130,246,0.18); border-color: rgba(59,130,246,0.45); color: #93c5fd; }
+    .drops-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 8px; }
+    .drop-chip { background: var(--card-alt); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+    .drop-chip.hit { border-color: rgba(245,158,11,0.55); background: rgba(245,158,11,0.09); }
+    .drop-chip.hit .dq { color: #fcd34d; }
+    .dq { font-weight: 800; font-size: 14px; color: var(--muted); }
+    .recent-drops { margin-top: 8px; display: flex; flex-direction: column; gap: 3px; max-height: 110px; overflow-y: auto; font-size: 11.5px; }
+    .recent-drop-line { display: flex; justify-content: space-between; gap: 8px; padding: 3px 7px; border-radius: 5px; background: #0a1020; color: var(--muted); }
+    .recent-drop-line.rare { color: #fde68a; }
+    .inv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin-top: 10px; }
+    .inv-chip { background: var(--card-alt); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; display: flex; justify-content: space-between; }
+    .hunt-bar { display: flex; gap: 8px; margin-top: 12px; }
+    select, input[type="number"], input[type="password"] {
+      background: #0b1120;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 9px;
+      width: 100%;
+    }
+    .cfg-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px 14px; margin-top: 10px; }
+    .chk { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+    .cfg-inputs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 12px; }
+    .field label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+    .log-box {
+      background: #080c16;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px;
+      height: 230px;
+      overflow-y: auto;
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .log-line { margin-bottom: 3px; }
+    .log-line.ok { color: #4ade80; }
+    .log-line.warn { color: #fbbf24; }
+    .log-line.error { color: #f87171; }
+    .log-line.catch { color: #38bdf8; }
+    .log-line.shiny { color: #facc15; font-weight: 700; }
+    h2 { margin: 0 0 8px 0; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card header">
+      <div class="brand">
+        <img src="/assets/nexo-pokebot-icon.png" width="34" height="34" alt="Nexo PokeBot" style="border-radius:50%;filter:drop-shadow(0 0 6px rgba(56,189,248,0.45));" />
+        <div>
+          <h1>Nexo PokeBot v1.0</h1>
+          <div class="sub" id="trainerLine">Carregando sessao...</div>
+        </div>
+        <span class="pill" id="statusPill">OFFLINE</span>
+      </div>
+      <div class="btn-row">
+        <button class="primary" onclick="postAction('start')">Iniciar / Reconectar</button>
+        <button class="warn" onclick="postAction('pause')">Pausar (Navegador)</button>
+        <button onclick="postAction('open-game')">Abrir Jogo</button>
+        <button onclick="postAction('play-with-bot')">Jogar com o bot</button>
+        <button onclick="postAction('open-lives')">Abrir Lives Oficiais</button>
+        <button onclick="postAction('restock-now')">Restock Agora</button>
+        <button onclick="postAction('claim-pass')">Passe</button>
+        <button onclick="postAction('roll-prey')">Prey</button>
+        <button onclick="postAction('run-lives')">Lives Agora</button>
+      </div>
+    </div>
+
+    <div class="grid-main">
+      <div class="col">
+        <div class="card">
+          <h2>Pokemon Ativo &amp; Hunt</h2>
+          <div class="poke-box">
+            <div class="poke-sprite" id="pokeSprite">?</div>
+            <div style="flex:1">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <strong id="pokeName" style="font-size:16px;">-</strong>
+                <span id="pokeHpTxt" style="color:var(--muted);font-size:12px;">0 / 0 HP</span>
+              </div>
+              <div class="hp-track"><div class="hp-fill" id="pokeHpFill" style="width:0%"></div></div>
+              <div class="sub" id="huntLine" style="margin-top:6px;">Hunt: -</div>
+              <div class="sub" id="huntGuideLine" role="status"></div>
+            </div>
+          </div>
+          <div class="hunt-bar">
+            <select id="huntSelect"></select>
+            <button id="btnChangeHunt" onclick="changeHunt()" style="white-space:nowrap;">Trocar Hunt</button>
+            <button id="btnGoCenter" onclick="postAction('go-center')" style="white-space:nowrap;">Centro Medico</button>
+          </div>
+          <div class="sub" id="pendingHuntBar" style="margin-top:6px;color:#93c5fd;display:none;"></div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px;">
+            <h2 style="margin:0;">Desempenho &amp; Eficiencia</h2>
+            <button type="button" onclick="postAction('reset-stats')" style="padding:4px 9px;font-size:11px;">Zerar sessao</button>
+          </div>
+          <div class="kpis">
+            <div class="kpi"><div class="lbl">Abates</div><div class="val" id="kKills">0</div><div class="rate" id="kKillsRate">0/min</div></div>
+            <div class="kpi"><div class="lbl">XP Ganho</div><div class="val" id="kXp">0</div><div class="rate" id="kXpRate">0/h</div></div>
+            <div class="kpi"><div class="lbl">Lucro Liquido</div><div class="val" id="kGold">0</div><div class="rate" id="kGoldRate">0/h</div></div>
+            <div class="kpi"><div class="lbl">Capturas</div><div class="val" id="kCaps">0</div><div class="rate" id="kCapsSub">0 bolas jogadas</div></div>
+          </div>
+          <div class="eff-grid">
+            <div class="eff-chip"><span>Tempo / abate</span><b id="eAvgKill">-</b><small id="eAvgKillSub">0/min</small></div>
+            <div class="eff-chip"><span>Capturas / abate</span><b id="eCapKill">-</b><small id="eCapKillSub">sem amostras</small></div>
+            <div class="eff-chip"><span>Bolas / captura</span><b id="eBallCap">-</b><small id="eBallCapSub">0% acerto</small></div>
+            <div class="eff-chip"><span>Gasto vs Bruto</span><b id="eSpent">0</b><small id="eBrutoSub">bruto: 0</small></div>
+            <div class="eff-chip"><span>Shinies sessao</span><b id="eShinies">0 / 0</b><small>cap / vistos</small></div>
+            <div class="eff-chip"><span>Sobrevivencia</span><b id="eSurv">0 poc · 0 rev</b><small id="eSurvSub">0 mortes</small></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+            <h2 style="margin:0;">Drops da Sessao</h2>
+            <span class="focus-pill" id="dropsFocusBadge">XP / Gold / Shiny</span>
+          </div>
+          <div id="dropFilterBar" style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px;">
+            <button type="button" data-drop-cat="outland" style="padding:2px 8px;font-size:11px;border-radius:999px;">Outland</button>
+            <button type="button" data-drop-cat="unova" style="padding:2px 8px;font-size:11px;border-radius:999px;">Ovo Shiny</button>
+            <button type="button" data-drop-cat="boss" style="padding:2px 8px;font-size:11px;border-radius:999px;">Boss</button>
+            <button type="button" data-drop-cat="stone" style="padding:2px 8px;font-size:11px;border-radius:999px;">Stones</button>
+            <button type="button" data-drop-cat="other" style="padding:2px 8px;font-size:11px;border-radius:999px;">Outros</button>
+            <button type="button" id="btnRestoreDrops" hidden style="padding:2px 8px;font-size:11px;border-radius:999px;color:#fcd34d;">Restaurar ocultos</button>
+          </div>
+          <div class="drops-grid" id="dropsGrid"></div>
+          <div class="recent-drops" id="recentDropsList"></div>
+        </div>
+
+        <div class="card">
+          <h2>Mochila &amp; Lives (Twitch/Kick)</h2>
+          <div class="inv-grid" id="invGrid"></div>
+          <div class="sub" id="livesLine" style="margin-top:10px;line-height:1.5;">Lives: aguardando ciclo...</div>
+          <div class="sub" id="livesBonusLine" style="margin-top:4px;color:#93c5fd;"></div>
+          <div class="sub" id="livesSmartLine" style="margin-top:2px;color:#fcd34d;"></div>
+          <div class="field" style="margin-top:8px;">
+            <label>Buff por Live (salva na hora)</label>
+            <div id="liveChanList" style="display:flex;flex-direction:column;gap:5px;max-height:220px;overflow-y:auto;margin-top:4px;"></div>
+          </div>
+          <div class="field">
+            <label for="quickChatChannel">Chat de live oficial</label>
+            <select id="quickChatChannel"><option value="">Nenhuma live oficial online</option></select>
+          </div>
+          <iframe id="quickChatFrame" title="Chat da live selecionada" height="440" style="width:100%;border:0" hidden></iframe>
+          <button type="button" id="quickChatOpen" hidden>Abrir só o chat</button>
+          <div class="sub" id="quickChatStatus" role="status"></div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="card">
+          <h2>Automacao &amp; Configuracoes</h2>
+          <div class="cfg-grid" id="cfgPanel">
+            <label class="chk"><input type="checkbox" id="cCaidos" /> Auto-Catch Caidos</label>
+            <label class="chk"><input type="checkbox" id="cEconomyPingOnly" /> Modo Economia (So Ping)</label>
+            <label class="chk"><input type="checkbox" id="cStandby" /> Standby Auto (4001)</label>
+            <label class="chk"><input type="checkbox" id="cRestock" /> Auto-Restock</label>
+            <label class="chk"><input type="checkbox" id="cPass" /> Auto-Passe Diario</label>
+            <label class="chk"><input type="checkbox" id="cPrey" /> Auto-Prey Diario</label>
+            <label class="chk"><input type="checkbox" id="cNativeHeal" /> Auto-Cura/Revive Nativo</label>
+            <label class="chk"><input type="checkbox" id="cLives" /> Auto-Lives (Twitch &amp; Kick)</label>
+            <label class="chk"><input type="checkbox" id="cLiveSmart" /> Balancear buffs ate a meta</label>
+          </div>
+          <div class="cfg-inputs">
+            <div class="field"><label>Modo Economia</label>
+              <select id="cEco">
+                <option value="auto">Auto (VIP)</option>
+                <option value="on">Sempre ON</option>
+                <option value="off">Sempre OFF</option>
+              </select>
+            </div>
+            <div class="field"><label>Bola Normal</label>
+              <select id="cBall">
+                <option value="auto">Auto Inteligente</option>
+                <option value="poke">Poke Ball</option>
+                <option value="great">Great Ball</option>
+                <option value="super">Super Ball</option>
+                <option value="ultra">Ultra Ball</option>
+                <option value="beast">Beast Ball</option>
+              </select>
+            </div>
+            <div class="field"><label>Bola Shiny</label>
+              <select id="cShinyBall">
+                <option value="best">Melhor disponivel</option>
+                <option value="beast">Beast Ball</option>
+                <option value="ultra">Ultra Ball</option>
+                <option value="super">Super Ball</option>
+                <option value="great">Great Ball</option>
+                <option value="poke">Poke Ball</option>
+              </select>
+            </div>
+            <div class="field"><label>Alvo Bolas</label><input type="number" id="cTargetBalls" min="10" max="5000" /></div>
+            <div class="field"><label>Alvo Pocoes</label><input type="number" id="cTargetPotions" min="0" max="5000" /></div>
+            <div class="field"><label for="cRestockPotion">Pocao Restock</label>
+              <select id="cRestockPotion">
+                <option value="0">Automatico (1a marcada)</option>
+                <option value="200">Small Potion</option>
+                <option value="201">Great Potion</option>
+                <option value="202">Ultra Potion</option>
+                <option value="203">Hyper Potion</option>
+                <option value="204">Ultimate Potion</option>
+              </select>
+            </div>
+            <div class="field"><label>Alvo Revives</label><input type="number" id="cTargetRevives" min="0" max="5000" /></div>
+            <div class="field"><label>Reserva Gold</label><input type="number" id="cReserve" min="0" step="5000" /></div>
+            <div class="field"><label for="cGuideMode">Acompanhamento /hunt</label>
+              <select id="cGuideMode">
+                <option value="off">Desligado</option>
+                <option value="notify">Avisar sem trocar</option>
+                <option value="auto">Trocar automaticamente</option>
+              </select>
+            </div>
+            <div class="field"><label for="cGuideMetric">Prioridade do /hunt</label>
+              <select id="cGuideMetric">
+                <option value="xp">XP/h</option>
+                <option value="ouro">Ouro/h</option>
+                <option value="shiny">Shiny/h</option>
+              </select>
+            </div>
+            <div class="field"><label for="cLiveTargetHours">Meta por buff</label>
+              <select id="cLiveTargetHours">
+                <option value="0.5">30m (so manter ligado)</option>
+                <option value="3">3 horas</option>
+                <option value="6">6 horas</option>
+                <option value="12">12 horas</option>
+                <option value="24">24 horas (1 dia)</option>
+                <option value="48">48 horas (2 dias)</option>
+                <option value="72">72 horas (3 dias)</option>
+                <option value="168">168 horas (7 dias)</option>
+              </select>
+            </div>
+            <div class="field"><label for="cLiveTier">Pacote das Lives</label>
+              <select id="cLiveTier">
+                <option value="smart">Inteligente (preenche meta)</option>
+                <option value="cheapest">Mais barato (1h)</option>
+                <option value="largest">Maior que couber (ate 10h)</option>
+                <option value="1h">Priorizar 1h</option>
+                <option value="3h">Priorizar 3h</option>
+                <option value="5h">Priorizar 5h</option>
+                <option value="10h">Priorizar 10h</option>
+              </select>
+            </div>
+            <div class="field"><label>Qtd Lives Twitch</label><input type="number" id="cLiveMaxTw" min="1" max="12" /></div>
+            <div class="field"><label>Qtd Lives Kick</label><input type="number" id="cLiveMaxKk" min="1" max="12" /></div>
+            <div class="field"><label for="cLiveCustomTw">Canais extras Twitch</label><input id="cLiveCustomTw" placeholder="Opcional" /></div>
+            <div class="field"><label for="cLiveCustomKk">Canais extras Kick</label><input id="cLiveCustomKk" placeholder="Opcional" /></div>
+            <div class="field"><label for="cBrowserProfile">Perfil do navegador</label>
+              <select id="cBrowserProfile" onchange="changeBrowserProfile()"></select>
+            </div>
+            <div class="field"><label>Twitch</label><button id="btnTwLogin" type="button" style="width:100%;background:#5b21b6;border-color:#7c3aed;" onclick="handleLiveLoginClick('twitch')">Logar na Twitch</button></div>
+            <div class="field"><label>Kick</label><button id="btnKkLogin" type="button" style="width:100%;background:#15803d;border-color:#16a34a;" onclick="handleLiveLoginClick('kick')">Logar na Kick</button></div>
+          </div>
+          <div id="cfgChips" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px;font-size:12px;">
+            <div>
+              <div style="font-weight:700;margin-bottom:4px;">Pocoes usadas no Auto-Heal <span id="activePotionsHint" class="sub" style="font-weight:400;"></span></div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px;">
+                <label class="chk"><input type="checkbox" data-potion="200" /> Small</label>
+                <label class="chk"><input type="checkbox" data-potion="201" /> Great</label>
+                <label class="chk"><input type="checkbox" data-potion="202" /> Ultra</label>
+                <label class="chk"><input type="checkbox" data-potion="203" /> Hyper</label>
+                <label class="chk"><input type="checkbox" data-potion="204" /> Ultimate</label>
+                <label class="chk"><input type="checkbox" data-potion="70070" /> Golden</label>
+              </div>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:16px;">
+              <div>
+                <div style="font-weight:700;margin-bottom:4px;color:#c4b5fd;">Buffs padrao Twitch</div>
+                <div style="display:flex;gap:8px;">
+                  <label class="chk"><input type="checkbox" data-tw-reward="xp" /> XP</label>
+                  <label class="chk"><input type="checkbox" data-tw-reward="captura" /> Captura</label>
+                  <label class="chk"><input type="checkbox" data-tw-reward="shiny" /> Shiny</label>
+                </div>
+              </div>
+              <div>
+                <div style="font-weight:700;margin-bottom:4px;color:#86efac;">Buffs padrao Kick</div>
+                <div style="display:flex;gap:8px;">
+                  <label class="chk"><input type="checkbox" data-kk-reward="xp" /> XP</label>
+                  <label class="chk"><input type="checkbox" data-kk-reward="captura" /> Captura</label>
+                  <label class="chk"><input type="checkbox" data-kk-reward="shiny" /> Shiny</label>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;">
+            <button id="btnPkLogin" type="button" onclick="handlePokeIdleLoginClick()">Entrar ou trocar conta</button>
+            <button id="btnImportLiveToggle" type="button" onclick="toggleImportLiveBox()">Colar token Twitch/Kick</button>
+            <button id="btnImportSessionToggle" type="button" onclick="toggleImportSessionBox()">Colar sessão</button>
+            <button id="btnReloadSession" onclick="postAction('reload-session')">Recarregar sessão</button>
+            <button class="primary" onclick="saveConfig()">Salvar Config</button>
+          </div>
+          <div id="importLiveBox" hidden style="margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#0b1120;">
+            <div class="sub" style="margin-bottom:6px;">F12 -> Application -> Cookies: cole auth-token (twitch.tv) e/ou session_token (kick.com):</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <input id="importTwTok" type="password" placeholder="Twitch auth-token (opcional)" />
+              <input id="importKkTok" type="password" placeholder="Kick session_token (opcional)" />
+            </div>
+            <div style="margin-top:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+              <span class="sub" id="importLiveStatus" role="status"></span>
+              <div style="display:flex;gap:6px;">
+                <button type="button" onclick="toggleImportLiveBox(false)">Cancelar</button>
+                <button type="button" class="primary" onclick="submitImportedLiveTokens()">Salvar tokens</button>
+              </div>
+            </div>
+          </div>
+          <div id="importSessionBox" hidden style="margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#0b1120;">
+            <div class="sub" style="margin-bottom:6px;">Cole o JSON de "Copiar Sessão Headless" no HUD ou localStorage.getItem('sessao'):</div>
+            <textarea id="importSessionInput" rows="3" style="width:100%;background:#080c16;color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px;font-family:ui-monospace,Consolas,monospace;font-size:12px;"></textarea>
+            <div style="margin-top:6px;display:flex;justify-content:space-between;align-items:center;gap:8px;">
+              <span class="sub" id="importSessionStatus" role="status"></span>
+              <div style="display:flex;gap:6px;">
+                <button type="button" onclick="toggleImportSessionBox(false)">Cancelar</button>
+                <button type="button" class="primary" onclick="submitImportedSession()">Importar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Eventos ao Vivo</h2>
+          <div class="log-box" id="logBox"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let cfgDirty = false;
+    let lastHuntSig = '';
+    let lastProfileSig = '';
+    let lastSpriteKey = '';
+    let lastLiveChanSig = '';
+    let lastDropsSig = '';
+    let lastSnapshot = null;
+    let currentLoginInProgress = '';
+    const POTION_LABELS = { 200: 'Small Potion', 201: 'Great Potion', 202: 'Ultra Potion', 203: 'Hyper Potion', 204: 'Ultimate Potion', 70070: 'Golden Potion' };
+    const LIVE_CHAN_OPTS = [
+      ['', 'Padrao'], ['xp', 'So XP'], ['captura', 'So Captura'], ['shiny', 'So Shiny'],
+      ['xp,captura', 'XP + Cap'], ['xp,shiny', 'XP + Shiny'], ['captura,shiny', 'Cap + Shiny'],
+      ['all', 'Todos'], ['off', 'Nao resgatar'],
+    ];
+    const STATUS_LABELS = {
+      connected: 'FARMANDO',
+      bridge: 'ACOPLADO · ON',
+      connecting: 'CONECTANDO',
+      standby: 'STANDBY (4001)',
+      paused: 'PAUSADO',
+      error: 'ERRO',
+      disconnected: 'OFFLINE',
+    };
+
+    document.getElementById('cfgPanel').addEventListener('change', () => { cfgDirty = true; });
+    document.getElementById('cfgChips').addEventListener('change', () => { cfgDirty = true; });
+    for (const id of ['cEco', 'cBall', 'cShinyBall', 'cTargetBalls', 'cTargetPotions', 'cRestockPotion', 'cTargetRevives', 'cReserve', 'cLiveTargetHours', 'cLiveTier', 'cLiveMaxTw', 'cLiveMaxKk', 'cLiveCustomTw', 'cLiveCustomKk', 'cGuideMode', 'cGuideMetric']) {
+      document.getElementById(id).addEventListener('change', () => { cfgDirty = true; });
+      document.getElementById(id).addEventListener('input', () => { cfgDirty = true; });
+    }
+    document.getElementById('liveChanList').addEventListener('change', async (ev) => {
+      const sel = ev.target;
+      if (!sel?.dataset?.chanKey) return;
+      const map = { ...(lastSnapshot?.config?.liveChannelRewards || {}) };
+      if (sel.value) map[sel.dataset.chanKey] = sel.value;
+      else delete map[sel.dataset.chanKey];
+      await postAction('set-config', { config: { liveChannelRewards: map } });
+    });
+    document.getElementById('dropFilterBar').addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('button');
+      if (!btn) return;
+      if (btn.id === 'btnRestoreDrops') {
+        await postAction('set-config', { config: { dropHideItems: [] } });
+        return;
+      }
+      const cat = btn.dataset.dropCat;
+      if (!cat) return;
+      const cur = new Set(lastSnapshot?.drops?.hiddenCategories || ['stone']);
+      if (cur.has(cat)) cur.delete(cat);
+      else cur.add(cat);
+      await postAction('set-config', { config: { dropHideCategories: [...cur] } });
+    });
+    document.getElementById('dropsGrid').addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('[data-hide-drop]');
+      if (!btn) return;
+      const cur = new Set(lastSnapshot?.drops?.hiddenItems || []);
+      cur.add(btn.dataset.hideDrop);
+      await postAction('set-config', { config: { dropHideItems: [...cur] } });
+    });
+
+    async function postAction(action, extra = {}) {
+      const res = await fetch('/api/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, ...extra }),
+      });
+      const json = await res.json().catch(() => ({}));
+      refresh();
+      return { ok: res.ok && json.ok !== false, json };
+    }
+
+    function handlePokeIdleLoginClick() {
+      if (currentLoginInProgress === 'pokeidle') {
+        postAction('cancel-login');
+      } else {
+        postAction('login-pokeidle', { interactive: true });
+      }
+    }
+
+    function handleLiveLoginClick(provider) {
+      if (currentLoginInProgress === provider) {
+        postAction('cancel-login');
+      } else {
+        postAction(`login-${provider}`, { interactive: true });
+      }
+    }
+
+    function toggleImportLiveBox(force) {
+      const box = document.getElementById('importLiveBox');
+      const show = force !== undefined ? force : box.hidden;
+      box.hidden = !show;
+      document.getElementById('importLiveStatus').textContent = '';
+      if (show) document.getElementById('importTwTok').focus();
+    }
+
+    async function submitImportedLiveTokens() {
+      const twitchToken = document.getElementById('importTwTok').value.trim();
+      const kickToken = document.getElementById('importKkTok').value.trim();
+      const st = document.getElementById('importLiveStatus');
+      if (!twitchToken && !kickToken) {
+        st.textContent = 'Informe pelo menos um token.';
+        return;
+      }
+      const res = await postAction('import-live-tokens', { twitchToken, kickToken });
+      if (res.ok) {
+        document.getElementById('importTwTok').value = '';
+        document.getElementById('importKkTok').value = '';
+        toggleImportLiveBox(false);
+      } else {
+        st.textContent = res.json?.error || 'Erro ao salvar tokens.';
+      }
+    }
+
+    async function changeBrowserProfile() {
+      const val = document.getElementById('cBrowserProfile').value;
+      await postAction('set-config', { config: { browserProfile: val } });
+    }
+
+    function toggleImportSessionBox(force) {
+      const box = document.getElementById('importSessionBox');
+      const show = force !== undefined ? force : box.hidden;
+      box.hidden = !show;
+      document.getElementById('importSessionStatus').textContent = '';
+      if (show) document.getElementById('importSessionInput').focus();
+    }
+
+    async function submitImportedSession() {
+      const raw = document.getElementById('importSessionInput').value.trim();
+      const st = document.getElementById('importSessionStatus');
+      if (!raw) {
+        st.textContent = 'Cole o JSON ou token da sessão.';
+        return;
+      }
+      const res = await postAction('import-session', { raw });
+      if (res.ok) {
+        document.getElementById('importSessionInput').value = '';
+        toggleImportSessionBox(false);
+      } else {
+        st.textContent = res.json?.error || 'Sessão inválida.';
+      }
+    }
+
+    const quickChatChannel = document.getElementById('quickChatChannel');
+    const quickChatFrame = document.getElementById('quickChatFrame');
+    const quickChatOpen = document.getElementById('quickChatOpen');
+    const quickChatStatus = document.getElementById('quickChatStatus');
+
+    function showQuickChat() {
+      const url = quickChatChannel.value;
+      quickChatStatus.textContent = '';
+      quickChatFrame.hidden = !url;
+      quickChatOpen.hidden = !url;
+      if (!url) {
+        quickChatFrame.removeAttribute('src');
+        return;
+      }
+      const channel = new URL(url);
+      const name = channel.pathname.slice(1);
+      quickChatFrame.src = channel.hostname === 'kick.com'
+        ? `https://kick.com/popout/${name}/chat`
+        : `https://www.twitch.tv/embed/${name}/chat?parent=${encodeURIComponent(location.hostname)}&darkpopout`;
+      quickChatStatus.textContent = 'Entre na plataforma se o chat pedir login. Use o campo de mensagem e o botão de envio do próprio chat.';
+    }
+
+    quickChatChannel.addEventListener('change', showQuickChat);
+    quickChatOpen.addEventListener('click', async () => {
+      const url = quickChatChannel.value;
+      if (!url) return;
+      try {
+        const res = await fetch('/api/action', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'open-live-chat', url }),
+        });
+        if (!res.ok || !(await res.json()).ok) throw new Error('Falha ao abrir o chat');
+        quickChatStatus.textContent = 'Chat aberto no navegador da conta.';
+      } catch {
+        quickChatStatus.textContent = 'Falha ao abrir o chat. Confira se a live continua online.';
+      }
+    });
+
+    function renderQuickChat(urls) {
+      const current = quickChatChannel.value;
+      const validUrls = (Array.isArray(urls) ? urls : [])
+        .filter((url) => /^https:\/\/(?:www\.twitch\.tv|kick\.com)\/[a-z0-9_-]+$/i.test(url));
+      const previousUrls = Array.from(quickChatChannel.options).slice(1).map((option) => option.value);
+      if (previousUrls.length === validUrls.length && previousUrls.every((url, i) => url === validUrls[i])) return;
+      quickChatChannel.replaceChildren(
+        new Option(validUrls.length ? 'Selecione uma live' : 'Nenhuma live oficial online', ''),
+        ...validUrls.map((url) => {
+          const channel = new URL(url);
+          const platform = channel.hostname === 'kick.com' ? 'Kick' : 'Twitch';
+          return new Option(`${platform} · ${channel.pathname.slice(1)}`, url);
+        })
+      );
+      if (validUrls.includes(current)) quickChatChannel.value = current;
+      else if (current) showQuickChat();
+    }
+
+    async function changeHunt() {
+      const slug = document.getElementById('huntSelect').value;
+      if (slug) await postAction('set-hunt', { slug });
+    }
+
+    async function saveConfig() {
+      const preferredPotionIds = Array.from(document.querySelectorAll('#cfgChips input[data-potion]:checked')).map((el) => Number(el.dataset.potion));
+      const liveTwitchRewards = Array.from(document.querySelectorAll('#cfgChips input[data-tw-reward]:checked')).map((el) => el.dataset.twReward);
+      const liveKickRewards = Array.from(document.querySelectorAll('#cfgChips input[data-kk-reward]:checked')).map((el) => el.dataset.kkReward);
+      const config = {
+        caidosEnabled: document.getElementById('cCaidos').checked,
+        economyPingOnly: document.getElementById('cEconomyPingOnly').checked,
+        standbyOn4001: document.getElementById('cStandby').checked,
+        restockEnabled: document.getElementById('cRestock').checked,
+        dailyPassEnabled: document.getElementById('cPass').checked,
+        preyEnabled: document.getElementById('cPrey').checked,
+        ensureNativeAutoHeal: document.getElementById('cNativeHeal').checked,
+        liveEnabled: document.getElementById('cLives').checked,
+        liveSmartBalance: document.getElementById('cLiveSmart').checked,
+        liveTargetHours: Number(document.getElementById('cLiveTargetHours').value) || 24,
+        economyMode: document.getElementById('cEco').value,
+        preferredBall: document.getElementById('cBall').value,
+        shinyBall: document.getElementById('cShinyBall').value,
+        preferredPotionIds,
+        restockPotionId: Number(document.getElementById('cRestockPotion').value) || 0,
+        liveRewardType: liveTwitchRewards[0] || liveKickRewards[0] || 'xp',
+        liveTwitchRewards,
+        liveKickRewards,
+        liveRewardTier: document.getElementById('cLiveTier').value,
+        huntGuideMode: document.getElementById('cGuideMode').value,
+        huntGuideMetric: document.getElementById('cGuideMetric').value,
+        liveMaxTwitchSlots: Number(document.getElementById('cLiveMaxTw').value) || 4,
+        liveMaxKickSlots: Number(document.getElementById('cLiveMaxKk').value) || 2,
+        liveCustomTwitch: document.getElementById('cLiveCustomTw').value,
+        liveCustomKick: document.getElementById('cLiveCustomKk').value,
+        targetBalls: Number(document.getElementById('cTargetBalls').value) || 50,
+        targetPotions: Number(document.getElementById('cTargetPotions').value) || 0,
+        targetRevives: Number(document.getElementById('cTargetRevives').value) || 0,
+        restockRevive: (Number(document.getElementById('cTargetRevives').value) || 0) > 0,
+        minGoldReserve: Number(document.getElementById('cReserve').value) || 0,
+      };
+      cfgDirty = false;
+      await postAction('set-config', { config });
+    }
+
+    function fmtNum(n) { return Number(n || 0).toLocaleString('pt-BR'); }
+
+    function fmtUptime(sec) {
+      const h = Math.floor(sec / 3600);
+      const m = Math.floor((sec % 3600) / 60);
+      const s = sec % 60;
+      return [h, m, s].map((v) => String(v).padStart(2, '0')).join(':');
+    }
+
+    function fmtBonusMins(mins) {
+      const m = Math.max(0, Math.floor(Number(mins || 0)));
+      if (m <= 0) return 'off';
+      const h = Math.floor(m / 60);
+      const r = m % 60;
+      return h > 0 ? `${h}h${String(r).padStart(2, '0')}m` : `${r}m`;
+    }
+
+    function render(data) {
+      lastSnapshot = data;
+      const pill = document.getElementById('statusPill');
+      pill.textContent = STATUS_LABELS[data.status] || String(data.status || '').toUpperCase();
+      pill.className = 'pill ' + (data.status || '');
+
+      const t = data.trainer || {};
+      const st = data.stats || {};
+      document.getElementById('trainerLine').textContent =
+        `${t.nick || '-'} (Nv ${t.level || 0}) · Gold: ${fmtNum(t.gold)} · Uptime: ${fmtUptime(st.uptimeSec || 0)} · Pongs: ${st.pongs || 0}`;
+
+      const pk = data.activePokemon;
+      document.getElementById('pokeName').textContent = pk ? `${pk.shiny ? '★ ' : ''}${pk.name} Nv ${pk.level}` : '-';
+      document.getElementById('pokeHpTxt').textContent = pk ? `${fmtNum(pk.hp)} / ${fmtNum(pk.maxHp)} HP (${pk.hpPercent}%)` : '0 / 0 HP';
+      const fill = document.getElementById('pokeHpFill');
+      const pct = pk ? pk.hpPercent : 0;
+      fill.style.width = `${pct}%`;
+      fill.style.background = pct > 55 ? '#22c55e' : pct > 25 ? '#f59e0b' : '#ef4444';
+      document.getElementById('huntLine').textContent = `Hunt: ${t.huntName || '-'} ${t.noCentro ? '(Centro Pokemon)' : ''} · Eco: ${t.economyActive ? 'ON' : 'OFF'}`;
+      document.getElementById('huntGuideLine').textContent = data.config?.huntGuideMode && data.config.huntGuideMode !== 'off'
+        ? data.huntGuide?.note ?? 'Use Jogar com o bot em um perfil com a extensão /hunt.'
+        : '';
+
+      const spKey = pk ? `${pk.speciesId}:${pk.shiny ? 1 : 0}` : '';
+      if (spKey && spKey !== lastSpriteKey) {
+        lastSpriteKey = spKey;
+        const box = document.getElementById('pokeSprite');
+        const shinySeg = pk.shiny ? 'shiny/' : '';
+        box.innerHTML = `<img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${shinySeg}${pk.speciesId}.png" alt="${pk.name}" onerror="this.remove()" />`;
+      }
+
+      const hunts = data.hunts || [];
+      const huntSig = `${hunts.length}:${t.huntSlug || ''}`;
+      const sel = document.getElementById('huntSelect');
+      if (huntSig !== lastHuntSig && document.activeElement !== sel) {
+        lastHuntSig = huntSig;
+        sel.innerHTML = hunts.map((h) => `<option value="${h.slug}">${h.nome} (Nv ${h.nivel})</option>`).join('');
+        if (t.huntSlug) sel.value = t.huntSlug;
+      }
+      const btnCenter = document.getElementById('btnGoCenter');
+      const btnHunt = document.getElementById('btnChangeHunt');
+      const pendingBar = document.getElementById('pendingHuntBar');
+      const isOnlineDash = data.status === 'connected' || data.status === 'bridge';
+      const nowDash = Date.now();
+      const combatLeft = t.centroLivreAt > nowDash ? t.centroLivreAt - nowDash : 0;
+      const swapLeft = t.trocaHuntLivreAt > nowDash ? t.trocaHuntLivreAt - nowDash : 0;
+      const lockLeft = Math.max(combatLeft, swapLeft);
+      if (btnCenter && btnHunt) {
+        if (!isOnlineDash) {
+          btnCenter.disabled = true;
+          btnCenter.textContent = 'Centro Medico';
+          btnHunt.textContent = 'Trocar Hunt';
+        } else if (t.noCentro) {
+          btnCenter.disabled = false;
+          btnCenter.textContent = 'Curar no Centro';
+          btnHunt.textContent = swapLeft > 0 ? `Agendar (${(swapLeft / 1000).toFixed(1)}s)` : 'Trocar Hunt';
+        } else if (combatLeft > 0) {
+          btnCenter.disabled = true;
+          btnCenter.textContent = `Centro (${(combatLeft / 1000).toFixed(1)}s)`;
+          btnHunt.textContent = `Agendar (${(lockLeft / 1000).toFixed(1)}s)`;
+        } else {
+          btnCenter.disabled = !t.huntSlug;
+          btnCenter.textContent = 'Centro Medico';
+          btnHunt.textContent = swapLeft > 0 ? `Agendar (${(swapLeft / 1000).toFixed(1)}s)` : 'Trocar Hunt';
+        }
+      }
+      if (pendingBar) {
+        if (t.pendingHuntSlug && isOnlineDash) {
+          pendingBar.style.display = 'block';
+          pendingBar.textContent = `Troca agendada: ${t.pendingHuntName || t.pendingHuntSlug}${lockLeft > 0 ? ` (${(lockLeft / 1000).toFixed(1)}s)` : ''}`;
+        } else {
+          pendingBar.style.display = 'none';
+        }
+      }
+
+      const fmtDec = (n) => String(Number(n || 0)).replace('.', ',');
+      const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      document.getElementById('kKills').textContent = fmtNum(st.kills);
+      document.getElementById('kKillsRate').textContent = `${fmtDec(st.killsPerMin || 0)}/min`;
+      document.getElementById('kXp').textContent = fmtNum(st.xpGained);
+      document.getElementById('kXpRate').textContent = `${fmtNum(st.xpPerHour)}/h · Tr ${fmtNum(st.xpTrainerPerHour)}/h`;
+      const netGold = st.netGold ?? st.goldGained ?? 0;
+      const netPerH = st.netGoldPerHour ?? st.goldPerHour ?? 0;
+      document.getElementById('kGold').textContent = `${netGold >= 0 ? '' : '-'}${fmtNum(Math.abs(netGold))}`;
+      document.getElementById('kGoldRate').textContent = `${netPerH >= 0 ? '+' : '-'}${fmtNum(Math.abs(netPerH))}/h liq.`;
+      document.getElementById('kCaps').textContent = fmtNum(st.captures);
+      document.getElementById('kCapsSub').textContent = `${st.shiniesCaptured || 0} shinies · ${fmtNum(st.ballsThrown)} bolas`;
+
+      document.getElementById('eAvgKill').textContent = st.avgKillSec > 0 ? `${fmtDec(st.avgKillSec)}s` : '-';
+      document.getElementById('eAvgKillSub').textContent = `${fmtDec(st.killsPerMin || 0)} abates/min`;
+      document.getElementById('eCapKill').textContent = st.kills > 0 ? `${fmtDec(st.capturePerKillPct || 0)}%` : '-';
+      document.getElementById('eCapKillSub').textContent = st.killsPerCapture > 0 ? `1 a cada ${fmtDec(st.killsPerCapture)} abates` : 'sem capturas';
+      document.getElementById('eBallCap').textContent = st.ballsPerCapture > 0 ? fmtDec(st.ballsPerCapture) : '-';
+      document.getElementById('eBallCapSub').textContent = `${fmtDec(st.catchPerBallPct || 0)}% acerto/bola`;
+      document.getElementById('eSpent').textContent = `-${fmtNum(st.spentGold || 0)}`;
+      document.getElementById('eBrutoSub').textContent = `bruto: +${fmtNum(st.goldGained || 0)}`;
+      document.getElementById('eShinies').textContent = `${fmtNum(st.shiniesCaptured || 0)} / ${fmtNum(st.shiniesSeen || 0)}`;
+      document.getElementById('eSurv').textContent = `${fmtNum(st.heals || 0)} poc · ${fmtNum(st.revivesUsed || 0)} rev`;
+      document.getElementById('eSurvSub').textContent = `${fmtNum(st.playerDeaths || 0)} mortes · ${fmtDec(st.potionsPerHour || 0)} poc/h`;
+
+      const dr = data.drops || {};
+      const focusKey = dr.focus || 'hunt';
+      const badge = document.getElementById('dropsFocusBadge');
+      badge.textContent = `${dr.focusLabel || 'XP / Gold / Shiny'} · ${fmtNum(dr.total || 0)} drops`;
+      badge.className = `focus-pill ${focusKey}`;
+      const featured = Array.isArray(dr.featured) ? dr.featured : [];
+      const recent = Array.isArray(dr.recent) ? dr.recent : [];
+      const hCats = Array.isArray(dr.hiddenCategories) ? dr.hiddenCategories : ['stone'];
+      const hItems = Array.isArray(dr.hiddenItems) ? dr.hiddenItems : [];
+      const hCatSet = new Set(hCats);
+      document.querySelectorAll('#dropFilterBar [data-drop-cat]').forEach((b) => {
+        const on = !hCatSet.has(b.dataset.dropCat);
+        b.style.opacity = on ? '1' : '0.45';
+        b.style.textDecoration = on ? 'none' : 'line-through';
+        b.style.borderColor = on ? 'rgba(59,130,246,0.55)' : 'var(--border)';
+      });
+      const rBtn = document.getElementById('btnRestoreDrops');
+      rBtn.hidden = hItems.length === 0;
+      if (hItems.length > 0) rBtn.textContent = `${hItems.length} oculto${hItems.length > 1 ? 's' : ''} · restaurar`;
+
+      const dSig = `${focusKey}|${dr.total || 0}|${hCats.join(',')}|${hItems.join(',')}|${featured.map((d) => `${d.key}:${d.qty}:${d.bagQty ?? ''}`).join(';')}|${recent[0]?.time || ''}:${recent.length}`;
+      if (dSig !== lastDropsSig) {
+        lastDropsSig = dSig;
+        const gEl = document.getElementById('dropsGrid');
+        gEl.innerHTML = featured.length
+          ? featured.map((d) => {
+            const bag = typeof d.bagQty === 'number' ? `bolsa: ${fmtNum(d.bagQty)}` : '';
+            const rate = d.qty > 0 && d.perHour > 0 ? `${fmtDec(d.perHour)}/h` : (d.lastTime || '');
+            const meta = [rate, bag].filter(Boolean).join(' · ') || 'sem drop ainda';
+            return `<div class="drop-chip${d.qty > 0 ? ' hit' : ''}"><div><div style="font-size:12px;font-weight:700;">${esc(d.name)}</div><div class="sub" style="font-size:10px;">${esc(meta)}</div></div><div style="display:flex;align-items:center;gap:4px;"><span class="dq">x${fmtNum(d.qty)}</span><button type="button" data-hide-drop="${esc(d.key)}" title="Ocultar item" style="border:0;background:transparent;color:var(--muted);padding:1px 4px;cursor:pointer;">×</button></div></div>`;
+          }).join('')
+          : `<div class="sub" style="grid-column:1/-1;">Foco em ${esc(dr.focusLabel || 'XP / Shiny')}. Itens visiveis nos filtros aparecem aqui automaticamente.</div>`;
+        document.getElementById('recentDropsList').innerHTML = recent.slice(0, 8)
+          .map((r) => `<div class="recent-drop-line${r.rare ? ' rare' : ''}"><span>[${esc(r.time)}] <b>${esc(r.name)}</b> x${fmtNum(r.qty)}</span><span>${esc(r.hunt || '')}</span></div>`)
+          .join('');
+      }
+
+      const inv = data.inventory || {};
+      const b = inv.balls || {};
+      const it = inv.items || {};
+      const selPots = new Set([
+        ...(data.config?.preferredPotionIds || []),
+        ...(data.automation?.potionIds || []),
+        ...(data.config?.restockPotionId ? [Number(data.config.restockPotionId)] : []),
+      ]);
+      const chips = [
+        ['Poke Ball', b[1]], ['Great Ball', b[2]], ['Super Ball', b[3]],
+        ['Ultra Ball', b[4]], ['Beast Ball', b[5]],
+      ];
+      for (const pid of [200, 201, 202, 203, 204, 70070]) {
+        const qty = Number(it[pid] || 0);
+        if (pid === 200 || qty > 0 || selPots.has(pid)) chips.push([POTION_LABELS[pid], qty]);
+      }
+      chips.push(['Revive', it[205]]);
+      if (Number(it[206] || 0) > 0) chips.push(['Max Revive', it[206]]);
+      document.getElementById('invGrid').innerHTML = chips
+        .map(([n, q]) => `<div class="inv-chip"><span>${n}</span><b>${fmtNum(q)}</b></div>`)
+        .join('');
+
+      const lv = data.lives || {};
+      renderQuickChat(lv.officialUrls);
+      const fmtChan = (m) => Object.entries(m || {}).filter(([, v]) => v?.live || v?.error)
+        .map(([k, v]) => v.error ? `${k}: ${v.error}` : `${k}:ON(${v.balance ?? '?'})`).join(', ') || 'nenhuma online';
+      const twSum = (lv.twitchRewards || [lv.rewardType || 'xp']).join('+').toUpperCase() || 'OFF';
+      const kkSum = (lv.kickRewards || [lv.rewardType || 'xp']).join('+').toUpperCase() || 'OFF';
+      document.getElementById('livesLine').textContent =
+        `Lives (${lv.enabled ? `TW:${twSum} · KK:${kkSum}` : 'OFF'}): ${lv.minutesWatched || 0}m · ${lv.chestsClaimed || 0} baus · ${lv.rewardsRedeemed || 0} resg. | TW[${lv.hasTwitchToken ? 'OK' : 'off'}] ${fmtChan(lv.twitch)} | KK[${lv.hasKickToken ? 'OK' : 'off'}] ${fmtChan(lv.kick)}`;
+      const ab = lv.activeBonuses || {};
+      document.getElementById('livesBonusLine').textContent =
+        `Ativos TW: XP ${fmtBonusMins(ab.twitch?.xp)} · Cap ${fmtBonusMins(ab.twitch?.captura)} · Shiny ${fmtBonusMins(ab.twitch?.shiny)} | KK: XP ${fmtBonusMins(ab.kick?.xp)} · Cap ${fmtBonusMins(ab.kick?.captura)} · Shiny ${fmtBonusMins(ab.kick?.shiny)}`;
+      const fmtSmart = (lb, st) => !st ? '' : (st.allReached ? `${lb}: todos >= ${fmtBonusMins(st.targetMin)} ✓` : `${lb}: prox. ${String(st.nextKind || '').toUpperCase()} (${fmtBonusMins(st.nextMin)}/${fmtBonusMins(st.targetMin)})`);
+      document.getElementById('livesSmartLine').textContent = lv.smartBalance
+        ? `Gestor (${lv.targetHours || 24}h): ${fmtSmart('TW', lv.smartStatus?.twitch)} | ${fmtSmart('KK', lv.smartStatus?.kick)}`
+        : 'Gestor inteligente: desligado';
+
+      const chanListEl = document.getElementById('liveChanList');
+      const channels = Array.isArray(lv.channels) ? lv.channels : [];
+      const chanSig = channels.map((c) => `${c.key}:${c.live ? 1 : 0}:${c.balance ?? ''}:${c.override || ''}`).join(';');
+      if (chanSig !== lastLiveChanSig && !chanListEl.contains(document.activeElement)) {
+        lastLiveChanSig = chanSig;
+        const frag = document.createDocumentFragment();
+        for (const ch of channels) {
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:6px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;background:#0c1322;font-size:12px;';
+          const lbl = document.createElement('span');
+          lbl.textContent = `[${ch.platform === 'twitch' ? 'TW' : 'KK'}]${ch.live ? ' ●' : ''} ${ch.channel}${typeof ch.balance === 'number' ? ` (${fmtNum(ch.balance)} pts)` : ''}`;
+          const sel = document.createElement('select');
+          sel.dataset.chanKey = ch.key;
+          sel.style.cssText = 'width:130px;padding:3px 5px;font-size:11px;';
+          for (const [v, l] of LIVE_CHAN_OPTS) sel.appendChild(new Option(l, v));
+          sel.value = ch.override || '';
+          row.appendChild(lbl);
+          row.appendChild(sel);
+          frag.appendChild(row);
+        }
+        chanListEl.replaceChildren(frag);
+      }
+
+      const gamePots = Array.isArray(data.automation?.potionIds) ? data.automation.potionIds : [];
+      document.getElementById('activePotionsHint').textContent = gamePots.length
+        ? `(no jogo: ${gamePots.map((id) => (POTION_LABELS[id] || `#${id}`).replace(' Potion', '')).join(', ')})`
+        : '(vazio = usa as do jogo)';
+      const lp = data.loginInProgress;
+      currentLoginInProgress = lp || '';
+      const profSel = document.getElementById('cBrowserProfile');
+      const profiles = Array.isArray(data.browserProfiles) ? data.browserProfiles : [];
+      const profSetting = data.browserProfileSetting || '';
+      const profSig = `${profSetting}|${profiles.map((p) => `${p.id}=${p.label}`).join(';')}`;
+      if (profSig !== lastProfileSig && document.activeElement !== profSel) {
+        lastProfileSig = profSig;
+        profSel.replaceChildren(
+          ...(profiles.length
+            ? profiles.map((p) => new Option(p.label, p.id))
+            : [new Option('Perfil isolado desta conta', '')])
+        );
+        profSel.value = profSetting;
+      }
+      const bTw = document.getElementById('btnTwLogin');
+      const bKk = document.getElementById('btnKkLogin');
+      const bPk = document.getElementById('btnPkLogin');
+      document.getElementById('btnReloadSession').textContent = data.browserProfile ? 'Usar sessão do Chrome' : 'Recarregar sessão';
+      bTw.disabled = !!lp && lp !== 'twitch'; bKk.disabled = !!lp && lp !== 'kick'; bPk.disabled = !!lp && lp !== 'pokeidle';
+      bTw.textContent = lp === 'twitch' ? 'Cancelar login' : (lv.hasTwitchToken ? 'Twitch Conectada ✓ (Trocar)' : 'Logar na Twitch');
+      bKk.textContent = lp === 'kick' ? 'Cancelar login' : (lv.hasKickToken ? 'Kick Conectada ✓ (Trocar)' : 'Logar na Kick');
+      bPk.textContent = lp === 'pokeidle' ? 'Cancelar login' : (data.status === 'connected' ? 'PokeIdle ✓ (Trocar)' : 'Logar PokeIdle');
+
+      if (!cfgDirty && data.config) {
+        const c = data.config;
+        document.getElementById('cCaidos').checked = !!c.caidosEnabled;
+        document.getElementById('cEconomyPingOnly').checked = !!c.economyPingOnly;
+        document.getElementById('cStandby').checked = !!c.standbyOn4001;
+        document.getElementById('cRestock').checked = !!c.restockEnabled;
+        document.getElementById('cPass').checked = !!c.dailyPassEnabled;
+        document.getElementById('cPrey').checked = !!c.preyEnabled;
+        document.getElementById('cNativeHeal').checked = !!c.ensureNativeAutoHeal;
+        document.getElementById('cLives').checked = !!c.liveEnabled;
+        document.getElementById('cLiveSmart').checked = c.liveSmartBalance !== false;
+        document.getElementById('cLiveTargetHours').value = String(c.liveTargetHours ?? 24);
+        document.getElementById('cEco').value = c.economyMode || 'auto';
+        document.getElementById('cBall').value = c.preferredBall || 'auto';
+        document.getElementById('cShinyBall').value = c.shinyBall || 'best';
+        document.getElementById('cRestockPotion').value = String(c.restockPotionId || 0);
+        document.getElementById('cLiveTier').value = c.liveRewardTier || 'smart';
+        document.getElementById('cGuideMode').value = c.huntGuideMode || 'off';
+        document.getElementById('cGuideMetric').value = c.huntGuideMetric || 'xp';
+        document.getElementById('cLiveMaxTw').value = c.liveMaxTwitchSlots ?? 4;
+        document.getElementById('cLiveMaxKk').value = c.liveMaxKickSlots ?? 2;
+        document.getElementById('cLiveCustomTw').value = c.liveCustomTwitch ?? '';
+        document.getElementById('cLiveCustomKk').value = c.liveCustomKick ?? '';
+        document.getElementById('cTargetBalls').value = c.targetBalls ?? 50;
+        document.getElementById('cTargetPotions').value = c.targetPotions ?? 40;
+        document.getElementById('cTargetRevives').value = c.restockRevive === false ? 0 : (c.targetRevives ?? 20);
+        document.getElementById('cReserve').value = c.minGoldReserve ?? 50000;
+        const prefPots = new Set(Array.isArray(c.preferredPotionIds) ? c.preferredPotionIds.map(Number) : []);
+        document.querySelectorAll('#cfgChips input[data-potion]').forEach((el) => {
+          el.checked = prefPots.has(Number(el.dataset.potion));
+        });
+        const twRews = new Set(Array.isArray(c.liveTwitchRewards) ? c.liveTwitchRewards : [c.liveRewardType || 'xp']);
+        document.querySelectorAll('#cfgChips input[data-tw-reward]').forEach((el) => {
+          el.checked = twRews.has(el.dataset.twReward);
+        });
+        const kkRews = new Set(Array.isArray(c.liveKickRewards) ? c.liveKickRewards : [c.liveRewardType || 'xp']);
+        document.querySelectorAll('#cfgChips input[data-kk-reward]').forEach((el) => {
+          el.checked = kkRews.has(el.dataset.kkReward);
+        });
+      }
+
+      const logBox = document.getElementById('logBox');
+      const atBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 24;
+      logBox.innerHTML = (data.logs || [])
+        .map((l) => `<div class="log-line ${l.kind}">[${l.time}] ${l.text.replace(/</g, '&lt;')}</div>`)
+        .join('');
+      if (atBottom) logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    async function refresh() {
+      try {
+        const res = await fetch('/api/status');
+        if (res.ok) render(await res.json());
+      } catch {
+        // servidor reiniciando
+      }
+    }
+
+    refresh();
+    setInterval(() => { if (!document.hidden) refresh(); }, 1250);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) refresh(); });
+  </script>
+</body>
+</html>

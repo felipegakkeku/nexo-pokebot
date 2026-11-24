@@ -1,0 +1,4 @@
+dist/pokebot.user.js text eol=lf
+src/** text eol=lf
+CHANGELOG.md text eol=lf
+*.bat text eol=crlf

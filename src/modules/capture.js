@@ -8,7 +8,80 @@ const SEL_LOCAL = {
     ballOpts: '#auto-ball-opts',
     ballChip: '.auto-chip',
     chipQty: '.q',
+    caidosBallsHost: '#caidos-bolas',
+    caidosBallBtn: 'button.caidos-bola',
     caidoWho: '.caido-quem',
+};
+
+const BALL_INDEX_BY_KEY = { poke: 0, great: 1, super: 2, ultra: 3, beast: 4 };
+const BALL_MATCHERS = [
+    { idx: 0, key: 'poke', token: 'poke ball', img: 'ball-poke' },
+    { idx: 1, key: 'great', token: 'great ball', img: 'ball-great' },
+    { idx: 2, key: 'super', token: 'super ball', img: 'ball-super' },
+    { idx: 3, key: 'ultra', token: 'ultra ball', img: 'ball-ultra' },
+    { idx: 4, key: 'beast', token: 'beast ball', img: 'ball-beast' },
+];
+
+export const resolveDesiredBallOrder = (CONFIG, { isShiny = false, targetLv = 1 } = {}) => {
+    const caidosCfg = CONFIG?.caidos || {};
+    if (isShiny) {
+        const base = [4, 3, 2, 1, 0];
+        const pref = BALL_INDEX_BY_KEY[caidosCfg.shinyBall];
+        return pref !== undefined ? [pref, ...base.filter((i) => i !== pref)] : base;
+    }
+
+    const pref = BALL_INDEX_BY_KEY[caidosCfg.preferredBall];
+    if (pref !== undefined) {
+        const fallback = [0, 1, 2, 3, 4];
+        return [pref, ...fallback.filter((i) => i !== pref)];
+    }
+
+    if (caidosCfg.smartBallSelect) {
+        return targetLv >= (caidosCfg.highLevelUltraThreshold ?? 20)
+            ? [3, 2, 1, 0]
+            : [0, 1, 2, 3];
+    }
+
+    return null;
+};
+
+const detectBallIndexFromBtn = (btn) => {
+    if (!btn) return null;
+    const title = normalizeText(btn.getAttribute?.('title') ?? btn.title ?? '');
+    const imgSrc = normalizeText(btn.querySelector?.('img')?.getAttribute?.('src') ?? '');
+    const matched = BALL_MATCHERS.find((m) => title.includes(m.token) || imgSrc.includes(m.img));
+    return matched ? matched.idx : null;
+};
+
+const syncCaidosBallHost = (ctx, order, preferredIdx) => {
+    const { dom } = ctx;
+    const host = dom.$(SEL_LOCAL.caidosBallsHost);
+    if (!host) return;
+    const btns = Array.from(host.querySelectorAll(SEL_LOCAL.caidosBallBtn));
+    if (btns.length === 0) return;
+
+    const byIdx = new Map();
+    btns.forEach((btn, pos) => {
+        const idx = detectBallIndexFromBtn(btn) ?? pos;
+        byIdx.set(idx, btn);
+    });
+
+    let targetBtn = preferredIdx !== -1 && preferredIdx !== null ? byIdx.get(preferredIdx) : null;
+    if (!targetBtn && Array.isArray(order)) {
+        for (const idx of order) {
+            if (byIdx.has(idx)) {
+                targetBtn = byIdx.get(idx);
+                break;
+            }
+        }
+    }
+    if (!targetBtn && !btns.some((b) => b.classList?.contains?.('on'))) {
+        targetBtn = btns[0];
+    }
+
+    if (targetBtn && !targetBtn.classList?.contains?.('on') && dom.isInteractable(targetBtn)) {
+        targetBtn.click();
+    }
 };
 
 export const isShinyCaidoButton = (btn) => {
@@ -26,45 +99,37 @@ export const isShinyCaidoButton = (btn) => {
 
 export const ensureBestBallSelected = (ctx, targetBtn) => {
     const { CONFIG, dom } = ctx;
-    const container = dom.$(SEL_LOCAL.ballOpts);
-    if (!container) return;
-
-    const chips = Array.from(container.querySelectorAll(SEL_LOCAL.ballChip));
-    if (chips.length === 0) return;
-
-    const counts = chips.map((c) => parseNumber(c.querySelector(SEL_LOCAL.chipQty)?.textContent ?? c.textContent) ?? 0);
-    const currentIdx = chips.findIndex((c) => c.classList.contains('on'));
     const isShiny = isShinyCaidoButton(targetBtn);
+    const targetLv = parseNumber(targetBtn?.textContent) ?? dom.getCurrentHunt()?.targetLevel ?? 1;
+    const order = resolveDesiredBallOrder(CONFIG, { isShiny, targetLv });
 
-    let desiredIdx = currentIdx;
+    const container = dom.$(SEL_LOCAL.ballOpts);
+    const chips = container ? Array.from(container.querySelectorAll(SEL_LOCAL.ballChip)) : [];
+    let desiredIdx = -1;
 
-    if (isShiny) {
-        for (const idx of [4, 3, 2, 1, 0]) {
-            if (chips[idx] && counts[idx] > 0) {
-                desiredIdx = idx;
-                break;
+    if (chips.length > 0) {
+        const counts = chips.map((c) => parseNumber(c.querySelector(SEL_LOCAL.chipQty)?.textContent ?? c.textContent) ?? 0);
+        const currentIdx = chips.findIndex((c) => c.classList.contains('on'));
+        desiredIdx = currentIdx;
+
+        if (order) {
+            for (const idx of order) {
+                if (chips[idx] && counts[idx] > 0) {
+                    desiredIdx = idx;
+                    break;
+                }
             }
+        } else if (currentIdx === -1 || counts[currentIdx] <= 0) {
+            const firstAvailable = counts.findIndex((n) => n > 0);
+            if (firstAvailable !== -1) desiredIdx = firstAvailable;
         }
-    } else if (CONFIG.caidos.smartBallSelect) {
-        const targetLv = parseNumber(targetBtn?.textContent) ?? dom.getCurrentHunt()?.targetLevel ?? 1;
-        const order =
-            targetLv >= CONFIG.caidos.highLevelUltraThreshold
-                ? [3, 2, 1, 0]
-                : [0, 1, 2, 3];
-        for (const idx of order) {
-            if (chips[idx] && counts[idx] > 0) {
-                desiredIdx = idx;
-                break;
-            }
+
+        if (desiredIdx !== -1 && desiredIdx !== currentIdx && chips[desiredIdx] && dom.isInteractable(chips[desiredIdx])) {
+            chips[desiredIdx].click();
         }
-    } else if (currentIdx === -1 || counts[currentIdx] <= 0) {
-        const firstAvailable = counts.findIndex((n) => n > 0);
-        if (firstAvailable !== -1) desiredIdx = firstAvailable;
     }
 
-    if (desiredIdx !== -1 && desiredIdx !== currentIdx && chips[desiredIdx] && dom.isInteractable(chips[desiredIdx])) {
-        chips[desiredIdx].click();
-    }
+    syncCaidosBallHost(ctx, order, desiredIdx);
 };
 
 export const processCaidos = (ctx, container) => {
@@ -101,7 +166,15 @@ export const processCaidos = (ctx, container) => {
     }
 
     const now = Date.now();
-    const ordered = shinyButtons.length > 0 ? [...shinyButtons, ...allButtons] : allButtons;
+    const normalButtons = allButtons.filter((b) => !isShinyCaidoButton(b));
+    const orderedNormals =
+        CONFIG.caidos.prioritizeExpiring !== false
+            ? [
+                  ...normalButtons.filter((b) => b.classList?.contains?.('acabando')),
+                  ...normalButtons.filter((b) => !b.classList?.contains?.('acabando')),
+              ]
+            : normalButtons;
+    const ordered = shinyButtons.length > 0 ? [...shinyButtons, ...orderedNormals] : orderedNormals;
     const nextBtn = ordered.find((btn) => {
         const lastTry = parseInt(btn.dataset.pbTriedAt || '0', 10);
         const retryMs = isShinyCaidoButton(btn) ? 1400 : CONFIG.caidos.retryAfterMs;

@@ -30,7 +30,7 @@
                 border: none; background: rgba(255,255,255,0.12); color: #e8eef8;
                 width: 20px; height: 20px; border-radius: 5px; cursor: pointer; font-size: 12px; padding: 0;
             }
-            #${HUD_ID} .pb-tabs { display: grid; grid-template-columns: repeat(3, 1fr); background: rgba(255,255,255,0.04); }
+            #${HUD_ID} .pb-tabs { display: grid; grid-template-columns: repeat(4, 1fr); background: rgba(255,255,255,0.04); }
             #${HUD_ID} .pb-tab {
                 border: none; background: transparent; color: #94a3b8; padding: 6px 4px;
                 font-size: 11px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent;
@@ -66,6 +66,12 @@
             #${HUD_ID} .pb-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
             #${HUD_ID} .pb-actions3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
             #${HUD_ID} .pb-actions4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
+            #${HUD_ID} .pb-actions5 { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+            #${HUD_ID} .pb-grid-cfg {
+                display: grid; grid-template-columns: 1fr 1fr; gap: 5px 6px;
+                background: rgba(255,255,255,0.04); padding: 6px 7px; border-radius: 6px;
+            }
+            #${HUD_ID} .pb-cfg-field { display: flex; flex-direction: column; gap: 2px; }
             #${HUD_ID} .pb-form { display: grid; grid-template-columns: 1fr 74px 54px; gap: 4px; }
             #${HUD_ID} input, #${HUD_ID} select, #${HUD_ID} textarea {
                 background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.15);
@@ -141,7 +147,7 @@
             <div class="pb-head" data-pb-drag="1">
                 <div class="pb-title">
                     <span class="pb-dot" data-pb="dot"></span>
-                    <span data-pb="headTitle">PokeBot v${VERSION}</span>
+                    <span data-pb="headTitle">Nexo PokeBot v${VERSION}</span>
                 </div>
                 <div class="pb-head-btns">
                     <button class="pb-icon-btn" data-pb-act="min" title="Minimizar">—</button>
@@ -151,6 +157,7 @@
             <div class="pb-tabs">
                 <button class="pb-tab" data-pb-tab="geral">Geral</button>
                 <button class="pb-tab" data-pb-tab="modulos">Módulos</button>
+                <button class="pb-tab" data-pb-tab="lives">Lives</button>
                 <button class="pb-tab" data-pb-tab="radar">Radar/Quiz</button>
             </div>
             <div class="pb-body">
@@ -212,13 +219,114 @@
                         <div class="pb-tog pb-span2" data-pb-tog="teamMode"><span>Equipe / Dia Sazonal</span><b data-pb-tval="teamMode">OFF</b></div>
                         <div class="pb-tog pb-span2" data-pb-tog="queueFallback"><span>Fila: Fallback Seguro</span><b data-pb-tval="queueFallback">ON</b></div>
                         <div class="pb-tog pb-span2" data-pb-tog="bossPriority"><span>Auto-Boss (Rotação)</span><b data-pb-tval="bossPriority">OFF</b></div>
+                        <div class="pb-tog pb-span2" data-pb-tog="prey"><span>Auto-Prey (Caçada)</span><b data-pb-tval="prey">ON</b></div>
+                    </div>
+                    <div class="pb-sec">Configurações (Bola &amp; Restock)</div>
+                    <div class="pb-grid-cfg">
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Bola Normal</span>
+                            <select data-pb-cfg="preferredBall">
+                                <option value="auto">Auto Intelig.</option>
+                                <option value="poke">Poke Ball</option>
+                                <option value="great">Great Ball</option>
+                                <option value="super">Super Ball</option>
+                                <option value="ultra">Ultra Ball</option>
+                                <option value="beast">Beast Ball</option>
+                            </select>
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Bola Shiny</span>
+                            <select data-pb-cfg="shinyBall">
+                                <option value="best">Melhor disp.</option>
+                                <option value="beast">Beast Ball</option>
+                                <option value="ultra">Ultra Ball</option>
+                                <option value="super">Super Ball</option>
+                                <option value="great">Great Ball</option>
+                                <option value="poke">Poke Ball</option>
+                            </select>
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Nv p/ Ultra</span>
+                            <input type="number" min="1" max="200" data-pb-cfg="highLevelUltraThreshold" />
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Alvo Bolas</span>
+                            <input type="number" min="10" max="5000" step="10" data-pb-cfg="targetBalls" />
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Alvo Poções</span>
+                            <input type="number" min="0" max="5000" step="10" data-pb-cfg="targetPotions" />
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Reserva Gold</span>
+                            <input type="number" min="0" step="10000" data-pb-cfg="minGoldReserve" />
+                        </label>
                     </div>
                     <div class="pb-sec">Executar Agora</div>
-                    <div class="pb-actions4">
+                    <div class="pb-actions5">
                         <button class="pb-btn" data-pb-act="runDepot">Depot</button>
                         <button class="pb-btn" data-pb-act="runPass">Passe</button>
+                        <button class="pb-btn" data-pb-act="runPrey">Prey</button>
                         <button class="pb-btn" data-pb-act="runEggs">Ovos</button>
                         <button class="pb-btn" data-pb-act="runBoss">Boss</button>
+                    </div>
+                </div>
+
+                <div class="pb-pane" data-pb-pane="lives">
+                    <div class="pb-grid">
+                        <div class="pb-row pb-span2"><span class="pb-lbl">Twitch</span><span class="pb-val" data-pb="liveTwitchInfo">-</span></div>
+                        <div class="pb-row pb-span2"><span class="pb-lbl">Kick</span><span class="pb-val" data-pb="liveKickInfo">-</span></div>
+                        <div class="pb-row pb-span2"><span class="pb-lbl">Pings / Baús / Resg.</span><span class="pb-val" data-pb="liveStatsInfo">0 / 0 / 0</span></div>
+                    </div>
+                    <div class="pb-toggles">
+                        <div class="pb-tog pb-span2" data-pb-tog="liveEnabled"><span>Auto-Lives (Ping &amp; Resgate)</span><b data-pb-tval="liveEnabled">OFF</b></div>
+                        <div class="pb-tog" data-pb-tog="liveWatchTwitch"><span>Twitch Leve</span><b data-pb-tval="liveWatchTwitch">ON</b></div>
+                        <div class="pb-tog" data-pb-tog="liveWatchKick"><span>Kick Leve</span><b data-pb-tval="liveWatchKick">ON</b></div>
+                        <div class="pb-tog" data-pb-tog="liveAutoClaimChest"><span>Baú +50 (TW)</span><b data-pb-tval="liveAutoClaimChest">ON</b></div>
+                        <div class="pb-tog" data-pb-tog="liveAutoRedeem"><span>Auto-Resgatar</span><b data-pb-tval="liveAutoRedeem">ON</b></div>
+                    </div>
+                    <div class="pb-grid-cfg">
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Bônus Alvo</span>
+                            <select data-pb-cfg="liveRewardType">
+                                <option value="xp">XP (+15%)</option>
+                                <option value="captura">Captura (+15%)</option>
+                                <option value="shiny">Shiny Lure (+15%)</option>
+                            </select>
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Guarda (min)</span>
+                            <input type="number" min="0" max="600" data-pb-cfg="liveGuardThresholdMin" />
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Lives Twitch</span>
+                            <input type="number" min="1" max="12" data-pb-cfg="liveMaxTwitchSlots" />
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Lives Kick</span>
+                            <input type="number" min="1" max="12" data-pb-cfg="liveMaxKickSlots" />
+                        </label>
+                        <label class="pb-cfg-field pb-span2">
+                            <span class="pb-lbl">Token Twitch (auth-token)</span>
+                            <input type="password" data-pb-cfg="liveTwitchToken" placeholder="Auto (cookie) ou cole auth-token" />
+                        </label>
+                        <label class="pb-cfg-field pb-span2">
+                            <span class="pb-lbl">Token Kick (session_token)</span>
+                            <input type="password" data-pb-cfg="liveKickToken" placeholder="Auto (cookie) ou cole session_token" />
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Canais TW (extra)</span>
+                            <input type="text" data-pb-cfg="liveCustomTwitch" placeholder="canal1, canal2" />
+                        </label>
+                        <label class="pb-cfg-field">
+                            <span class="pb-lbl">Canais KK (extra)</span>
+                            <input type="text" data-pb-cfg="liveCustomKick" placeholder="slug1, slug2" />
+                        </label>
+                    </div>
+                    <div class="pb-actions">
+                        <button class="pb-btn" data-pb-act="runLives">Rodar Lives Agora</button>
+                        <button class="pb-btn" data-pb-act="syncLives">Ler Canais do Jogo</button>
+                        <button class="pb-btn pb-span2" data-pb-act="copyHeadless">Copiar Sessão Headless</button>
                     </div>
                 </div>
 
@@ -323,6 +431,12 @@
                 if (key === 'restockRevive') CONFIG.restock.restockRevive = !CONFIG.restock.restockRevive;
                 if (key === 'topCatchHop') CONFIG.topCatchHop.enabled = !CONFIG.topCatchHop.enabled;
                 if (key === 'dailyPass') CONFIG.dailyPass.enabled = !CONFIG.dailyPass.enabled;
+                if (key === 'prey') CONFIG.prey.enabled = !CONFIG.prey.enabled;
+                if (key === 'liveEnabled') CONFIG.live.enabled = !CONFIG.live.enabled;
+                if (key === 'liveWatchTwitch') CONFIG.live.watchTwitch = !CONFIG.live.watchTwitch;
+                if (key === 'liveWatchKick') CONFIG.live.watchKick = !CONFIG.live.watchKick;
+                if (key === 'liveAutoClaimChest') CONFIG.live.autoClaimChest = !CONFIG.live.autoClaimChest;
+                if (key === 'liveAutoRedeem') CONFIG.live.autoRedeem = !CONFIG.live.autoRedeem;
                 if (key === 'incubator') {
                     CONFIG.incubator.enabled = !CONFIG.incubator.enabled;
                     state.nextIncubatorCheckAt = 0;
@@ -385,10 +499,18 @@
                 }
             } else if (act === 'runPass') {
                 checkDailyPass(true);
+            } else if (act === 'runPrey') {
+                checkPrey(true);
             } else if (act === 'runEggs') {
                 checkIncubator(true);
             } else if (act === 'runBoss') {
                 checkBosses(true);
+            } else if (act === 'runLives') {
+                checkLives(true);
+            } else if (act === 'syncLives') {
+                syncLives(true);
+            } else if (act === 'copyHeadless') {
+                exportarSessaoHeadless(true);
             } else if (act === 'importDex') {
                 abrirSeletorCsvPokedex();
             } else if (act === 'addAlert') {
@@ -409,6 +531,54 @@
 
         hud.addEventListener('click', onHudClick);
         state.cleanupListeners.push(() => hud.removeEventListener('click', onHudClick));
+
+        const onHudChange = (e) => {
+            const cfgEl = e.target.closest('[data-pb-cfg]');
+            if (!cfgEl) return;
+            const key = cfgEl.getAttribute('data-pb-cfg');
+            if (key === 'preferredBall' && BALL_PREF_OPTIONS.includes(cfgEl.value)) {
+                CONFIG.caidos.preferredBall = cfgEl.value;
+            } else if (key === 'shinyBall' && SHINY_BALL_OPTIONS.includes(cfgEl.value)) {
+                CONFIG.caidos.shinyBall = cfgEl.value;
+            } else if (key === 'highLevelUltraThreshold') {
+                const v = parseInt(cfgEl.value, 10);
+                if (!Number.isNaN(v)) CONFIG.caidos.highLevelUltraThreshold = Math.max(1, Math.min(200, v));
+            } else if (key === 'targetBalls') {
+                const v = parseInt(cfgEl.value, 10);
+                if (!Number.isNaN(v)) CONFIG.restock.targetBalls = Math.max(10, Math.min(5000, v));
+            } else if (key === 'targetPotions') {
+                const v = parseInt(cfgEl.value, 10);
+                if (!Number.isNaN(v)) CONFIG.restock.targetPotions = Math.max(0, Math.min(5000, v));
+            } else if (key === 'minGoldReserve') {
+                const v = parseInt(cfgEl.value, 10);
+                if (!Number.isNaN(v)) CONFIG.restock.minGoldReserve = Math.max(0, v);
+            } else if (key === 'liveRewardType' && LIVE_REWARD_TYPES.includes(cfgEl.value)) {
+                CONFIG.live.rewardType = cfgEl.value;
+            } else if (key === 'liveGuardThresholdMin') {
+                const v = parseInt(cfgEl.value, 10);
+                if (!Number.isNaN(v)) CONFIG.live.guardThresholdMin = Math.max(0, Math.min(600, v));
+            } else if (key === 'liveMaxTwitchSlots') {
+                const v = parseInt(cfgEl.value, 10);
+                if (!Number.isNaN(v)) CONFIG.live.maxTwitchSlots = Math.max(1, Math.min(12, v));
+            } else if (key === 'liveMaxKickSlots') {
+                const v = parseInt(cfgEl.value, 10);
+                if (!Number.isNaN(v)) CONFIG.live.maxKickSlots = Math.max(1, Math.min(12, v));
+            } else if (key === 'liveTwitchToken') {
+                CONFIG.live.twitchToken = cfgEl.value.trim();
+            } else if (key === 'liveKickToken') {
+                CONFIG.live.kickToken = cfgEl.value.trim();
+            } else if (key === 'liveCustomTwitch') {
+                CONFIG.live.customTwitchChannels = cfgEl.value.trim();
+            } else if (key === 'liveCustomKick') {
+                CONFIG.live.customKickChannels = cfgEl.value.trim();
+            } else {
+                return;
+            }
+            persistPrefs();
+            updateHud();
+        };
+        hud.addEventListener('change', onHudChange);
+        state.cleanupListeners.push(() => hud.removeEventListener('change', onHudChange));
 
         // Digitar/colar nos campos do HUD não deve disparar atalhos do jogo
         const stopKeys = (e) => {
@@ -468,7 +638,7 @@
             );
         }
 
-        setText('headTitle', `PokeBot v${VERSION} · ${state.shinyAlertActive ? '✨ SHINY!' : state.statusText}`);
+        setText('headTitle', `Nexo PokeBot v${VERSION} · ${state.shinyAlertActive ? '✨ SHINY!' : state.statusText}`);
         setText('poke', poke ? `${poke.name} Nv${poke.level ?? '?'} (${poke.types.join('/') || '-'})` : '-');
         setText('regiao', farm ? farm.regiao : '-');
         setText(
@@ -495,6 +665,22 @@
         );
         setText('pauseBtn', state.paused ? 'Retomar' : 'Pausar');
         setText('dexCount', String(state.dexCatalog.length));
+        const fmtSiteStatus = (entries) => {
+            const list = Object.entries(entries || {});
+            if (list.length === 0) return '-';
+            return list
+                .map(([name, info]) => {
+                    const pts = info.balance !== null && info.balance !== undefined ? `${info.balance}pts` : '?';
+                    return `${name}:${info.live ? 'ON' : 'off'}(${pts})`;
+                })
+                .join(' · ');
+        };
+        setText('liveTwitchInfo', fmtSiteStatus(state.liveStatus?.twitch));
+        setText('liveKickInfo', fmtSiteStatus(state.liveStatus?.kick));
+        setText(
+            'liveStatsInfo',
+            `${state.stats.liveMinutesWatched}m / ${state.stats.liveChestsClaimed} / ${state.stats.liveRewardsRedeemed}`
+        );
         setText('note', isInSpecialArena() ? 'Arena especial (protegido)' : state.lastActionNote);
 
         if (state.hudCache.__mode !== CONFIG.mode) {
@@ -513,6 +699,12 @@
             restockRevive: [CONFIG.restock.restockRevive, CONFIG.restock.restockRevive ? 'ON' : 'OFF'],
             topCatchHop: [CONFIG.topCatchHop.enabled, CONFIG.topCatchHop.enabled ? 'ON' : 'OFF'],
             dailyPass: [CONFIG.dailyPass.enabled, CONFIG.dailyPass.enabled ? 'ON' : 'OFF'],
+            prey: [CONFIG.prey.enabled, CONFIG.prey.enabled ? 'ON' : 'OFF'],
+            liveEnabled: [CONFIG.live.enabled, CONFIG.live.enabled ? 'ON' : 'OFF'],
+            liveWatchTwitch: [CONFIG.live.watchTwitch, CONFIG.live.watchTwitch ? 'ON' : 'OFF'],
+            liveWatchKick: [CONFIG.live.watchKick, CONFIG.live.watchKick ? 'ON' : 'OFF'],
+            liveAutoClaimChest: [CONFIG.live.autoClaimChest, CONFIG.live.autoClaimChest ? 'ON' : 'OFF'],
+            liveAutoRedeem: [CONFIG.live.autoRedeem, CONFIG.live.autoRedeem ? 'ON' : 'OFF'],
             incubator: [CONFIG.incubator.enabled, CONFIG.incubator.enabled ? 'ON' : 'OFF'],
             autoRegion: [CONFIG.autoRegion.enabled, CONFIG.autoRegion.enabled ? 'ON' : 'OFF'],
             evolve: [CONFIG.evolve.enabled, CONFIG.evolve.enabled ? 'ON' : 'OFF'],
@@ -531,6 +723,29 @@
             const val = hud.querySelector(`[data-pb-tval="${key}"]`);
             if (box) box.classList.toggle('on', isOn);
             if (val) val.textContent = label;
+        });
+
+        const cfgValues = {
+            preferredBall: CONFIG.caidos.preferredBall,
+            shinyBall: CONFIG.caidos.shinyBall,
+            highLevelUltraThreshold: String(CONFIG.caidos.highLevelUltraThreshold),
+            targetBalls: String(CONFIG.restock.targetBalls),
+            targetPotions: String(CONFIG.restock.targetPotions),
+            minGoldReserve: String(CONFIG.restock.minGoldReserve),
+            liveRewardType: CONFIG.live.rewardType,
+            liveGuardThresholdMin: String(CONFIG.live.guardThresholdMin),
+            liveMaxTwitchSlots: String(CONFIG.live.maxTwitchSlots),
+            liveMaxKickSlots: String(CONFIG.live.maxKickSlots),
+            liveTwitchToken: CONFIG.live.twitchToken,
+            liveKickToken: CONFIG.live.kickToken,
+            liveCustomTwitch: CONFIG.live.customTwitchChannels,
+            liveCustomKick: CONFIG.live.customKickChannels,
+        };
+        Object.entries(cfgValues).forEach(([key, val]) => {
+            const el = hud.querySelector(`[data-pb-cfg="${key}"]`);
+            if (el && document.activeElement !== el && el.value !== val) {
+                el.value = val;
+            }
         });
 
         renderQuizCandidates();

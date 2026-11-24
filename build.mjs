@@ -45,13 +45,22 @@ if (!RAW) {
 }
 
 const header = `// ==UserScript==
-// @name         PokeBot (Pokeidle)
+// @name         Nexo PokeBot (PokeIdle)
 // @namespace    https://github.com/${REPO}
 // @version      ${version}
-// @description  Automação para o Pokeidle: captura, bolas, equipe, evolução, mapa e fila /hunt com HUD flutuante
+// @description  Automação desenvolvida especificamente para o PokeIdle (pokeidle.io): captura, restock, equipe, auto-evoluir, bosses, mapa/hunt, lives e HUD flutuante
 // @match        https://pokeidle.io/app*
 // @run-at       document-idle
-// @grant        none
+// @grant        GM_xmlhttpRequest
+// @grant        GM_cookie
+// @grant        unsafeWindow
+// @connect      twitch.tv
+// @connect      gql.twitch.tv
+// @connect      usher.ttvnw.net
+// @connect      ttvnw.net
+// @connect      kick.com
+// @connect      websockets.kick.com
+// @connect      *
 // @updateURL    ${RAW}
 // @downloadURL  ${RAW}
 // ==/UserScript==
@@ -78,7 +87,7 @@ if (!body.includes(MARK)) {
     console.error(`ERRO: marcador ${MARK} não encontrado em src/00-core.js`);
     process.exit(1);
 }
-const out = header + body.replace(MARK, () => modules).replaceAll('__VERSION__', version) + '\n';
+const out = (header + body.replace(MARK, () => modules).replaceAll('__VERSION__', version) + '\n').replace(/\r\n/g, '\n');
 
 mkdirSync(join(root, 'dist'), { recursive: true });
 const target = join(root, 'dist', 'pokebot.user.js');

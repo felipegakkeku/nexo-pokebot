@@ -11,4 +11,28 @@ export default [
             'no-unused-vars': ['error', { args: 'none', caughtErrors: 'none' }],
         },
     },
+    {
+        files: ['src/headless/**/*.mjs', 'src/desktop/**/*.mjs', 'src/electron/**/*.mjs', 'headless-farm.mjs'],
+        languageOptions: { ecmaVersion: 2022, sourceType: 'module', globals: { ...globals.node } },
+        rules: {
+            'no-undef': 'error',
+            'no-unused-vars': ['error', { args: 'none', caughtErrors: 'none' }],
+        },
+    },
+    {
+        files: ['src/electron/**/*.cjs'],
+        languageOptions: { ecmaVersion: 2022, sourceType: 'commonjs', globals: { ...globals.node, ...globals.browser } },
+        rules: {
+            'no-undef': 'error',
+            'no-unused-vars': ['error', { args: 'none', caughtErrors: 'none' }],
+        },
+    },
+    {
+        files: ['src/electron/renderer.js'],
+        languageOptions: { ecmaVersion: 2022, sourceType: 'script', globals: { ...globals.browser } },
+        rules: {
+            'no-undef': 'error',
+            'no-unused-vars': ['error', { args: 'none', caughtErrors: 'none' }],
+        },
+    },
 ];

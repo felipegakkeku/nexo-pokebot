@@ -73,6 +73,13 @@
             filaHuntProximo: state.huntQueue.length ? state.huntQueue[state.huntQueueIndex % state.huntQueue.length]?.name : '-',
             filaFallbackSeguro: CONFIG.huntQueue.fallbackToSafeArea,
             autoEvoluir: CONFIG.evolve.enabled,
+            bolaPreferida: CONFIG.caidos.preferredBall,
+            bolaShiny: CONFIG.caidos.shinyBall,
+            autoPrey: CONFIG.prey.enabled,
+            autoLives: CONFIG.live.enabled,
+            liveBonusAlvo: CONFIG.live.rewardType,
+            liveBaus: state.stats.liveChestsClaimed,
+            liveResgates: state.stats.liveRewardsRedeemed,
             xpPokeHora: native?.xpPokemonH ?? (farm ? farm.xpPokeMin * 60 : 0),
             lucroHora: native?.lucroH ?? (farm ? farm.lucroLiqMin * 60 : 0),
             capturasSessao: native?.capturas ?? state.stats.captures,
@@ -81,6 +88,73 @@
         };
         console.table(info);
         return info;
+    };
+
+    const readPageLocalStorage = (key) => {
+        try {
+            const val = pageWin?.localStorage?.getItem(key);
+            if (val !== null && val !== undefined) return val;
+        } catch {
+            // fallback para localStorage da janela atual
+        }
+        try {
+            return window.localStorage.getItem(key);
+        } catch {
+            return null;
+        }
+    };
+
+    const exportarSessaoHeadless = async (copyToClipboard = true) => {
+        let sessao = null;
+        try {
+            const raw = readPageLocalStorage('sessao');
+            sessao = raw ? JSON.parse(raw) : null;
+        } catch {
+            sessao = null;
+        }
+        if (!sessao?.token) {
+            state.lastActionNote = 'Faça login no jogo antes de exportar sessão.';
+            updateHud();
+            return { ok: false, error: 'Sessão ausente' };
+        }
+
+        const dispositivo = readPageLocalStorage('id-dispositivo') || '';
+        const nick = sessao.nick || '';
+        const provedor = sessao.provedor || '';
+        const data = {
+            nick,
+            token: sessao.token,
+            provedor,
+            dispositivo,
+            env: `POKEIDLE_NICK="${nick}" POKEIDLE_TOKEN="${sessao.token}"`,
+            command: `node headless-farm.mjs --nick ${nick} --token <token>`,
+        };
+        const json = JSON.stringify(
+            {
+                nick,
+                token: sessao.token,
+                provedor,
+                dispositivo,
+                updatedAt: Date.now(),
+            },
+            null,
+            2
+        );
+
+        let copied = false;
+        if (copyToClipboard && navigator.clipboard?.writeText) {
+            try {
+                await navigator.clipboard.writeText(json);
+                copied = true;
+            } catch {
+                // clipboard indisponivel ou sem permissao
+            }
+        }
+        state.lastActionNote = copied
+            ? 'Sessão Headless copiada (.pokebot-session.json)!'
+            : 'Sessão Headless pronta no objeto retornado.';
+        updateHud();
+        return { ok: true, json, data };
     };
 
     window.PokeBot = {
@@ -102,6 +176,10 @@
         hopTopCatch: () => hopNextTopCatchArea(true),
         rodarDepot: () => runDepotManager(true),
         checarPasse: () => checkDailyPass(true),
+        checarPrey: () => checkPrey(true),
+        checarLives: () => checkLives(true),
+        sincronizarLives: () => syncLives(true),
+        exportarSessaoHeadless,
         checarOvos: () => checkIncubator(true),
         checarBoss: () => checkBosses(true),
         restockNow: () => smartRestock(true),

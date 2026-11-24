@@ -34,11 +34,16 @@ test('o userscript carrega, monta o HUD e expõe a API', async () => {
     const w = boot();
     try {
         assert.ok(w.document.getElementById('pokebot-hud'), 'HUD deveria existir');
-        for (const fn of ['status', 'pausar', 'retomar', 'stop', 'definirFilaHunt', 'carregarFilaManual', 'copiarFichaHunt', 'proximaHuntGuia', 'syncHuntGuide']) {
+        for (const fn of ['status', 'pausar', 'retomar', 'stop', 'definirFilaHunt', 'carregarFilaManual', 'copiarFichaHunt', 'proximaHuntGuia', 'syncHuntGuide', 'checarPrey', 'checarLives', 'sincronizarLives', 'exportarSessaoHeadless']) {
             assert.equal(typeof w.PokeBot[fn], 'function', `PokeBot.${fn}`);
         }
         const st = w.PokeBot.status();
         assert.equal(st.autoEvoluir, false, 'Auto-Evoluir começa desligado');
+        assert.equal(st.autoPrey, true);
+        assert.equal(st.autoLives, false);
+        assert.equal(st.liveBonusAlvo, 'xp');
+        assert.equal(st.bolaPreferida, 'auto');
+        assert.equal(st.bolaShiny, 'best');
         assert.equal(st.filaHuntTotal, 0);
         assert.match(st.pokemon, /^Charmander Nv ?16/);
     } finally {
@@ -208,13 +213,102 @@ test('ficha: se o jogo não copiar a ficha, avisa em vez de fingir que deu certo
     }
 });
 
-test('módulos: checarPasse roda pelo runtime sem travar e o stop() libera o agendador', async () => {
+test('módulos: checarPasse e checarPrey rodam pelo runtime sem travar e o stop() libera o agendador', async () => {
     const w = boot();
     try {
         await w.PokeBot.checarPasse(); // sem botão de Passe no DOM falso: volta sem erro
+        await w.PokeBot.checarPrey(); // sem botão de Bolsa no DOM falso: volta sem erro
         assert.ok(w.document.getElementById('pokebot-hud'), 'HUD continua montado');
     } finally {
         w.PokeBot?.stop();
     }
     assert.equal(w.document.getElementById('pokebot-hud'), null);
+});
+
+test('HUD: alterar configurações de bola e restock persiste e reflete no status', async () => {
+    const w = boot();
+    try {
+        const selBall = w.document.querySelector('[data-pb-cfg="preferredBall"]');
+        const inputBalls = w.document.querySelector('[data-pb-cfg="targetBalls"]');
+        assert.ok(selBall, 'seletor de bola no HUD');
+        assert.ok(inputBalls, 'input de alvo de bolas no HUD');
+
+        selBall.value = 'great';
+        selBall.dispatchEvent(new w.Event('change', { bubbles: true }));
+        inputBalls.value = '120';
+        inputBalls.dispatchEvent(new w.Event('change', { bubbles: true }));
+
+        const st = w.PokeBot.status();
+        assert.equal(st.bolaPreferida, 'great');
+        assert.equal(st.bolaAlvo, 'Great Ball');
+        assert.equal(w.PokeBot.config.restock.targetBalls, 120);
+
+        const prefs = JSON.parse(w.localStorage.getItem('pokeidle_hud_prefs_v60'));
+        assert.equal(prefs.preferredBall, 'great');
+        assert.equal(prefs.targetBalls, 120);
+
+        const livesTab = w.document.querySelector('[data-pb-tab="lives"]');
+        assert.ok(livesTab, 'aba Lives no HUD');
+        livesTab.click();
+        w.document.querySelector('[data-pb-tog="liveEnabled"]').click();
+        const selReward = w.document.querySelector('[data-pb-cfg="liveRewardType"]');
+        selReward.value = 'shiny';
+        selReward.dispatchEvent(new w.Event('change', { bubbles: true }));
+        const stLives = w.PokeBot.status();
+        assert.equal(stLives.autoLives, true);
+        assert.equal(stLives.liveBonusAlvo, 'shiny');
+    } finally {
+        w.PokeBot?.stop();
+    }
+});
+
+test('HUD Lives: exportarSessaoHeadless trata sessao ausente e copia JSON headless ao clicar em copyHeadless', async () => {
+    const w = boot();
+    try {
+        const copied = [];
+        Object.defineProperty(w.navigator, 'clipboard', {
+            value: { writeText: async (txt) => { copied.push(txt); } },
+            configurable: true,
+        });
+
+        const livesTab = w.document.querySelector('[data-pb-tab="lives"]');
+        assert.ok(livesTab, 'aba Lives no HUD');
+        livesTab.click();
+
+        const copyBtn = w.document.querySelector('[data-pb-act="copyHeadless"]');
+        assert.ok(copyBtn, 'botao copyHeadless na aba Lives');
+
+        // 1) Sem sessao no localStorage: retorna erro gracioso e atualiza nota no HUD
+        const missingRes = await w.PokeBot.exportarSessaoHeadless(true);
+        assert.deepEqual({ ...missingRes }, { ok: false, error: 'Sessão ausente' });
+        assert.equal(copied.length, 0);
+        assert.equal(
+            w.document.querySelector('[data-pb="note"]').textContent,
+            'Faça login no jogo antes de exportar sessão.'
+        );
+
+        // 2) Com sessao e id-dispositivo no localStorage: clique no botao copia JSON e atualiza nota
+        const sessaoObj = {
+            nick: 'AshHeadless',
+            token: 'eyJhbGciOiJIUzI1NiJ9.eyJjb250YUlkIjoxfQ.sig',
+            provedor: 'google',
+        };
+        const dispositivoId = '11111111-2222-4333-8444-555555555555';
+        w.localStorage.setItem('sessao', JSON.stringify(sessaoObj));
+        w.localStorage.setItem('id-dispositivo', dispositivoId);
+
+        copyBtn.click();
+        await new Promise((r) => setTimeout(r, 20));
+
+        assert.equal(copied.length, 1);
+        const exported = JSON.parse(copied[0]);
+        assert.equal(exported.nick, sessaoObj.nick);
+        assert.equal(exported.token, sessaoObj.token);
+        assert.equal(exported.provedor, sessaoObj.provedor);
+        assert.equal(exported.dispositivo, dispositivoId);
+        assert.equal(typeof exported.updatedAt, 'number');
+        assert.match(w.document.querySelector('[data-pb="note"]').textContent, /Sessão Headless copiada/);
+    } finally {
+        w.PokeBot?.stop();
+    }
 });

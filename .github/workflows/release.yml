@@ -12,13 +12,13 @@ permissions:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
 
       - run: npm ci
@@ -35,27 +35,38 @@ jobs:
         run: git diff --exit-code -- dist/pokebot.user.js
 
       - name: Checksum
+        shell: bash
         run: |
           cd dist
           sha256sum pokebot.user.js > pokebot.user.js.sha256
           cat pokebot.user.js.sha256
 
       - name: Notas da versão (CHANGELOG.md)
+        id: meta
+        shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
+          short_version="${version%.0}"
+          echo "short_version=${short_version}" >> "$GITHUB_OUTPUT"
           awk -v v="$version" '
+            { sub(/\r$/, "") }
             $0 ~ "^## \\[?"v"\\]?([ ]|$)" { on=1; next }
             on && /^## / { exit }
             on { print }
           ' CHANGELOG.md > release-notes.md
           if [ ! -s release-notes.md ]; then
-            echo "PokeBot ${GITHUB_REF_NAME}" > release-notes.md
+            echo "Nexo PokeBot v${short_version}" > release-notes.md
           fi
           cat release-notes.md
 
+      - name: Empacotar o Nexo PokeBot para Windows
+        run: npm run package:friend
+
       - uses: softprops/action-gh-release@v2
         with:
+          name: Nexo PokeBot v${{ steps.meta.outputs.short_version }}
           body_path: release-notes.md
           files: |
             dist/pokebot.user.js
             dist/pokebot.user.js.sha256
+            release/Nexo-PokeBot-*.zip
