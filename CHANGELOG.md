@@ -2,6 +2,14 @@
 
 Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova versão (o workflow usa o texto da seção como nota da Release).
 
+## 1.0.2
+
+Popups leves direto na HUD para **Vote & Ganhe** e **Caixinha +50 da Twitch** sem abrir navegador externo nem player de vídeo:
+
+- **Votar direto da HUD (`Votar aqui`)**: abre uma janela compacta (`560x740`) isolada por conta (`persist:conta1..4`) direto no `IdleHub.io` já com o nick preenchido para confirmação manual em segundos; ao fechar, atualiza automaticamente a contagem de votos e diamantes (mantendo botão `↗` opcional para navegador externo).
+- **Resgatar caixinha `+50` da Twitch sem vídeo (`Resgatar +50 aqui`)**: abre apenas o chat popout leve (`400x580`, zero player de vídeo) já logado na conta Twitch daquela aba para clicar manualmente na caixinha verde `+50`, atualizando o saldo ao fechar.
+- **Toasts flutuantes clicáveis**: notificações de caixinha `+50` disponível e voto diário liberado abrem o popup leve correspondente com 1 clique.
+
 ## 1.0.1
 
 Correções de estabilidade no **Gestor Inteligente de Buffs** e isolamento multi-conta das lives:

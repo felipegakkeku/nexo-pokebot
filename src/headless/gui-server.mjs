@@ -3955,7 +3955,7 @@ export function createHeadlessController(options = {}) {
             : (config.browserProfile && activeExistingProfile?.id ? activeExistingProfile.id : (config.browserProfile || ''));
 
         return {
-            version: '1.0.1',
+            version: '1.0.2',
             status,
             mode: connectionMode,
             lastError,
@@ -4135,6 +4135,12 @@ export function createHeadlessController(options = {}) {
             : null;
     };
 
+    const getLiveCredentials = () => ({
+        twitchToken: config.liveTwitchToken || '',
+        twitchDeviceId: config.liveTwitchDeviceId || '',
+        kickToken: config.liveKickToken || '',
+    });
+
     const syncWebviewSession = (rawObj) => {
         try {
             const parsed = parseImportedSessionInput(rawObj);
@@ -4184,6 +4190,7 @@ export function createHeadlessController(options = {}) {
         attachBrowser,
         attachExternalBridge,
         getRawSession,
+        getLiveCredentials,
         syncWebviewSession,
         openGame,
         openLives,

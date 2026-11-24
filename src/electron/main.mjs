@@ -166,6 +166,7 @@ async function runUpdateInstall() {
 
 const sharedHuntGuide = createHeadlessHuntGuideEvaluator({ cwd: ROOT });
 const servers = new Map(); // account (1..4) -> { instance, port, attached: { onFrame, onDetach, bridgeId } | null }
+const actionPopups = new Map(); // key -> BrowserWindow (voto ou caixinha +50 embutido leve)
 let nextBridgeId = 1;
 const pendingHuntQueries = new Map();
 let nextHuntQueryId = 1;
@@ -492,6 +493,171 @@ function registerWebviewSecurity() {
     });
 }
 
+function cleanBrowserUserAgent(rawUa) {
+    return String(rawUa || '').replace(/\s*Electron\/[^\s]+/gi, '').trim();
+}
+
+async function seedTwitchCookiesInPartition(acc, creds) {
+    if (!creds?.twitchToken) return;
+    const ses = session.fromPartition(`persist:conta${acc}`);
+    const exp = Math.floor(Date.now() / 1000) + 180 * 86400;
+    try {
+        const existing = await ses.cookies.get({ domain: 'twitch.tv', name: 'auth-token' });
+        if (!existing.some((c) => c.value === creds.twitchToken)) {
+            await ses.cookies.set({
+                url: 'https://www.twitch.tv',
+                domain: '.twitch.tv',
+                path: '/',
+                name: 'auth-token',
+                value: creds.twitchToken,
+                secure: true,
+                httpOnly: false,
+                sameSite: 'no_restriction',
+                expirationDate: exp,
+            });
+        }
+        if (creds.twitchDeviceId) {
+            const existingDev = await ses.cookies.get({ domain: 'twitch.tv', name: 'unique_id' });
+            if (!existingDev.some((c) => c.value === creds.twitchDeviceId)) {
+                await ses.cookies.set({
+                    url: 'https://www.twitch.tv',
+                    domain: '.twitch.tv',
+                    path: '/',
+                    name: 'unique_id',
+                    value: creds.twitchDeviceId,
+                    secure: true,
+                    httpOnly: false,
+                    sameSite: 'no_restriction',
+                    expirationDate: exp,
+                });
+            }
+        }
+    } catch {
+        // segue mesmo se o cookie ja existir em outro formato
+    }
+}
+
+function createCompactActionPopup({ key, account, title, width, height, url, allowedPopupHosts = [], onClosed = null }) {
+    const existing = actionPopups.get(key);
+    if (existing && !existing.isDestroyed()) {
+        if (existing.isMinimized()) existing.restore();
+        existing.show();
+        existing.focus();
+        return existing;
+    }
+
+    const icon = getAppIcon();
+    const popup = new BrowserWindow({
+        width,
+        height,
+        minWidth: 360,
+        minHeight: 460,
+        parent: mainWindow && !mainWindow.isDestroyed() ? mainWindow : undefined,
+        autoHideMenuBar: true,
+        backgroundColor: '#0e0e10',
+        title,
+        ...(icon ? { icon } : {}),
+        webPreferences: {
+            partition: `persist:conta${account}`,
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+        },
+    });
+    const cleanUa = cleanBrowserUserAgent(popup.webContents.getUserAgent());
+    if (cleanUa) popup.webContents.setUserAgent(cleanUa);
+
+    popup.webContents.setWindowOpenHandler(({ url: nextUrl }) => {
+        try {
+            const parsed = new URL(nextUrl);
+            if (allowedPopupHosts.some((re) => re.test(parsed.hostname))) {
+                return {
+                    action: 'allow',
+                    overrideBrowserWindowOptions: {
+                        autoHideMenuBar: true,
+                        width: 520,
+                        height: 680,
+                        webPreferences: {
+                            partition: `persist:conta${account}`,
+                            contextIsolation: true,
+                            nodeIntegration: false,
+                            sandbox: true,
+                        },
+                    },
+                };
+            }
+            if (parsed.protocol === 'https:' || parsed.protocol === 'http:') {
+                shell.openExternal(parsed.toString()).catch(() => {});
+            }
+        } catch {
+            // ignora URL invalida
+        }
+        return { action: 'deny' };
+    });
+
+    actionPopups.set(key, popup);
+    popup.on('closed', () => {
+        if (actionPopups.get(key) === popup) actionPopups.delete(key);
+        if (typeof onClosed === 'function') onClosed();
+    });
+    void popup.loadURL(url, cleanUa ? { userAgent: cleanUa } : undefined);
+    return popup;
+}
+
+async function openEmbeddedVotePopup(acc) {
+    const entry = servers.get(acc);
+    if (!entry) return false;
+    const { controller } = entry.instance;
+    let snap = controller.getSnapshot({ includeHunts: false });
+    if (!snap?.vote?.url) {
+        await controller.refreshVoteStatus({ force: true });
+        snap = controller.getSnapshot({ includeHunts: false });
+    }
+    const targetUrl = snap?.vote?.url;
+    if (!targetUrl || !/^https?:\/\//i.test(targetUrl)) return false;
+    const nick = snap?.trainer?.nick && snap.trainer.nick !== '-'
+        ? snap.trainer.nick
+        : (snap?.session?.nick || `Conta ${acc}`);
+
+    createCompactActionPopup({
+        key: `vote:${acc}`,
+        account: acc,
+        title: `Vote & Ganhe · Conta ${acc} (${nick})`,
+        width: 560,
+        height: 740,
+        url: targetUrl,
+        allowedPopupHosts: [/(?:^|\.)(?:idlehub\.io|google\.com|gstatic\.com|pokeidle\.io)$/i],
+        onClosed: () => {
+            void controller.refreshVoteStatus({ force: true });
+        },
+    });
+    return true;
+}
+
+async function openEmbeddedTwitchChestPopup(acc, rawChannel) {
+    const entry = servers.get(acc);
+    if (!entry) return false;
+    const channel = String(rawChannel || '').trim().toLowerCase();
+    if (!/^[a-z0-9_]{1,40}$/.test(channel)) return false;
+    const { controller } = entry.instance;
+    const creds = controller.getLiveCredentials?.() || {};
+    await seedTwitchCookiesInPartition(acc, creds);
+
+    createCompactActionPopup({
+        key: `chest:${acc}:${channel}`,
+        account: acc,
+        title: `Caixinha +50 · ${channel} (Conta ${acc})`,
+        width: 400,
+        height: 580,
+        url: `https://www.twitch.tv/popout/${encodeURIComponent(channel)}/chat`,
+        allowedPopupHosts: [/(?:^|\.)twitch\.tv$/i],
+        onClosed: () => {
+            controller.triggerAction('run-lives');
+        },
+    });
+    return true;
+}
+
 function registerIpcHandlers() {
     ipcMain.handle('hub:get-all-snapshots', () => getAllSnapshots());
 
@@ -560,6 +726,10 @@ function registerIpcHandlers() {
             ok = typeof payload.url === 'string' && await controller.openLives(payload.url, { chatOnly: true });
         } else if (act === 'open-vote') {
             ok = await controller.openVote();
+        } else if (act === 'open-vote-embedded') {
+            ok = await openEmbeddedVotePopup(acc);
+        } else if (act === 'open-twitch-chest-embedded') {
+            ok = await openEmbeddedTwitchChestPopup(acc, payload.channel);
         } else if (act === 'refresh-vote') {
             await controller.refreshVoteStatus({ force: true });
             ok = true;
@@ -782,6 +952,10 @@ app.on('before-quit', (ev) => {
     }
     const closing = [...servers.values()].map((entry) => entry.instance.close().catch(() => {}));
     servers.clear();
+    for (const popup of actionPopups.values()) {
+        try { if (!popup.isDestroyed()) popup.destroy(); } catch { /* ignore */ }
+    }
+    actionPopups.clear();
     if (updateBootTimer) clearTimeout(updateBootTimer);
     if (updateCheckTimer) clearInterval(updateCheckTimer);
     try { sharedHuntGuide?.dispose?.(); } catch { /* ignore */ }

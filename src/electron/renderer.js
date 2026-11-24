@@ -763,8 +763,17 @@ function renderLives(lv) {
                 row.append(note);
             }
             const url = (ch.platform === 'twitch' ? 'https://www.twitch.tv/' : 'https://kick.com/') + ch.channel;
+            const hasManualChest = ch.platform === 'twitch' && Boolean(lv.twitch?.[ch.channel]?.manualChest);
+            if (hasManualChest) {
+                const chestBtn = document.createElement('button');
+                chestBtn.className = 'btn sm chest-quick-btn';
+                chestBtn.textContent = 'Resgatar +50 aqui';
+                chestBtn.title = 'Abre apenas o chat leve (sem vídeo) já logado nesta conta para clicar na caixinha +50';
+                chestBtn.onclick = () => sendAction('open-twitch-chest-embedded', { channel: ch.channel });
+                row.append(chestBtn);
+            }
             if (lv.officialUrls?.includes(url)) {
-                for (const [title, action] of [['Abrir chat', 'open-live-chat'], [error?.includes('baú') ? 'Abrir live para resgatar' : 'Abrir live', 'open-lives']]) {
+                for (const [title, action] of [['Abrir chat', 'open-live-chat'], ['Abrir live', 'open-lives']]) {
                     const button = document.createElement('button');
                     button.className = 'btn sm';
                     button.textContent = title;
@@ -866,7 +875,7 @@ function refreshHuntAndCenterButtons() {
     }
 }
 
-function showToast({ kind = 'info', title = 'Nexo PokeBot', text = '', account = null } = {}) {
+function showToast({ kind = 'info', title = 'Nexo PokeBot', text = '', account = null, onClick = null } = {}) {
     if (!toastsEnabled || !text) return;
     const stack = $('toastStack');
     if (!stack) return;
@@ -910,10 +919,13 @@ function showToast({ kind = 'info', title = 'Nexo PokeBot', text = '', account =
         if (account && ACCOUNTS.includes(account)) {
             selectAccount(account);
         }
+        if (typeof onClick === 'function') {
+            try { onClick(); } catch { /* ignore */ }
+        }
         dismiss();
     });
     stack.appendChild(item);
-    setTimeout(dismiss, kind === 'shiny' ? 7200 : 4800);
+    setTimeout(dismiss, kind === 'shiny' || onClick ? 7800 : 4800);
 }
 
 function isToastWorthyLog(entry) {
@@ -941,9 +953,16 @@ function processActivityToasts(allSnaps) {
         const sigOf = (l) => `${l.time || ''}|${l.kind || ''}|${l.text || ''}`;
         const base = toastBaselineByAcc[acc];
         if (!base) {
+            const initChests = new Set(
+                Object.entries(snap.lives?.twitch || {})
+                    .filter(([, st]) => st?.manualChest)
+                    .map(([ch]) => ch)
+            );
             toastBaselineByAcc[acc] = {
                 lastSig: logs.length > 0 ? sigOf(logs[logs.length - 1]) : '',
                 lastDropSig: snap.drops?.recent?.[0] ? `${snap.drops.recent[0].time}|${snap.drops.recent[0].name}|${snap.drops.recent[0].qty}` : '',
+                manualChests: initChests,
+                voteReady: Boolean(snap.vote?.available),
             };
         } else {
             if (logs.length > 0) {
@@ -964,6 +983,35 @@ function processActivityToasts(allSnaps) {
                 }
                 base.lastSig = sigOf(logs[logs.length - 1]);
             }
+            const curChests = new Set(
+                Object.entries(snap.lives?.twitch || {})
+                    .filter(([, st]) => st?.manualChest)
+                    .map(([ch]) => ch)
+            );
+            for (const ch of curChests) {
+                if (!base.manualChests?.has(ch)) {
+                    showToast({
+                        kind: 'reward',
+                        title: `Caixinha +50 · ${accLabel}`,
+                        text: `Clique para abrir o chat leve (${ch}) sem vídeo e resgatar`,
+                        account: acc,
+                        onClick: () => void sendAction('open-twitch-chest-embedded', { channel: ch }, acc),
+                    });
+                }
+            }
+            base.manualChests = curChests;
+
+            const voteReadyNow = Boolean(snap.vote?.available);
+            if (voteReadyNow && !base.voteReady) {
+                showToast({
+                    kind: 'reward',
+                    title: `Vote & Ganhe · ${accLabel}`,
+                    text: 'Voto diário liberado! Clique para abrir direto na HUD.',
+                    account: acc,
+                    onClick: () => void sendAction('open-vote-embedded', {}, acc),
+                });
+            }
+            base.voteReady = voteReadyNow;
             const topDrop = snap.drops?.recent?.[0];
             if (topDrop && topDrop.rare) {
                 const dropSig = `${topDrop.time}|${topDrop.name}|${topDrop.qty}`;
@@ -1018,11 +1066,14 @@ function renderVoteBar(data = snapshots[activeAccount]) {
     const pill = $('votePill');
     const sub = $('voteSub');
     const btn = $('btnOpenVote');
+    const btnExt = $('btnOpenVoteExt');
     const v = data?.vote;
     if (!v || !v.checkedAt) {
         bar.classList.remove('ready');
         btn.classList.remove('ready');
-        btn.disabled = !data?.session?.nick && (!data?.trainer?.nick || data.trainer.nick === '-');
+        const noSession = !data?.session?.nick && (!data?.trainer?.nick || data.trainer.nick === '-');
+        btn.disabled = noSession;
+        if (btnExt) btnExt.disabled = noSession;
         pill.textContent = 'IdleHub.io';
         sub.textContent = v?.error
             ? `Erro: ${v.error}`
@@ -1035,6 +1086,7 @@ function renderVoteBar(data = snapshots[activeAccount]) {
     bar.classList.toggle('ready', ready);
     btn.classList.toggle('ready', ready);
     btn.disabled = !v.url;
+    if (btnExt) btnExt.disabled = !v.url;
     if (!v.ativo) {
         pill.textContent = 'Desligado';
         sub.textContent = 'Vote & Ganhe inativo no servidor';
@@ -1071,7 +1123,7 @@ function renderUpdateUi(st) {
     const btnCheck = $('btnUpdateCheck');
     const brandVer = document.querySelector('.brand-ver');
 
-    const curVer = st.currentVersion || '1.0.1';
+    const curVer = st.currentVersion || '1.0.2';
     const shortCur = curVer.replace(/\.0$/, '');
     if (brandVer) brandVer.textContent = `v${shortCur}`;
     document.title = `Nexo PokeBot v${shortCur}`;
@@ -1338,7 +1390,8 @@ function wireEvents() {
     $('btnPassNow').addEventListener('click', () => sendAction('claim-pass'));
     $('btnPreyNow').addEventListener('click', () => sendAction('roll-prey'));
     $('btnLivesNow').addEventListener('click', () => sendAction('run-lives'));
-    $('btnOpenVote')?.addEventListener('click', () => sendAction('open-vote'));
+    $('btnOpenVote')?.addEventListener('click', () => sendAction('open-vote-embedded'));
+    $('btnOpenVoteExt')?.addEventListener('click', () => sendAction('open-vote'));
     $('btnRefreshVote')?.addEventListener('click', () => sendAction('refresh-vote'));
     $('btnOpenLives').addEventListener('click', () => sendAction('open-lives'));
     $('chatReminder').addEventListener('change', event => {
