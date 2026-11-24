@@ -127,48 +127,6 @@ try {
     // Re-injetado no dom-ready caso falhe antes da carga inicial
 }
 
-// Garante a interface nativa da extensao "/hunt for PokeIdle" na aba embutida
-// caso o loadExtension MV3 do Electron nao injete scripts world:"MAIN" no <webview>.
-try {
-    const isPokeIdleHost = /pokeidle\.io$/i.test(String(location.hostname || ''));
-    if (isPokeIdleHost) {
-        const huntBundle = ipcRenderer.sendSync('hub:get-hunt-extension-bundle');
-        if (huntBundle && Array.isArray(huntBundle.scripts) && huntBundle.scripts.length > 0) {
-            const injectHuntUi = () => {
-                try {
-                    const alreadyLoaded = webFrame.executeJavaScript('Boolean(globalThis.__pokeidleHunt)', false);
-                    Promise.resolve(alreadyLoaded).then((hasGuide) => {
-                        if (hasGuide) return;
-                        if (Array.isArray(huntBundle.styles) && huntBundle.styles.length > 0) {
-                            const injectCss = () => {
-                                if (document.getElementById('nexo-hunt-ext-css')) return;
-                                const style = document.createElement('style');
-                                style.id = 'nexo-hunt-ext-css';
-                                style.textContent = huntBundle.styles.join('\n');
-                                (document.head || document.documentElement)?.appendChild(style);
-                            };
-                            if (document.head || document.documentElement) injectCss();
-                            else window.addEventListener('DOMContentLoaded', injectCss, { once: true });
-                        }
-                        for (const src of huntBundle.scripts) {
-                            try {
-                                webFrame.executeJavaScript(src, false);
-                            } catch {
-                                // ignora script individual que falhar
-                            }
-                        }
-                    }).catch(() => {});
-                } catch {
-                    // extensao opcional
-                }
-            };
-            injectHuntUi();
-        }
-    }
-} catch {
-    // extensao /hunt opcional
-}
-
 window.addEventListener('message', (ev) => {
     if (ev.source !== window || !ev.data || typeof ev.data !== 'object') return;
     if (ev.data.__pbHub === 'ws-frame' && typeof ev.data.data === 'string') {

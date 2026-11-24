@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } 
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { execFileSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import {
     resolveHeadlessSession,
     discoverBrowserUserDataDirs,
@@ -442,7 +442,11 @@ function normalizeConfigPatch(current, patch = {}) {
     }
     if (typeof patch.browserProfile === 'string') {
         const cleanProfile = patch.browserProfile.trim();
-        if (cleanProfile === '' || cleanProfile === 'isolated' || /^(?:Default|Profile \d+)$/.test(cleanProfile)) {
+        if (
+            cleanProfile === '' ||
+            cleanProfile === 'isolated' ||
+            /^(?:(?:chrome|edge|brave):)?(?:Default|Profile \d+)$/.test(cleanProfile)
+        ) {
             next.browserProfile = cleanProfile;
         }
     }
@@ -565,43 +569,101 @@ function attachWsListeners(ws, { onOpen, onMessage, onClose, onError }) {
     }
 }
 
-let defaultBrowserFile;
-function preferredBrowserFile() {
-    if (defaultBrowserFile !== undefined) return defaultBrowserFile;
-    defaultBrowserFile = '';
-    if (process.platform !== 'win32') return '';
-    try {
-        const key = 'HKCU\\Software\\Microsoft\\Windows\\Shell\\Associations\\UrlAssociations\\https\\UserChoice';
-        const result = execFileSync(join(process.env.SystemRoot, 'System32', 'reg.exe'), ['query', key, '/v', 'ProgId'], { encoding: 'utf8', windowsHide: true, timeout: 1500, stdio: ['ignore', 'pipe', 'ignore'] });
-        const id = /REG_SZ\s+(\S+)/i.exec(result)?.[1] || '';
-        if (/^ChromeHTML/i.test(id)) defaultBrowserFile = 'chrome.exe';
-        if (/^MSEdgeHTM/i.test(id)) defaultBrowserFile = 'msedge.exe';
-        if (/^BraveHTML/i.test(id)) defaultBrowserFile = 'brave.exe';
-    } catch { /* A associação HTTPS pode estar indisponível. */ }
-    return defaultBrowserFile;
+function getBrowserKeyFromExe(exe) {
+    if (/msedge\.exe$/i.test(exe || '')) return 'edge';
+    if (/brave\.exe$/i.test(exe || '')) return 'brave';
+    if (/chrome(?:\.exe)?$|chromium$/i.test(exe || '')) return 'chrome';
+    return '';
 }
 
-function findChromiumExecutable() {
-    if (process.env.POKEBOT_BROWSER_EXE) return process.env.POKEBOT_BROWSER_EXE;
+function listInstalledChromiumExecutables() {
     const localAppData = process.env.LOCALAPPDATA || '';
     const programFiles = process.env.ProgramFiles || 'C:/Program Files';
     const programFiles86 = process.env['ProgramFiles(x86)'] || 'C:/Program Files (x86)';
-    const candidates = [
-        join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-        join(programFiles86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-        join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
-        join(programFiles86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-        join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-        join(programFiles, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
-        join(localAppData, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
-        join(programFiles86, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
-        join(localAppData, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
-        '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-        '/usr/bin/google-chrome',
-        '/usr/bin/chromium',
+    const groups = [
+        {
+            key: 'chrome',
+            label: 'Chrome',
+            paths: [
+                join(programFiles, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+                join(programFiles86, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+                join(localAppData, 'Google', 'Chrome', 'Application', 'chrome.exe'),
+                '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+                '/usr/bin/google-chrome',
+                '/usr/bin/chromium',
+            ],
+        },
+        {
+            key: 'brave',
+            label: 'Brave',
+            paths: [
+                join(programFiles, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
+                join(programFiles86, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
+                join(localAppData, 'BraveSoftware', 'Brave-Browser', 'Application', 'brave.exe'),
+            ],
+        },
+        {
+            key: 'edge',
+            label: 'Edge',
+            paths: [
+                join(programFiles86, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+                join(programFiles, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+                join(localAppData, 'Microsoft', 'Edge', 'Application', 'msedge.exe'),
+            ],
+        },
     ];
-    const preferred = preferredBrowserFile();
-    return (preferred && candidates.find(p => p.endsWith(preferred) && existsSync(p))) || candidates.find(p => existsSync(p)) || null;
+    const found = [];
+    if (process.env.POKEBOT_BROWSER_EXE && existsSync(process.env.POKEBOT_BROWSER_EXE)) {
+        const key = getBrowserKeyFromExe(process.env.POKEBOT_BROWSER_EXE) || 'chrome';
+        const label = { chrome: 'Chrome', brave: 'Brave', edge: 'Edge' }[key] || 'Navegador';
+        found.push({ key, label, exe: process.env.POKEBOT_BROWSER_EXE });
+    }
+    for (const grp of groups) {
+        if (found.some((item) => item.key === grp.key)) continue;
+        const hit = grp.paths.find((p) => existsSync(p));
+        if (hit) found.push({ key: grp.key, label: grp.label, exe: hit });
+    }
+    return found;
+}
+
+function findChromiumExecutable(preferredKey = '') {
+    if (process.env.POKEBOT_BROWSER_EXE && !preferredKey) return process.env.POKEBOT_BROWSER_EXE;
+    const installed = listInstalledChromiumExecutables();
+    if (preferredKey) {
+        const exact = installed.find((b) => b.key === preferredKey);
+        if (exact) return exact.exe;
+    }
+    return installed[0]?.exe || null;
+}
+
+/**
+ * Identifica qual motor Chromium (chrome, edge ou brave) criou um diretorio de perfil isolado
+ * para garantir descriptografia dos cookies na reabertura de lives.
+ * @param {string} profileDir Caminho do diretorio de perfil isolado.
+ * @returns {'chrome'|'edge'|'brave'|''} Chave do navegador detectado ou string vazia.
+ */
+export function detectProfileBrowserKind(profileDir) {
+    if (!profileDir || !existsSync(profileDir)) return '';
+    try {
+        const localStatePath = join(profileDir, 'Local State');
+        const prefPath = join(profileDir, 'Default', 'Preferences');
+        const state = existsSync(localStatePath) ? JSON.parse(readFileSync(localStatePath, 'utf8')) : null;
+        const pref = existsSync(prefPath) ? JSON.parse(readFileSync(prefPath, 'utf8')) : null;
+        if (state && typeof state === 'object') {
+            const keys = Object.keys(state);
+            if (keys.some((k) => /edge|msedge/i.test(k)) || Boolean(pref?.edge)) return 'edge';
+            if (keys.some((k) => /brave/i.test(k)) || Boolean(pref?.brave)) return 'brave';
+            return 'chrome';
+        }
+        if (pref && typeof pref === 'object') {
+            if (pref.edge) return 'edge';
+            if (pref.brave) return 'brave';
+            return 'chrome';
+        }
+    } catch {
+        // perfil novo ou ilegivel
+    }
+    return '';
 }
 
 async function launchBrowserWindow(exe, profileDir, urls, existingProfile, { enableRemoteDebugging = true, waitForExit = false, signal = null } = {}) {
@@ -1290,7 +1352,7 @@ export async function openInteractiveLogin(provider, options = {}) {
  * @returns {Promise<{ twitchToken: string, twitchDeviceId: string, kickToken: string, fromActiveBrowser?: boolean }|null>} Tokens encontrados ou null.
  */
 export async function trySilentProfileCookieSync(options = {}) {
-    const active = await connectActiveBrowserCdp(options);
+    const active = options.forceIsolatedProfile ? null : await connectActiveBrowserCdp(options);
     if (active) {
         try {
             const res = await extractCredentialsViaCdp(active.cdp, 'twitch', {
@@ -1902,12 +1964,20 @@ export function createHeadlessController(options = {}) {
     const watchdogTimeoutMs = options.watchdogTimeoutMs ?? WATCHDOG_TIMEOUT_MS;
 
     const browserOptions = options.isolatedAccount || options.useEmbeddedBrowser
-        ? { cwd, profileDir: resolve(cwd, DEFAULT_BROWSER_PROFILE_DIR) }
+        ? { cwd, profileDir: resolve(cwd, DEFAULT_BROWSER_PROFILE_DIR), forceIsolatedProfile: Boolean(options.useEmbeddedBrowser) }
         : { cwd };
     const allowBrowserProfiles = Boolean(options.useExistingBrowser || options.enableBrowserProfilePicker);
-    const desktopBrowser = allowBrowserProfiles
-        ? (options.browserExecutablePath || findChromiumExecutable())
-        : null;
+    const installedBrowsers = allowBrowserProfiles
+        ? (options.browserExecutablePath
+            ? [{
+                key: getBrowserKeyFromExe(options.browserExecutablePath) || 'chrome',
+                label: { chrome: 'Chrome', brave: 'Brave', edge: 'Edge' }[getBrowserKeyFromExe(options.browserExecutablePath)] || 'Navegador',
+                exe: options.browserExecutablePath,
+            }]
+            : listInstalledChromiumExecutables())
+        : [];
+    const desktopBrowser = installedBrowsers[0]?.exe || null;
+    const usePrefixedProfileIds = !options.browserExecutablePath && installedBrowsers.length > 1;
     const getBrowserUserDataRoots = () => (Array.isArray(options.browserUserDataRoots)
         ? options.browserUserDataRoots
         : [
@@ -1916,20 +1986,53 @@ export function createHeadlessController(options = {}) {
                 ...discoverBrowserUserDataDirs({ cwd, homeDir: homedir() }),
             ]),
         ]);
-    const getAvailableBrowserProfiles = () => (desktopBrowser
-        ? listExistingBrowserProfiles(desktopBrowser, getBrowserUserDataRoots())
-        : []);
+    const getAvailableBrowserProfiles = () => {
+        if (!allowBrowserProfiles || installedBrowsers.length === 0) return [];
+        const roots = getBrowserUserDataRoots();
+        const out = [];
+        for (const br of installedBrowsers) {
+            const profs = listExistingBrowserProfiles(br.exe, roots);
+            for (const p of profs) {
+                out.push({
+                    ...p,
+                    browser: br.key,
+                    browserLabel: br.label,
+                    exe: br.exe,
+                    id: usePrefixedProfileIds ? `${br.key}:${p.name}` : p.name,
+                });
+            }
+        }
+        return out;
+    };
     const savedConfig = loadSavedConfig(configPath);
     let config = buildConfig({}, savedConfig, options.initialConfig, options.isolatedAccount);
     const getExistingProfile = () => {
-        if (!desktopBrowser) return null;
+        if (installedBrowsers.length === 0) return null;
         const selected = String(config.browserProfile || '').trim();
         if (selected === 'isolated') return null;
+        const profiles = getAvailableBrowserProfiles();
+        if (profiles.length === 0) return null;
         if (selected) {
-            return findExistingBrowserProfile(desktopBrowser, getBrowserUserDataRoots(), selected);
+            const colonIdx = selected.indexOf(':');
+            if (colonIdx > 0) {
+                const wantBrowser = selected.slice(0, colonIdx);
+                const wantName = selected.slice(colonIdx + 1);
+                const exact = profiles.find((p) => p.browser === wantBrowser && p.name === wantName);
+                if (exact) {
+                    return { root: exact.root, name: exact.name, levelDb: exact.levelDb, exe: exact.exe, browser: exact.browser, label: exact.label, id: exact.id };
+                }
+                return null;
+            }
+            const byName = profiles.find((p) => p.name === selected);
+            if (byName) {
+                return { root: byName.root, name: byName.name, levelDb: byName.levelDb, exe: byName.exe, browser: byName.browser, label: byName.label, id: byName.id };
+            }
+            return null;
         }
-        return options.useExistingBrowser
-            ? findExistingBrowserProfile(desktopBrowser, getBrowserUserDataRoots())
+        if (!options.useExistingBrowser) return null;
+        const auto = profiles.find((p) => p.isLastUsed) || profiles[0];
+        return auto
+            ? { root: auto.root, name: auto.name, levelDb: auto.levelDb, exe: auto.exe, browser: auto.browser, label: auto.label, id: auto.id }
             : null;
     };
     const buildBrowserProfileOptions = () => {
@@ -1956,7 +2059,7 @@ export function createHeadlessController(options = {}) {
         }
         for (const p of profiles) {
             items.push({
-                id: p.name,
+                id: p.id,
                 label: p.label,
             });
         }
@@ -2718,9 +2821,15 @@ export function createHeadlessController(options = {}) {
     const getIsolatedProfileDir = () => browserOptions.profileDir || resolve(cwd, DEFAULT_BROWSER_PROFILE_DIR);
     const getLiveProfileDir = () => resolve(cwd, DEFAULT_LIVE_PROFILE_DIR);
 
-    const readCookiesFromLocalProfile = options.cookieReader || ((profileDir, signal) => openInteractiveLogin('twitch', {
+    const resolveIsolatedExeForDir = (dir) => {
+        if (options.browserExecutablePath) return options.browserExecutablePath;
+        const detected = detectProfileBrowserKind(dir);
+        return (detected && findChromiumExecutable(detected)) || findChromiumExecutable();
+    };
+
+    const readCookiesFromLocalProfile = options.cookieReader || ((profileDir, signal, explicitExe = null) => openInteractiveLogin('twitch', {
         cwd,
-        executablePath: options.browserExecutablePath || findChromiumExecutable(),
+        executablePath: explicitExe || resolveIsolatedExeForDir(profileDir),
         profileDir,
         forceIsolatedProfile: true,
         headless: true,
@@ -2730,17 +2839,17 @@ export function createHeadlessController(options = {}) {
     }));
 
     const loginLiveViaCleanBrowser = async (provider, { previousToken, interactive, signal }) => {
-        const exe = options.browserExecutablePath || findChromiumExecutable();
+        const liveProfileDir = getLiveProfileDir();
+        const exe = resolveIsolatedExeForDir(liveProfileDir);
         if (!exe || (!options.browserLauncher && !existsSync(exe))) {
             throw new Error('Chrome/Edge nao encontrado para abrir a janela de login.');
         }
-        const liveProfileDir = getLiveProfileDir();
         if (!interactive && existsSync(liveProfileDir)) {
-            const existing = await readCookiesFromLocalProfile(liveProfileDir, signal).catch(() => null);
+            const existing = await readCookiesFromLocalProfile(liveProfileDir, signal, exe).catch(() => null);
             const existingTok = provider === 'twitch' ? existing?.twitchToken : existing?.kickToken;
             if (existingTok && existingTok !== previousToken) return existing;
         }
-        pushLog('info', `Abrindo ${provider} no Chrome limpo (sem depuração). Faça login e feche a janela do Chrome ao concluir.`);
+        pushLog('info', `Abrindo ${provider} no navegador limpo (sem depuração). Faça login e feche a janela ao concluir.`);
         const launchRes = await browserLauncher(exe, liveProfileDir, [LOGIN_URLS[provider]], null, {
             enableRemoteDebugging: false,
             waitForExit: true,
@@ -2752,10 +2861,10 @@ export function createHeadlessController(options = {}) {
         }
         await new Promise((r) => setTimeout(r, 450));
         if (signal.aborted) throw new Error('Login cancelado.');
-        const extracted = await readCookiesFromLocalProfile(liveProfileDir, signal).catch(() => null);
+        const extracted = await readCookiesFromLocalProfile(liveProfileDir, signal, exe).catch(() => null);
         const capturedTok = provider === 'twitch' ? extracted?.twitchToken : extracted?.kickToken;
         if (!capturedTok) {
-            throw new Error(`Nenhum login de ${provider} encontrado ao fechar o Chrome. Confirme que concluiu o login antes de fechar (ou use "Colar token").`);
+            throw new Error(`Nenhum login de ${provider} encontrado ao fechar o navegador. Confirme que concluiu o login antes de fechar (ou use "Colar token").`);
         }
         return extracted;
     };
@@ -2793,11 +2902,13 @@ export function createHeadlessController(options = {}) {
         interactive,
         signal,
     }) => {
-        const exe = targetExistingProfile ? desktopBrowser : (options.browserExecutablePath || findChromiumExecutable());
+        const profileDir = targetExistingProfile ? null : getIsolatedProfileDir();
+        const exe = targetExistingProfile
+            ? (targetExistingProfile.exe || desktopBrowser || findChromiumExecutable())
+            : resolveIsolatedExeForDir(profileDir);
         if (!exe || (!options.browserLauncher && !existsSync(exe))) {
             throw new Error('Chrome/Edge nao encontrado para abrir a janela de login.');
         }
-        const profileDir = targetExistingProfile ? null : getIsolatedProfileDir();
         const levelDbDir = targetExistingProfile
             ? targetExistingProfile.levelDb
             : join(profileDir, 'Default', 'Local Storage', 'leveldb');
@@ -2854,7 +2965,7 @@ export function createHeadlessController(options = {}) {
             (clean === 'twitch' || clean === 'kick');
 
         if (interactive && activeExistingProfile && !config.browserProfile) {
-            config = normalizeConfigPatch(config, { browserProfile: activeExistingProfile.name });
+            config = normalizeConfigPatch(config, { browserProfile: activeExistingProfile.id || activeExistingProfile.name });
             persistConfig(configPath, config);
         }
 
@@ -3167,7 +3278,7 @@ export function createHeadlessController(options = {}) {
         try {
             pause();
             if (activeExistingProfile && !linked) {
-                await browserLauncher(desktopBrowser || exe, null, [LOGIN_URLS.pokeidle], activeExistingProfile, {
+                await browserLauncher(activeExistingProfile.exe || desktopBrowser || exe, null, [LOGIN_URLS.pokeidle], activeExistingProfile, {
                     enableRemoteDebugging: false,
                 });
                 pushLog('info', 'Jogo aberto no seu perfil. Feche a aba e clique em Iniciar para voltar ao farm em segundo plano.');
@@ -3211,13 +3322,17 @@ export function createHeadlessController(options = {}) {
 
     const resolveBrowserLaunchTarget = ({ forLives = false } = {}) => {
         const activeExistingProfile = getExistingProfile();
-        const exe = activeExistingProfile
-            ? (desktopBrowser || options.browserExecutablePath || findChromiumExecutable())
-            : (options.browserExecutablePath || findChromiumExecutable());
-        const profileDir = activeExistingProfile
-            ? null
-            : (forLives ? getLiveProfileDir() : getIsolatedProfileDir());
-        return { exe, profileDir, existingProfile: activeExistingProfile };
+        if (activeExistingProfile) {
+            const exe = activeExistingProfile.exe || desktopBrowser || options.browserExecutablePath || findChromiumExecutable();
+            return { exe, profileDir: null, existingProfile: activeExistingProfile };
+        }
+        const liveDir = getLiveProfileDir();
+        const isoDir = getIsolatedProfileDir();
+        const profileDir = forLives
+            ? (existsSync(liveDir) ? liveDir : (existsSync(isoDir) ? isoDir : liveDir))
+            : isoDir;
+        const exe = resolveIsolatedExeForDir(profileDir);
+        return { exe, profileDir, existingProfile: null };
     };
 
     const openExternalUrl = async (url, { forLives = false } = {}) => {
@@ -3261,7 +3376,10 @@ export function createHeadlessController(options = {}) {
             await browserLauncher(exe, profileDir, destinations, existingProfile, {
                 enableRemoteDebugging: false,
             });
-            const targetDesc = existingProfile ? `no perfil ${existingProfile.name}` : 'no perfil isolado de lives desta conta';
+            const browserName = { chrome: 'Chrome', edge: 'Edge', brave: 'Brave' }[getBrowserKeyFromExe(exe)] || 'navegador';
+            const targetDesc = existingProfile
+                ? `em ${existingProfile.label || existingProfile.name}`
+                : `no ${browserName} (perfil isolado desta conta)`;
             pushLog('info', chatOnly ? `Chat oficial aberto ${targetDesc}.`
                 : `Abertura de ${urls.length} lives oficiais solicitada ${targetDesc}.`);
             return true;
@@ -3660,7 +3778,7 @@ export function createHeadlessController(options = {}) {
         const huntSwapLockMs = isOnlineSnap ? getHuntSwapLockMs() : 0;
         const normalizedProfileSetting = (!options.useExistingBrowser && config.browserProfile === 'isolated')
             ? ''
-            : (config.browserProfile || '');
+            : (config.browserProfile && activeExistingProfile?.id ? activeExistingProfile.id : (config.browserProfile || ''));
 
         return {
             version: '1.0',

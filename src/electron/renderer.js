@@ -1137,10 +1137,6 @@ function wireEvents() {
     $('btnPreyNow').addEventListener('click', () => sendAction('roll-prey'));
     $('btnLivesNow').addEventListener('click', () => sendAction('run-lives'));
     $('btnOpenLives').addEventListener('click', () => sendAction('open-lives'));
-    $('btnExtensions').onclick = async () => {
-        const result = await sendAction('open-extensions').catch(() => null);
-        $('extensionsStatus').textContent = result?.ok ? ' Confira a janela do navegador.' : ' Abra o menu Extensões do seu navegador.';
-    };
     $('chatReminder').addEventListener('change', event => {
         clearInterval(chatReminderTimer);
         const note = $('chatReminderNote');

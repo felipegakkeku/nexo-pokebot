@@ -33,6 +33,7 @@ import {
 import { parseCliArgs } from '../src/headless/cli-runner.mjs';
 import {
     createHeadlessController,
+    detectProfileBrowserKind,
     startGuiServer,
     openInteractiveLogin,
     trySilentProfileCookieSync,
@@ -2641,6 +2642,16 @@ test('perfil configurado: openLives, openPanel e openExternalUrl usam o perfil e
                 assert.equal(call.existingProfile?.root, chromeRoot);
                 assert.equal(call.profileDir, null);
             }
+
+            // detectProfileBrowserKind diferencia perfil isolado criado no Edge vs Chrome
+            const edgeIso = join(dir, 'iso-edge');
+            const chromeIso = join(dir, 'iso-chrome');
+            mkdirSync(join(edgeIso, 'Default'), { recursive: true });
+            mkdirSync(join(chromeIso, 'Default'), { recursive: true });
+            writeFileSync(join(edgeIso, 'Local State'), JSON.stringify({ edge_work: {} }), 'utf8');
+            writeFileSync(join(chromeIso, 'Local State'), JSON.stringify({ profile: { last_used: 'Default' } }), 'utf8');
+            assert.equal(detectProfileBrowserKind(edgeIso), 'edge');
+            assert.equal(detectProfileBrowserKind(chromeIso), 'chrome');
         } finally {
             controller.stop();
         }

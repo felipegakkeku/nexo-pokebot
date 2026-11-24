@@ -1,6 +1,6 @@
 // Processo principal Electron do Nexo PokeBot: 1 janela, 1 bandeja, 4 contas isoladas + navegador embutido por conta.
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, powerSaveBlocker, session, shell, Tray } from 'electron';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startGuiServer } from '../headless/gui-server.mjs';
@@ -113,44 +113,8 @@ async function startAccountServer(account) {
     return entry;
 }
 
-let loadedHuntExtensionDir = null;
-let cachedHuntExtBundle = undefined;
-
-function getHuntExtensionBundle() {
-    if (cachedHuntExtBundle !== undefined) return cachedHuntExtBundle;
-    const extDir = loadedHuntExtensionDir || findHuntExtensionDir({ cwd: ROOT });
-    if (!extDir) {
-        cachedHuntExtBundle = null;
-        return null;
-    }
-    try {
-        const manifest = JSON.parse(readFileSync(join(extDir, 'manifest.json'), 'utf8'));
-        const scripts = [];
-        const styles = [];
-        for (const cs of manifest.content_scripts || []) {
-            const matches = Array.isArray(cs.matches) ? cs.matches : [];
-            if (!matches.some((m) => /pokeidle\.io/i.test(String(m)))) continue;
-            for (const cssRel of cs.css || []) {
-                const cssPath = join(extDir, cssRel);
-                if (existsSync(cssPath)) styles.push(readFileSync(cssPath, 'utf8'));
-            }
-            if (cs.world === 'MAIN' || cs.run_at === 'document_start') {
-                for (const jsRel of cs.js || []) {
-                    const jsPath = join(extDir, jsRel);
-                    if (existsSync(jsPath)) scripts.push(readFileSync(jsPath, 'utf8'));
-                }
-            }
-        }
-        cachedHuntExtBundle = scripts.length > 0 ? { scripts, styles } : null;
-    } catch {
-        cachedHuntExtBundle = null;
-    }
-    return cachedHuntExtBundle;
-}
-
 async function loadHuntExtensionIntoPartitions() {
     const extDir = findHuntExtensionDir({ cwd: ROOT });
-    loadedHuntExtensionDir = extDir || null;
     if (!extDir) return null;
     for (const acc of ACCOUNT_IDS) {
         const ses = session.fromPartition(`persist:conta${acc}`);
@@ -161,7 +125,7 @@ async function loadHuntExtensionIntoPartitions() {
                 await ses.loadExtension(extDir, { allowFileAccess: false });
             }
         } catch {
-            // Fallback de injecao MAIN-world em webview-preload.cjs garante /hunt no embutido mesmo se loadExtension falhar
+            // Extensao opcional; o avaliador /hunt headless no Node continua ativo mesmo sem carregar no webview
         }
     }
     return extDir;
@@ -392,10 +356,6 @@ function registerIpcHandlers() {
     });
 
     ipcMain.handle('hub:get-webview-preload', () => pathToFileURL(join(HERE, 'webview-preload.cjs')).href);
-
-    ipcMain.on('hub:get-hunt-extension-bundle', (ev) => {
-        ev.returnValue = getHuntExtensionBundle();
-    });
 
     ipcMain.handle('hub:action', async (_ev, { account, action, payload = {} } = {}) => {
         const acc = Number(account);
