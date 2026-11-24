@@ -1045,6 +1045,17 @@ select:focus, input:focus, textarea:focus {
   font-size: 11px;
   color: var(--muted);
 }
+.pix-qr-box {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0 2px;
+}
+.pix-qr-box img {
+  display: block;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 6px;
+}
 .pix-key-row {
   display: flex;
   align-items: center;

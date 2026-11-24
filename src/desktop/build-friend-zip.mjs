@@ -87,6 +87,7 @@ export function buildFriendPackage(options = {}) {
             'Recuperar Sessoes Nexo PokeBot.bat',
             'package.json',
             'README.md',
+            'LICENSE',
         ];
         for (const rel of copyFiles) {
             const src = join(ROOT, rel);
@@ -97,6 +98,9 @@ export function buildFriendPackage(options = {}) {
         cpSync(join(ROOT, 'src'), join(pkgRoot, 'src'), { recursive: true });
         if (existsSync(join(ROOT, 'assets'))) {
             cpSync(join(ROOT, 'assets'), join(pkgRoot, 'assets'), { recursive: true });
+        }
+        if (existsSync(join(ROOT, 'docs'))) {
+            cpSync(join(ROOT, 'docs'), join(pkgRoot, 'docs'), { recursive: true });
         }
 
         mkdirSync(join(pkgRoot, 'dist'), { recursive: true });
