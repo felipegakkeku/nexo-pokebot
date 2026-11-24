@@ -756,6 +756,11 @@ function renderLives(lv) {
                 note.className = 'channel-warning';
                 note.textContent = error;
                 row.append(note);
+            } else if (ch.smartNote) {
+                const note = document.createElement('small');
+                note.className = 'channel-smart-note';
+                note.textContent = ch.smartNote;
+                row.append(note);
             }
             const url = (ch.platform === 'twitch' ? 'https://www.twitch.tv/' : 'https://kick.com/') + ch.channel;
             if (lv.officialUrls?.includes(url)) {

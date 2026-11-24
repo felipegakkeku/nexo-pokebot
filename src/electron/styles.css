@@ -1186,6 +1186,12 @@ select:focus, input:focus, textarea:focus {
 .btn.vote-btn.ready:hover {
   background: rgba(16,185,129,0.34);
 }
+.channel-smart-note {
+  font-size: 10.5px;
+  color: #93c5fd;
+  flex-basis: 100%;
+  margin-top: -2px;
+}
 .btn.pix-btn {
   border-color: rgba(56,189,248,0.45);
   background: rgba(14,165,233,0.14);

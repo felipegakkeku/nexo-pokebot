@@ -903,3 +903,194 @@ test('live: gestor inteligente prioriza buffs zerados, pula quem ja bateu 1d (24
         liveRewards.dispose();
     }
 });
+
+test('live: gestor inteligente segura pontos p/ buff zerado (evita starvation de XP) e usa desempate LRU', async () => {
+    liveRewards.dispose();
+    const rewards = [
+        { id: 'xp1', title: 'Bônus +15% XP PokeIdle', prompt: '1 hora', cost: 300, isEnabled: true, isPaused: false, isInStock: true },
+        { id: 'cap1', title: 'Bônus de +15% Capture Boost', prompt: '1 hora PokeIdle', cost: 500, isEnabled: true, isPaused: false, isInStock: true },
+        { id: 'sh1', title: 'Bônus de +15% Secret Lure', prompt: '1 hora PokeIdle', cost: 1000, isEnabled: true, isPaused: false, isInStock: true },
+    ];
+    let balance = 350;
+    const redeemed = [];
+    const mockFetch = async (url, opts = {}) => {
+        if (url === 'https://gql.twitch.tv/gql') {
+            const p = JSON.parse(opts.body);
+            if (p.query?.includes('redeemCommunityPointsCustomReward')) {
+                redeemed.push(p.variables?.i?.rewardID);
+                return { ok: true, status: 200, json: async () => ({ data: { redeemCommunityPointsCustomReward: { redemption: { id: 'ok' } } } }) };
+            }
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    data: {
+                        currentUser: { id: 'u1' },
+                        user: {
+                            id: 'ch1',
+                            stream: { id: 'br1', game: { id: 'g1', name: 'PokeIdle' } },
+                            channel: {
+                                self: { communityPoints: { balance, availableClaim: null } },
+                                communityPointsSettings: { customRewards: rewards },
+                            },
+                        },
+                    },
+                }),
+            };
+        }
+        return { ok: false, status: 404 };
+    };
+
+    const ctx = {
+        CONFIG: {
+            live: {
+                enabled: true,
+                watchTwitch: false,
+                autoClaimChest: false,
+                autoRedeem: true,
+                smartBalance: true,
+                targetHours: 24,
+                rewardTier: 'smart',
+                twitchRewards: ['xp', 'captura', 'shiny'],
+                guardThresholdMin: 30,
+            },
+        },
+        state: {
+            running: true,
+            lastActionNote: '',
+            liveGameData: {
+                twitch: { bonus: { xp: Date.now() + 45 * 60_000, captura: 0, shiny: 0 } },
+                kick: null,
+                skew: 0,
+            },
+            liveStatus: { twitch: {}, kick: {} },
+            stats: { liveMinutesWatched: 0, liveChestsClaimed: 0, liveRewardsRedeemed: 0 },
+        },
+        net: { fetch: mockFetch },
+    };
+
+    try {
+        // XP tem 45m (< 24h), Captura tem 0m (500 pts), saldo 350 pts -> DEVE guardar para Captura e NAO gastar em XP!
+        const st1 = await stepTwitchChannel(ctx, 'guaxilol1', { token: 'tok', force: true });
+        assert.deepEqual(redeemed, [], 'nao deve torrar 300 pts em XP enquanto Captura esta zerada');
+        assert.match(st1.smartNote, /CAPTURA.*500/i);
+
+        // Saldo sobe para 850 pts (paga Captura 500 + sobra 350, mas Shiny=0m precisa 1000 -> paga Captura e guarda os 350 p/ Shiny!)
+        balance = 850;
+        const st2 = await stepTwitchChannel(ctx, 'guaxilol1', { token: 'tok', force: false });
+        assert.deepEqual(redeemed, ['cap1'], 'resgata Captura e guarda saldo restante para Shiny zerado');
+        assert.equal(st2.balance, 350);
+
+        // Desempate LRU quando XP e Captura empatam em 0m (XP foi resgatado mais recentemente -> Captura vem antes)
+        const orderedLru = orderBuffsForRedeem(
+            ['xp', 'captura', 'shiny'],
+            { bonus: { xp: 0, captura: 0, shiny: 0 } },
+            { smartBalance: true, targetHours: 24, guardThresholdMin: 30 },
+            Date.now(),
+            { xp: 2000, captura: 0, shiny: 1000 }
+        );
+        assert.deepEqual(orderedLru, ['captura', 'shiny', 'xp']);
+    } finally {
+        liveRewards.dispose(ctx);
+    }
+});
+
+test('live: isolamento multi-conta (runtimeState independente para Twitch, Kick e dispose)', async () => {
+    liveRewards.dispose();
+    const twPingsByToken = { tok1: [], tok2: [] };
+    const kickSocketsByAccount = { acc1: [], acc2: [] };
+
+    const makeCtx = (accKey, twTok, kkTok) => ({
+        CONFIG: {
+            live: {
+                enabled: true,
+                watchTwitch: true,
+                watchKick: true,
+                autoClaimChest: false,
+                autoRedeem: false,
+                twitchToken: twTok,
+                kickToken: kkTok,
+                maxTwitchSlots: 2,
+                maxKickSlots: 1,
+            },
+        },
+        dom: { $: () => null },
+        state: {
+            running: true,
+            paused: false,
+            lastActionNote: '',
+            liveGameData: {
+                twitch: { oficiais: [{ login: 'sharedch', aoVivo: true, ativo: true }] },
+                kick: { oficiais: [{ slug: 'sharedkk', aoVivo: true, ativo: true }] },
+                skew: 0,
+            },
+            liveStatus: { twitch: {}, kick: {} },
+            stats: { liveMinutesWatched: 0, liveChestsClaimed: 0, liveRewardsRedeemed: 0 },
+        },
+        net: {
+            fetch: async (url, opts = {}) => {
+                if (url === 'https://gql.twitch.tv/gql') {
+                    const p = JSON.parse(opts.body);
+                    if (p.operationName === 'PlaybackAccessToken') {
+                        return { ok: true, status: 200, json: async () => ({ data: { streamPlaybackAccessToken: null } }) };
+                    }
+                    return {
+                        ok: true,
+                        status: 200,
+                        json: async () => ({
+                            data: {
+                                currentUser: { id: `u-${twTok}` },
+                                user: {
+                                    id: 'ch-shared',
+                                    stream: { id: 'br-1', game: { id: 'g1', name: 'PokeIdle' } },
+                                    channel: { self: { communityPoints: { balance: 100 } }, communityPointsSettings: { customRewards: [] } },
+                                },
+                            },
+                        }),
+                    };
+                }
+                if (url.startsWith('https://www.twitch.tv/')) return { ok: true, status: 200, text: async () => '<script src="https://static.twitchcdn.net/config/settings.x.js"></script>' };
+                if (url.includes('/config/settings')) return { ok: true, status: 200, text: async () => '{"spade_url":"https://spade.twitch.test/multi"}' };
+                if (url === 'https://spade.twitch.test/multi') {
+                    twPingsByToken[twTok].push('sharedch');
+                    return { ok: true, status: 204, text: async () => '' };
+                }
+                if (url.endsWith('/info')) return { ok: true, status: 200, json: async () => ({ id: 42, livestream: { id: 99, is_live: true, vod_id: 7 } }) };
+                if (url.includes('/viewer/v1/token')) return { ok: true, status: 200, json: async () => ({ data: { token: `vtok-${kkTok}` } }) };
+                if (url.endsWith('/points')) return { ok: true, status: 200, json: async () => ({ data: { points: 100 } }) };
+                if (url.endsWith('/rewards')) return { ok: true, status: 200, json: async () => ({ data: [] }) };
+                return { ok: false, status: 404, json: async () => ({}) };
+            },
+            createWebSocket: (wsUrl) => {
+                const ws = {
+                    url: wsUrl,
+                    readyState: 1,
+                    closed: false,
+                    send() {},
+                    close() { this.closed = true; this.readyState = 3; },
+                };
+                kickSocketsByAccount[accKey].push(ws);
+                return ws;
+            },
+        },
+    });
+
+    const ctx1 = makeCtx('acc1', 'tok1', 'kk1');
+    const ctx2 = makeCtx('acc2', 'tok2', 'kk2');
+    try {
+        await Promise.all([runLiveCycle(ctx1, { force: false }), runLiveCycle(ctx2, { force: false })]);
+        assert.deepEqual(twPingsByToken.tok1, ['sharedch'], 'Conta 1 envia minute-watched independente');
+        assert.deepEqual(twPingsByToken.tok2, ['sharedch'], 'Conta 2 tambem envia minute-watched sem ser bloqueada pela Conta 1');
+        assert.equal(kickSocketsByAccount.acc1.length, 1);
+        assert.equal(kickSocketsByAccount.acc2.length, 1);
+        assert.notEqual(kickSocketsByAccount.acc1[0].url, kickSocketsByAccount.acc2[0].url);
+
+        // dispose(ctx1) fecha apenas o socket da Conta 1 e mantem a Conta 2 viva
+        liveRewards.dispose(ctx1);
+        assert.equal(kickSocketsByAccount.acc1[0].closed, true);
+        assert.equal(kickSocketsByAccount.acc2[0].closed, false);
+    } finally {
+        liveRewards.dispose(ctx1);
+        liveRewards.dispose(ctx2);
+    }
+});

@@ -2707,11 +2707,12 @@
     }
     return baseGuard;
   };
-  var orderBuffsForRedeem = (kinds = [], bonusState = null, liveConfig = {}, now = Date.now()) => {
+  var orderBuffsForRedeem = (kinds = [], bonusState = null, liveConfig = {}, now = Date.now(), lastRedeemByKind = null) => {
     const list = Array.isArray(kinds) ? [...kinds] : [];
     if (list.length <= 1 || liveConfig?.smartBalance !== true) return list;
     const criticalMin = Math.max(15, Number(liveConfig?.guardThresholdMin ?? 30) || 30);
     const indexMap = new Map(list.map((k, idx) => [k, idx]));
+    const lastAt = (k) => Number(lastRedeemByKind?.[k] || 0);
     return list.sort((a, b) => {
       const minA = getBonusRemainingMin(bonusState, a, now);
       const minB = getBonusRemainingMin(bonusState, b, now);
@@ -2719,8 +2720,40 @@
       const critB = minB <= criticalMin ? 0 : 1;
       if (critA !== critB) return critA - critB;
       if (Math.abs(minA - minB) > 0.5) return minA - minB;
+      const lruA = lastAt(a);
+      const lruB = lastAt(b);
+      if (lruA !== lruB) return lruA - lruB;
       return (indexMap.get(a) ?? 0) - (indexMap.get(b) ?? 0);
     });
+  };
+  var shouldReservePointsForHigherPriority = ({
+    kind,
+    orderedKinds = [],
+    candidateMeta = /* @__PURE__ */ new Map(),
+    balance = 0,
+    rewardCost = 0,
+    smartBalance = false
+  }) => {
+    if (!smartBalance) return { allow: true, reason: null };
+    const idx = orderedKinds.indexOf(kind);
+    if (idx <= 0) return { allow: true, reason: null };
+    const cur = candidateMeta.get(kind);
+    if (!cur) return { allow: true, reason: null };
+    for (let i = 0; i < idx; i++) {
+      const higherKind = orderedKinds[i];
+      const hi = candidateMeta.get(higherKind);
+      if (!hi || !hi.available || !hi.needsRedeem || hi.recentlyRedeemed) continue;
+      if (balance - rewardCost >= hi.minCost) continue;
+      const aheadInTime = cur.remainingMin > hi.remainingMin + 0.5;
+      const tiedWithPriority = Math.abs(cur.remainingMin - hi.remainingMin) <= 15 && hi.lastRedeemAt < cur.lastRedeemAt;
+      if (aheadInTime || tiedWithPriority) {
+        return {
+          allow: false,
+          reason: `guardando p/ ${higherKind.toUpperCase()} (${hi.minCost} pts)`
+        };
+      }
+    }
+    return { allow: true, reason: null };
   };
   var selectChannelsToWatch = (officials = [], customCsv = "", maxSlots = 2) => {
     const seen = /* @__PURE__ */ new Set();
@@ -2760,14 +2793,15 @@
     eligible.sort((a, b) => Number(a.live) - Number(b.live) || b.points - a.points);
     return eligible[0];
   };
-  var runtimeState = {
-    spadeCache: /* @__PURE__ */ new Map(),
+  var sharedSpadeCache = /* @__PURE__ */ new Map();
+  var createRuntimeState = () => ({
     twitchLastPingAt: /* @__PURE__ */ new Map(),
     twitchSeenSegments: /* @__PURE__ */ new Map(),
     kickSockets: /* @__PURE__ */ new Map(),
     kickPointsCheckAt: /* @__PURE__ */ new Map(),
     kickTimer: null,
     lastPlatformRedeemAt: {},
+    optimisticBonusUntil: { twitch: {}, kick: {} },
     redeemRetryAt: { twitch: /* @__PURE__ */ new Map(), kick: /* @__PURE__ */ new Map() },
     claimRetryAt: /* @__PURE__ */ new Map(),
     confirmedClaims: /* @__PURE__ */ new Map(),
@@ -2776,9 +2810,74 @@
     lastLiveProbeAt: { twitch: 0, kick: 0 },
     cycleInFlight: false,
     modalSyncDone: false
+  });
+  var defaultRuntimeState = createRuntimeState();
+  var runtimeStateByObj = /* @__PURE__ */ new WeakMap();
+  var activeRuntimeStates = /* @__PURE__ */ new Set([defaultRuntimeState]);
+  var getRuntimeState = (ctx) => {
+    const key = ctx?.state;
+    if (!key || typeof key !== "object") return defaultRuntimeState;
+    let rt = runtimeStateByObj.get(key);
+    if (!rt) {
+      rt = createRuntimeState();
+      runtimeStateByObj.set(key, rt);
+      activeRuntimeStates.add(rt);
+    }
+    return rt;
+  };
+  var clearRuntimeState = (rt) => {
+    if (!rt) return;
+    if (rt.kickTimer) {
+      clearInterval(rt.kickTimer);
+      rt.kickTimer = null;
+    }
+    for (const [, conn] of rt.kickSockets) {
+      try {
+        conn.ws?.close?.();
+      } catch {
+      }
+    }
+    rt.kickSockets.clear();
+    rt.twitchLastPingAt.clear();
+    rt.twitchSeenSegments.clear();
+    rt.kickPointsCheckAt.clear();
+    rt.lastPlatformRedeemAt = {};
+    rt.optimisticBonusUntil = { twitch: {}, kick: {} };
+    rt.redeemRetryAt = { twitch: /* @__PURE__ */ new Map(), kick: /* @__PURE__ */ new Map() };
+    rt.claimRetryAt.clear();
+    rt.confirmedClaims.clear();
+    rt.guardReads = { twitch: /* @__PURE__ */ new Map(), kick: /* @__PURE__ */ new Map() };
+    rt.twitchIntegrityCache = { token: null, expiresAt: 0 };
+    rt.lastLiveProbeAt = { twitch: 0, kick: 0 };
+    rt.cycleInFlight = false;
+    rt.modalSyncDone = false;
   };
   var getPageWindow = (ctx) => ctx.pageWin || (typeof window !== "undefined" ? window : null);
-  var canRedeemPlatform = (platform, kind, now, force = false) => force || now - (runtimeState.lastPlatformRedeemAt[`${platform}:${kind}`] || 0) >= CONFIRM_WITHIN_MS;
+  var canRedeemPlatform = (rt, platform, kind, now, force = false) => force || now - (rt.lastPlatformRedeemAt[`${platform}:${kind}`] || 0) >= CONFIRM_WITHIN_MS;
+  var getLastRedeemMapForPlatform = (rt, platform) => {
+    const out = {};
+    for (const k of LIVE_REWARD_KINDS) {
+      out[k] = Number(rt.lastPlatformRedeemAt[`${platform}:${k}`] || 0);
+    }
+    return out;
+  };
+  var buildEffectiveBonusState = (rt, bonusState, platform) => {
+    const opt = rt?.optimisticBonusUntil?.[platform];
+    if (!opt) return bonusState;
+    const mergedBonus = { ...bonusState?.bonus || {} };
+    for (const k of LIVE_REWARD_KINDS) {
+      const cur = Number(mergedBonus[k]) || 0;
+      const est = Number(opt[k]) || 0;
+      if (est > cur) mergedBonus[k] = est;
+    }
+    return { ...bonusState || {}, bonus: mergedBonus };
+  };
+  var recordOptimisticRedeem = (rt, platform, kind, reward, serverNow) => {
+    const hours = Math.max(1, extractRewardHours(reward));
+    const cur = Number(rt.optimisticBonusUntil?.[platform]?.[kind]) || 0;
+    const base = Math.max(cur, serverNow);
+    rt.optimisticBonusUntil[platform][kind] = base + hours * 36e5;
+  };
   var recordChannelBalance = (state, platform, channel, points) => {
     if (!state || typeof points !== "number") return;
     if (!state.liveChannelBalances) state.liveChannelBalances = { twitch: {}, kick: {} };
@@ -2902,7 +3001,7 @@
             if (dom.getVisibleModal()) await dom.closeActiveModal();
           }
         }
-        runtimeState.modalSyncDone = true;
+        getRuntimeState(ctx).modalSyncDone = true;
         state.lastActionNote = `Lives lidas: TW=${result.twitch.length} KK=${result.kick.length}`;
       },
       { force }
@@ -2958,6 +3057,7 @@
     return creds;
   };
   var twitchGqlCall = async (ctx, { token, deviceId }, payload) => {
+    const rt = getRuntimeState(ctx);
     const headers = {
       "Client-Id": TWITCH_CLIENT_ID,
       "Content-Type": "text/plain;charset=UTF-8"
@@ -2977,13 +3077,13 @@
       const challenged = Boolean(json?.extensions?.challenge) || (json?.errors || []).some((e) => e?.extensions?.code === "IntegrityCheckFailed");
       if (!challenged) return json;
       if (integrity) {
-        runtimeState.twitchIntegrityCache = { token: null, expiresAt: 0 };
+        rt.twitchIntegrityCache = { token: null, expiresAt: 0 };
         return { failed: "checagem anti-rob\xF4 da Twitch (IntegrityCheckFailed)" };
       }
       if (!token) return { failed: "checagem anti-rob\xF4 da Twitch" };
       const now = Date.now();
-      if (runtimeState.twitchIntegrityCache.token && runtimeState.twitchIntegrityCache.expiresAt > now + 6e4) {
-        integrity = runtimeState.twitchIntegrityCache.token;
+      if (rt.twitchIntegrityCache.token && rt.twitchIntegrityCache.expiresAt > now + 6e4) {
+        integrity = rt.twitchIntegrityCache.token;
         continue;
       }
       if (typeof ctx.getTwitchIntegrityToken === "function") {
@@ -2991,7 +3091,7 @@
           const browserInt = await ctx.getTwitchIntegrityToken({ token, deviceId });
           if (browserInt?.token) {
             integrity = browserInt.token;
-            runtimeState.twitchIntegrityCache = {
+            rt.twitchIntegrityCache = {
               token: browserInt.token,
               expiresAt: Number(browserInt.expiration) || now + 36e5
             };
@@ -3004,7 +3104,7 @@
       const intJson = intRes.ok ? await intRes.json().catch(() => null) : null;
       if (!intJson?.token) return { failed: `checagem anti-rob\xF4 (${intRes.status})` };
       integrity = intJson.token;
-      runtimeState.twitchIntegrityCache = {
+      rt.twitchIntegrityCache = {
         token: intJson.token,
         expiresAt: Number(intJson.expiration) || now + 36e5
       };
@@ -3027,7 +3127,7 @@
     return out;
   };
   var discoverSpadeUrl = async (ctx, login) => {
-    const cached = runtimeState.spadeCache.get("twitch");
+    const cached = sharedSpadeCache.get("twitch");
     if (cached && Date.now() - cached.at < SPADE_CACHE_MS) return cached.url;
     try {
       const pageRes = await netFetch(ctx, `https://www.twitch.tv/${encodeURIComponent(login)}`, { method: "GET" });
@@ -3041,7 +3141,7 @@
             const spadeMatch = js.match(/"spade_url"\s*:\s*"(.*?)"/);
             if (spadeMatch) {
               const raw = spadeMatch[1].replace(/\\\//g, "/");
-              runtimeState.spadeCache.set("twitch", { url: raw, at: Date.now() });
+              sharedSpadeCache.set("twitch", { url: raw, at: Date.now() });
               return raw;
             }
           }
@@ -3090,10 +3190,11 @@
       const lastSeg = segs[segs.length - 1];
       if (!lastSeg) return false;
       const segUrl = new URL(lastSeg, chosenUri).toString();
-      let seen = runtimeState.twitchSeenSegments.get(login);
+      const rt = getRuntimeState(ctx);
+      let seen = rt.twitchSeenSegments.get(login);
       if (!seen) {
         seen = /* @__PURE__ */ new Set();
-        runtimeState.twitchSeenSegments.set(login, seen);
+        rt.twitchSeenSegments.set(login, seen);
       }
       if (seen.has(segUrl)) return true;
       seen.add(segUrl);
@@ -3107,9 +3208,11 @@
   var stepTwitchChannel = async (ctx, login, { token = "", deviceId = "", force = false, guardOnly = false, onlyKind = null, probeOnly = false } = {}) => {
     var _a;
     const { CONFIG, state } = ctx;
+    const rt = getRuntimeState(ctx);
     if (!state.liveStatus) state.liveStatus = { twitch: {}, kick: {} };
-    const status = guardOnly ? { balance: null, live: false, lastPingAt: 0, lastRedeemAt: 0, redeemedThisStep: false, error: null } : (_a = state.liveStatus.twitch)[login] || (_a[login] = { balance: null, live: false, lastPingAt: 0, lastRedeemAt: 0, redeemedThisStep: false, error: null });
+    const status = guardOnly ? { balance: null, live: false, lastPingAt: 0, lastRedeemAt: 0, redeemedThisStep: false, smartNote: "", error: null } : (_a = state.liveStatus.twitch)[login] || (_a[login] = { balance: null, live: false, lastPingAt: 0, lastRedeemAt: 0, redeemedThisStep: false, smartNote: "", error: null });
     status.redeemedThisStep = false;
+    status.smartNote = "";
     const query = "query($login:String!){currentUser{id} user(login:$login){id stream{id game{id name}} channel{self{communityPoints{balance availableClaim{id}}} communityPointsSettings{customRewards{id title prompt cost isEnabled isPaused isInStock cooldownExpiresAt}}}}}";
     const credentials = { token, deviceId };
     let res = await twitchGqlCall(ctx, credentials, { query, variables: { login } });
@@ -3148,25 +3251,28 @@
       recordChannelBalance(state, "twitch", login, balance);
       for (const k of LIVE_REWARD_KINDS) {
         if (!configuredKinds.includes(k)) {
-          runtimeState.guardReads.twitch.delete(guardKey(channelKey, k));
+          rt.guardReads.twitch.delete(guardKey(channelKey, k));
           continue;
         }
+        const cheapestRew = pickRewardForChannel(rewards, k, "twitch", { tier: "cheapest", balance });
         const rew = pickRewardForChannel(rewards, k, "twitch", { tier, balance });
         if (rew) {
           const unavail = Boolean(rew.isPaused || rew.isInStock === false || rew.cooldownExpiresAt);
-          runtimeState.guardReads.twitch.set(guardKey(channelKey, k), {
+          const minUnavail = cheapestRew ? Boolean(cheapestRew.isPaused || cheapestRew.isInStock === false || cheapestRew.cooldownExpiresAt) : unavail;
+          rt.guardReads.twitch.set(guardKey(channelKey, k), {
             at: now,
             points: balance,
             cost: rew.cost,
-            paused: unavail
+            minCost: cheapestRew ? cheapestRew.cost : rew.cost,
+            paused: unavail && minUnavail
           });
         }
       }
     }
     const claimId = cp?.availableClaim?.id;
     if (cp && !claimId) status.manualChest = false;
-    const canClaim = now >= (runtimeState.claimRetryAt.get(channelKey) || 0);
-    if (!guardOnly && CONFIG.live?.autoClaimChest && token && claimId && runtimeState.confirmedClaims.get(channelKey) !== claimId && canClaim) {
+    const canClaim = now >= (rt.claimRetryAt.get(channelKey) || 0);
+    if (!guardOnly && CONFIG.live?.autoClaimChest && token && claimId && rt.confirmedClaims.get(channelKey) !== claimId && canClaim) {
       const claimRes = await twitchGqlCall(ctx, { token, deviceId }, {
         query: "mutation($i:ClaimCommunityPointsInput!){claimCommunityPoints(input:$i){claim{id}}}",
         variables: { i: { channelID: channelId, claimID: claimId } }
@@ -3174,7 +3280,7 @@
       const claimData = claimRes?.data?.claimCommunityPoints;
       if (claimData?.claim?.id && !claimData.error && !claimRes?.errors?.length && !claimRes?.failed) {
         status.manualChest = false;
-        runtimeState.confirmedClaims.set(channelKey, claimId);
+        rt.confirmedClaims.set(channelKey, claimId);
         state.stats.liveChestsClaimed = (state.stats.liveChestsClaimed || 0) + 1;
         balance = typeof claimData.currentPoints === "number" ? claimData.currentPoints : (balance ?? 0) + 50;
         recordChannelBalance(state, "twitch", login, balance);
@@ -3186,11 +3292,11 @@
         status.error = isIntegrity ? "Twitch exige o resgate do ba\xFA +50 no navegador" : `ba\xFA +50: ${errCode}`;
         state.lastActionNote = isIntegrity ? `Twitch (${login}): ba\xFA +50 exige clique no navegador` : `Twitch ba\xFA +50 (${login}): ${errCode}`;
         if (errCode && errCode !== "NOT_FOUND") {
-          runtimeState.claimRetryAt.set(channelKey, now + (isIntegrity ? RETRY_WAIT_MS : 6e4));
+          rt.claimRetryAt.set(channelKey, now + (isIntegrity ? RETRY_WAIT_MS : 6e4));
         }
       }
     }
-    const lastPing = runtimeState.twitchLastPingAt.get(login) || 0;
+    const lastPing = rt.twitchLastPingAt.get(login) || 0;
     if (!guardOnly && CONFIG.live?.watchTwitch && broadcastId && userId && (force || now - lastPing >= 55e3)) {
       const spadeUrl = await discoverSpadeUrl(ctx, login);
       const encoded = encodeSpadePayload({ channelId, broadcastId, userId, login, game, gameId });
@@ -3200,29 +3306,47 @@
         body: `data=${encodeURIComponent(encoded)}`
       });
       if (pingRes.ok) {
-        runtimeState.twitchLastPingAt.set(login, now);
+        rt.twitchLastPingAt.set(login, now);
         status.lastPingAt = now;
         state.stats.liveMinutesWatched = (state.stats.liveMinutesWatched || 0) + 1;
       }
       await touchTwitchHlsSegment(ctx, { token, deviceId }, login);
     }
-    const canRetryRedeem = force || now >= (runtimeState.redeemRetryAt.twitch.get(login) || 0);
+    const canRetryRedeem = force || now >= (rt.redeemRetryAt.twitch.get(login) || 0);
     if (!probeOnly && CONFIG.live?.autoRedeem && token && balance !== null && canRetryRedeem && activeKinds.length > 0) {
       const serverNow = Date.now() - (state.liveGameData?.skew || 0);
-      const bonusState = state.liveGameData?.twitch;
+      const bonusState = buildEffectiveBonusState(rt, state.liveGameData?.twitch, "twitch");
       const thresholdMin = resolveEffectiveThresholdMin(CONFIG.live);
       const criticalMin = Math.max(15, Number(CONFIG.live?.guardThresholdMin ?? 30) || 30);
-      const orderedKinds = orderBuffsForRedeem(activeKinds, bonusState, CONFIG.live, serverNow);
+      const smartOn = CONFIG.live?.smartBalance === true;
+      const lastRedeemMap = getLastRedeemMapForPlatform(rt, "twitch");
+      const orderedKinds = orderBuffsForRedeem(activeKinds, bonusState, CONFIG.live, serverNow, lastRedeemMap);
       const criticalPending = new Set(
         orderedKinds.filter((k) => getBonusRemainingMin(bonusState, k, serverNow) <= criticalMin)
       );
+      const candidateMeta = /* @__PURE__ */ new Map();
+      for (const k of orderedKinds) {
+        const rem = getBonusRemainingMin(bonusState, k, serverNow);
+        const minRew = pickRewardForChannel(rewards, k, "twitch", { tier: "cheapest", balance });
+        const unavail = minRew ? Boolean(minRew.isPaused || minRew.isInStock === false || minRew.cooldownExpiresAt) : true;
+        candidateMeta.set(k, {
+          remainingMin: rem,
+          needsRedeem: rem <= thresholdMin,
+          available: Boolean(minRew && !unavail),
+          minCost: minRew ? minRew.cost : Infinity,
+          minHours: minRew ? extractRewardHours(minRew) : 1,
+          lastRedeemAt: lastRedeemMap[k] || 0,
+          recentlyRedeemed: !canRedeemPlatform(rt, "twitch", k, now, false)
+        });
+      }
       for (const kind of orderedKinds) {
-        if (!canRedeemPlatform("twitch", kind, now, force)) continue;
-        const remainingMin = getBonusRemainingMin(bonusState, kind, serverNow);
-        const needsRedeem = force || remainingMin <= thresholdMin;
+        if (!canRedeemPlatform(rt, "twitch", kind, now, false)) continue;
+        const meta = candidateMeta.get(kind);
+        const remainingMin = meta?.remainingMin ?? getBonusRemainingMin(bonusState, kind, serverNow);
+        const needsRedeem = remainingMin <= thresholdMin;
         if (!needsRedeem) continue;
         const deficitMin = Math.max(0, thresholdMin - remainingMin);
-        const preferQuickTurnOn = CONFIG.live?.smartBalance === true && criticalPending.has(kind) && criticalPending.size > 1;
+        const preferQuickTurnOn = smartOn && criticalPending.has(kind) && criticalPending.size > 1;
         const reward = pickRewardForChannel(rewards, kind, "twitch", {
           tier,
           balance,
@@ -3230,7 +3354,26 @@
           preferQuickTurnOn
         });
         const unavailable = reward ? Boolean(reward.isPaused || reward.isInStock === false || reward.cooldownExpiresAt) : true;
-        if (!reward || unavailable || balance < reward.cost) continue;
+        if (!reward || unavailable) continue;
+        if (balance < reward.cost) {
+          if (!status.smartNote) {
+            const hrs = extractRewardHours(reward);
+            status.smartNote = `pr\xF3x. ${kind.toUpperCase()} (${reward.cost} pts \xB7 ${hrs}h)`;
+          }
+          continue;
+        }
+        const reserveCheck = shouldReservePointsForHigherPriority({
+          kind,
+          orderedKinds,
+          candidateMeta,
+          balance,
+          rewardCost: reward.cost,
+          smartBalance: smartOn
+        });
+        if (!reserveCheck.allow) {
+          if (!status.smartNote && reserveCheck.reason) status.smartNote = reserveCheck.reason;
+          continue;
+        }
         const txId = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
         const redRes = await twitchGqlCall(ctx, { token, deviceId }, {
           query: "mutation($i:RedeemCommunityPointsCustomRewardInput!){redeemCommunityPointsCustomReward(input:$i){redemption{id} error{code}}}",
@@ -3249,14 +3392,17 @@
         if (p?.redemption?.id && !p.error && !redRes?.errors?.length) {
           balance -= reward.cost;
           criticalPending.delete(kind);
+          if (meta) meta.recentlyRedeemed = true;
           recordChannelBalance(state, "twitch", login, balance);
+          recordOptimisticRedeem(rt, "twitch", kind, reward, serverNow);
           status.lastRedeemAt = now;
           status.redeemedThisStep = true;
-          runtimeState.lastPlatformRedeemAt[`twitch:${kind}`] = now;
+          status.smartNote = "";
+          rt.lastPlatformRedeemAt[`twitch:${kind}`] = now;
           state.stats.liveRewardsRedeemed = (state.stats.liveRewardsRedeemed || 0) + 1;
           state.lastActionNote = `Twitch resgatou ${reward.title} (${login})`;
         } else {
-          runtimeState.redeemRetryAt.twitch.set(login, now + RETRY_WAIT_MS);
+          rt.redeemRetryAt.twitch.set(login, now + RETRY_WAIT_MS);
           status.error = p?.error?.code || redRes?.errors?.[0]?.message || redRes?.failed || "resgate recusado";
           break;
         }
@@ -3265,7 +3411,7 @@
     status.balance = balance;
     if (!guardOnly && !status.live) {
       delete state.liveStatus.twitch[login];
-      runtimeState.lastLiveProbeAt.twitch = 0;
+      rt.lastLiveProbeAt.twitch = 0;
     }
     return status;
   };
@@ -3313,19 +3459,21 @@
     return true;
   };
   var ensureKickHeartbeatTimer = (ctx) => {
-    if (runtimeState.kickTimer) return;
-    runtimeState.kickTimer = setInterval(() => {
+    const rt = getRuntimeState(ctx);
+    if (rt.kickTimer) return;
+    rt.kickTimer = setInterval(() => {
       if (!ctx.state?.running || ctx.state?.paused || !ctx.CONFIG?.live?.enabled || !ctx.CONFIG?.live?.watchKick) return;
-      for (const [, conn] of runtimeState.kickSockets) {
+      for (const [, conn] of rt.kickSockets) {
         flushKickSocketEvents(ctx, conn, false);
       }
     }, 15e3);
   };
   var ensureKickViewerSocket = async (ctx, slug, { token, channelId, livestreamId, vodId, force = false }) => {
     const { net } = ctx;
+    const rt = getRuntimeState(ctx);
     const createWs = net?.createWebSocket || (typeof WebSocket === "function" ? (url) => new WebSocket(url) : null);
     if (!createWs) return false;
-    let conn = runtimeState.kickSockets.get(slug);
+    let conn = rt.kickSockets.get(slug);
     if (!conn || !conn.ws || conn.ws.readyState > 1) {
       const tokRes = await netFetch(ctx, `${KICK_WS_API_URL}/viewer/v1/token`, {
         method: "GET",
@@ -3337,7 +3485,7 @@
       if (!viewerToken) return false;
       const ws = createWs(`${KICK_WS_URL}?token=${encodeURIComponent(viewerToken)}`);
       conn = { ws, channelId, livestreamId, vodId, lastHandshakeAt: 0, lastPingAt: 0, lastWatchAt: 0 };
-      runtimeState.kickSockets.set(slug, conn);
+      rt.kickSockets.set(slug, conn);
       const onOpen = () => flushKickSocketEvents(ctx, conn, true);
       if (typeof ws.addEventListener === "function") {
         ws.addEventListener("open", onOpen);
@@ -3365,9 +3513,11 @@
   var stepKickChannel = async (ctx, slug, { token = "", force = false, guardOnly = false, onlyKind = null, probeOnly = false } = {}) => {
     var _a;
     const { CONFIG, state } = ctx;
+    const rt = getRuntimeState(ctx);
     if (!state.liveStatus) state.liveStatus = { twitch: {}, kick: {} };
-    const status = guardOnly ? { balance: null, live: false, wsOpen: false, lastPingAt: 0, lastRedeemAt: 0, redeemedThisStep: false, error: null } : (_a = state.liveStatus.kick)[slug] || (_a[slug] = { balance: null, live: false, wsOpen: false, lastPingAt: 0, lastRedeemAt: 0, redeemedThisStep: false, error: null });
+    const status = guardOnly ? { balance: null, live: false, wsOpen: false, lastPingAt: 0, lastRedeemAt: 0, redeemedThisStep: false, smartNote: "", error: null } : (_a = state.liveStatus.kick)[slug] || (_a[slug] = { balance: null, live: false, wsOpen: false, lastPingAt: 0, lastRedeemAt: 0, redeemedThisStep: false, smartNote: "", error: null });
     status.redeemedThisStep = false;
+    status.smartNote = "";
     const headers = kickHeaders(token);
     let live = status.live;
     if (!guardOnly) {
@@ -3389,17 +3539,17 @@
       status.live = live;
       status.error = null;
       if (!live) {
-        const oldConn = runtimeState.kickSockets.get(slug);
+        const oldConn = rt.kickSockets.get(slug);
         if (oldConn) {
           try {
             oldConn.ws?.close?.();
           } catch {
           }
-          runtimeState.kickSockets.delete(slug);
+          rt.kickSockets.delete(slug);
         }
         status.wsOpen = false;
         delete state.liveStatus.kick[slug];
-        runtimeState.lastLiveProbeAt.kick = 0;
+        rt.lastLiveProbeAt.kick = 0;
       } else if (CONFIG.live?.watchKick && token && channelId && livestreamId && vodId) {
         const ok = await ensureKickViewerSocket(ctx, slug, { token, channelId, livestreamId, vodId, force });
         status.wsOpen = ok;
@@ -3412,9 +3562,9 @@
     const configuredKinds = resolveChannelRewardKinds(CONFIG.live, "kick", slug);
     const activeKinds = onlyKind ? configuredKinds.includes(onlyKind) ? [onlyKind] : [] : configuredKinds;
     status.rewardKinds = configuredKinds;
-    const lastCheck = runtimeState.kickPointsCheckAt.get(slug) || 0;
+    const lastCheck = rt.kickPointsCheckAt.get(slug) || 0;
     if (token && (force || guardOnly || now - lastCheck >= 29e4)) {
-      runtimeState.kickPointsCheckAt.set(slug, now);
+      rt.kickPointsCheckAt.set(slug, now);
       const data = await readKickPointsAndRewards(ctx, slug, headers);
       if (data) {
         let { points, rewards } = data;
@@ -3422,43 +3572,81 @@
         recordChannelBalance(state, "kick", slug, points);
         for (const k of LIVE_REWARD_KINDS) {
           if (!configuredKinds.includes(k)) {
-            runtimeState.guardReads.kick.delete(guardKey(channelKey, k));
+            rt.guardReads.kick.delete(guardKey(channelKey, k));
             continue;
           }
+          const cheapestRew = pickRewardForChannel(rewards, k, "kick", { tier: "cheapest", balance: points });
           const rew = pickRewardForChannel(rewards, k, "kick", { tier, balance: points });
           if (rew) {
-            runtimeState.guardReads.kick.set(guardKey(channelKey, k), {
+            rt.guardReads.kick.set(guardKey(channelKey, k), {
               at: now,
               points,
               cost: rew.cost,
-              paused: Boolean(rew.is_paused)
+              minCost: cheapestRew ? cheapestRew.cost : rew.cost,
+              paused: Boolean(rew.is_paused && (!cheapestRew || cheapestRew.is_paused))
             });
           }
         }
-        const canRetryRedeem = force || now >= (runtimeState.redeemRetryAt.kick.get(slug) || 0);
+        const canRetryRedeem = force || now >= (rt.redeemRetryAt.kick.get(slug) || 0);
         if (!probeOnly && CONFIG.live?.autoRedeem && canRetryRedeem && activeKinds.length > 0) {
           const serverNow = Date.now() - (state.liveGameData?.skew || 0);
-          const bonusState = state.liveGameData?.kick;
+          const bonusState = buildEffectiveBonusState(rt, state.liveGameData?.kick, "kick");
           const thresholdMin = resolveEffectiveThresholdMin(CONFIG.live);
           const criticalMin = Math.max(15, Number(CONFIG.live?.guardThresholdMin ?? 30) || 30);
-          const orderedKinds = orderBuffsForRedeem(activeKinds, bonusState, CONFIG.live, serverNow);
+          const smartOn = CONFIG.live?.smartBalance === true;
+          const lastRedeemMap = getLastRedeemMapForPlatform(rt, "kick");
+          const orderedKinds = orderBuffsForRedeem(activeKinds, bonusState, CONFIG.live, serverNow, lastRedeemMap);
           const criticalPending = new Set(
             orderedKinds.filter((k) => getBonusRemainingMin(bonusState, k, serverNow) <= criticalMin)
           );
+          const candidateMeta = /* @__PURE__ */ new Map();
+          for (const k of orderedKinds) {
+            const rem = getBonusRemainingMin(bonusState, k, serverNow);
+            const minRew = pickRewardForChannel(rewards, k, "kick", { tier: "cheapest", balance: points });
+            candidateMeta.set(k, {
+              remainingMin: rem,
+              needsRedeem: rem <= thresholdMin,
+              available: Boolean(minRew && !minRew.is_paused),
+              minCost: minRew ? minRew.cost : Infinity,
+              minHours: minRew ? extractRewardHours(minRew) : 1,
+              lastRedeemAt: lastRedeemMap[k] || 0,
+              recentlyRedeemed: !canRedeemPlatform(rt, "kick", k, now, false)
+            });
+          }
           for (const kind of orderedKinds) {
-            if (!canRedeemPlatform("kick", kind, now, force)) continue;
-            const remainingMin = getBonusRemainingMin(bonusState, kind, serverNow);
-            const needsRedeem = force || remainingMin <= thresholdMin;
+            if (!canRedeemPlatform(rt, "kick", kind, now, false)) continue;
+            const meta = candidateMeta.get(kind);
+            const remainingMin = meta?.remainingMin ?? getBonusRemainingMin(bonusState, kind, serverNow);
+            const needsRedeem = remainingMin <= thresholdMin;
             if (!needsRedeem) continue;
             const deficitMin = Math.max(0, thresholdMin - remainingMin);
-            const preferQuickTurnOn = CONFIG.live?.smartBalance === true && criticalPending.has(kind) && criticalPending.size > 1;
+            const preferQuickTurnOn = smartOn && criticalPending.has(kind) && criticalPending.size > 1;
             const reward = pickRewardForChannel(rewards, kind, "kick", {
               tier,
               balance: points,
               deficitMin,
               preferQuickTurnOn
             });
-            if (!reward || reward.is_paused || points < reward.cost) continue;
+            if (!reward || reward.is_paused) continue;
+            if (points < reward.cost) {
+              if (!status.smartNote) {
+                const hrs = extractRewardHours(reward);
+                status.smartNote = `pr\xF3x. ${kind.toUpperCase()} (${reward.cost} pts \xB7 ${hrs}h)`;
+              }
+              continue;
+            }
+            const reserveCheck = shouldReservePointsForHigherPriority({
+              kind,
+              orderedKinds,
+              candidateMeta,
+              balance: points,
+              rewardCost: reward.cost,
+              smartBalance: smartOn
+            });
+            if (!reserveCheck.allow) {
+              if (!status.smartNote && reserveCheck.reason) status.smartNote = reserveCheck.reason;
+              continue;
+            }
             const redRes = await netFetch(ctx, `${KICK_API_URL}/api/v2/channels/${encodeURIComponent(slug)}/rewards/${reward.id}/redeem`, {
               method: "POST",
               headers: { ...headers, "Content-Type": "application/json" },
@@ -3467,15 +3655,18 @@
             if (redRes.ok) {
               points -= reward.cost;
               criticalPending.delete(kind);
+              if (meta) meta.recentlyRedeemed = true;
               status.balance = points;
               recordChannelBalance(state, "kick", slug, points);
+              recordOptimisticRedeem(rt, "kick", kind, reward, serverNow);
               status.lastRedeemAt = now;
               status.redeemedThisStep = true;
-              runtimeState.lastPlatformRedeemAt[`kick:${kind}`] = now;
+              status.smartNote = "";
+              rt.lastPlatformRedeemAt[`kick:${kind}`] = now;
               state.stats.liveRewardsRedeemed = (state.stats.liveRewardsRedeemed || 0) + 1;
               state.lastActionNote = `Kick resgatou ${reward.title} (${slug})`;
             } else {
-              runtimeState.redeemRetryAt.kick.set(slug, now + RETRY_WAIT_MS);
+              rt.redeemRetryAt.kick.set(slug, now + RETRY_WAIT_MS);
               status.error = `resgate erro ${redRes.status}`;
               break;
             }
@@ -3487,10 +3678,13 @@
   };
   var runBonusGuard = async (ctx, platform, { token, deviceId = "", watched = [], officials = [], customCsv = "" }) => {
     const { CONFIG, state } = ctx;
+    const rt = getRuntimeState(ctx);
     const now = Date.now();
     if (!CONFIG.live?.autoRedeem || !token) return false;
     const serverNow = now - (state.liveGameData?.skew || 0);
-    const bonusState = state.liveGameData?.[platform];
+    const bonusState = buildEffectiveBonusState(rt, state.liveGameData?.[platform], platform);
+    const smartOn = CONFIG.live?.smartBalance === true;
+    const lastRedeemMap = getLastRedeemMapForPlatform(rt, platform);
     const watchedSet = new Set(watched.map((w) => w.toLowerCase()));
     const defaults = platform === "twitch" ? DEFAULT_TWITCH_OFFICIALS : DEFAULT_KICK_OFFICIALS;
     const liveSet = /* @__PURE__ */ new Set();
@@ -3514,11 +3708,11 @@
     defaults.forEach((c) => addCandidate(c, false));
     const thresholdMin = resolveEffectiveThresholdMin(CONFIG.live);
     const eligibleKinds = LIVE_REWARD_KINDS.filter(
-      (kind) => canRedeemPlatform(platform, kind, now, false) && shouldRedeemBonus(bonusState, kind, thresholdMin, serverNow) && candidates.some((ch) => resolveChannelRewardKinds(CONFIG.live, platform, ch).includes(kind))
+      (kind) => canRedeemPlatform(rt, platform, kind, now, false) && shouldRedeemBonus(bonusState, kind, thresholdMin, serverNow) && candidates.some((ch) => resolveChannelRewardKinds(CONFIG.live, platform, ch).includes(kind))
     );
-    const kindsToCheck = orderBuffsForRedeem(eligibleKinds, bonusState, CONFIG.live, serverNow);
+    const kindsToCheck = orderBuffsForRedeem(eligibleKinds, bonusState, CONFIG.live, serverNow, lastRedeemMap);
     if (kindsToCheck.length === 0) return false;
-    const readsMap = runtimeState.guardReads[platform];
+    const readsMap = rt.guardReads[platform];
     const tier = CONFIG.live?.rewardTier || "cheapest";
     for (const ch of candidates) {
       if (!state.running) return false;
@@ -3536,13 +3730,15 @@
         if (data) {
           recordChannelBalance(state, "kick", ch, data.points);
           for (const k of chKinds) {
+            const cheapestRew = pickRewardForChannel(data.rewards, k, "kick", { tier: "cheapest", balance: data.points });
             const rew = pickRewardForChannel(data.rewards, k, "kick", { tier, balance: data.points });
             if (rew) {
               readsMap.set(guardKey(ch, k), {
                 at: Date.now(),
                 points: data.points,
                 cost: rew.cost,
-                paused: Boolean(rew.is_paused)
+                minCost: cheapestRew ? cheapestRew.cost : rew.cost,
+                paused: Boolean(rew.is_paused && (!cheapestRew || cheapestRew.is_paused))
               });
             }
           }
@@ -3551,10 +3747,36 @@
     }
     let redeemedAny = false;
     for (const kind of kindsToCheck) {
-      if (!state.running || !canRedeemPlatform(platform, kind, Date.now(), false)) continue;
-      const kindCandidates = candidates.filter(
-        (ch) => resolveChannelRewardKinds(CONFIG.live, platform, ch).includes(kind)
-      );
+      if (!state.running || !canRedeemPlatform(rt, platform, kind, Date.now(), false)) continue;
+      const kindCandidates = candidates.filter((ch) => {
+        const chKinds = resolveChannelRewardKinds(CONFIG.live, platform, ch);
+        if (!chKinds.includes(kind)) return false;
+        if (!smartOn) return true;
+        const entry = readsMap.get(guardKey(ch, kind));
+        if (!entry) return false;
+        const chOrdered = orderBuffsForRedeem(chKinds, bonusState, CONFIG.live, serverNow, getLastRedeemMapForPlatform(rt, platform));
+        const chMeta = /* @__PURE__ */ new Map();
+        for (const k of chOrdered) {
+          const r = readsMap.get(guardKey(ch, k));
+          const rem = getBonusRemainingMin(bonusState, k, serverNow);
+          chMeta.set(k, {
+            remainingMin: rem,
+            needsRedeem: rem <= thresholdMin,
+            available: Boolean(r && !r.paused),
+            minCost: r ? r.minCost ?? r.cost : Infinity,
+            lastRedeemAt: Number(rt.lastPlatformRedeemAt[`${platform}:${k}`] || 0),
+            recentlyRedeemed: !canRedeemPlatform(rt, platform, k, Date.now(), false)
+          });
+        }
+        return shouldReservePointsForHigherPriority({
+          kind,
+          orderedKinds: chOrdered,
+          candidateMeta: chMeta,
+          balance: entry.points,
+          rewardCost: entry.cost,
+          smartBalance: true
+        }).allow;
+      });
       const kindReads = /* @__PURE__ */ new Map();
       for (const ch of kindCandidates) {
         const entry = readsMap.get(guardKey(ch, kind));
@@ -3574,17 +3796,18 @@
   };
   var runLiveCycle = async (ctx, { force = false } = {}) => {
     const { CONFIG, state, updateHud } = ctx;
+    const rt = getRuntimeState(ctx);
     if (!state.running || !CONFIG.live?.enabled && !force) return;
-    if (runtimeState.cycleInFlight) return;
-    runtimeState.cycleInFlight = true;
+    if (rt.cycleInFlight) return;
+    rt.cycleInFlight = true;
     try {
       installGameWsTap(ctx);
       readDomBonusFallback(ctx);
       const { twitchToken, twitchDeviceId, kickToken } = await syncCookiesToConfig(ctx);
       const probeNow = Date.now();
-      const shouldProbeTw = !Array.isArray(state.liveGameData?.twitch?.oficiais) && probeNow - runtimeState.lastLiveProbeAt.twitch >= 12e4;
+      const shouldProbeTw = !Array.isArray(state.liveGameData?.twitch?.oficiais) && probeNow - rt.lastLiveProbeAt.twitch >= 12e4;
       if (shouldProbeTw) {
-        runtimeState.lastLiveProbeAt.twitch = probeNow;
+        rt.lastLiveProbeAt.twitch = probeNow;
         const customTw = String(CONFIG.live?.customTwitchChannels || "").split(/[\s,;]+/).filter(Boolean);
         const knownTw = (state.liveGameData?.twitch?.oficiais || []).map((o) => o?.login).filter(Boolean);
         const poolTw = [.../* @__PURE__ */ new Set([...customTw, ...knownTw, ...DEFAULT_TWITCH_OFFICIALS])];
@@ -3597,7 +3820,7 @@
           };
         }
       }
-      const shouldProbeKk = !Array.isArray(state.liveGameData?.kick?.oficiais) && probeNow - runtimeState.lastLiveProbeAt.kick >= 12e4;
+      const shouldProbeKk = !Array.isArray(state.liveGameData?.kick?.oficiais) && probeNow - rt.lastLiveProbeAt.kick >= 12e4;
       if (shouldProbeKk) {
         const customKk = String(CONFIG.live?.customKickChannels || "").split(/[\s,;]+/).filter(Boolean);
         const knownKk = (state.liveGameData?.kick?.oficiais || []).map((o) => o?.slug).filter(Boolean);
@@ -3615,7 +3838,7 @@
         }
         if (!state.liveGameData) state.liveGameData = { twitch: null, kick: null, skew: 0 };
         state.liveGameData.kick = { ...state.liveGameData.kick || {}, canaisConsultados: probed };
-        runtimeState.lastLiveProbeAt.kick = probeNow;
+        rt.lastLiveProbeAt.kick = probeNow;
       }
       const twMaxSlots = Math.max(1, Number(CONFIG.live?.maxTwitchSlots ?? CONFIG.live?.maxSlots) || 4);
       const kkMaxSlots = Math.max(1, Number(CONFIG.live?.maxKickSlots ?? CONFIG.live?.maxSlots) || 2);
@@ -3637,7 +3860,7 @@
       };
       const twChannels = selectChannelsToWatch(channelsFor("twitch"), liveCustomTw, twMaxSlots);
       const kkChannels = selectChannelsToWatch(channelsFor("kick"), liveCustomKk, kkMaxSlots);
-      if (twChannels.length === 0 && kkChannels.length === 0 && force && !runtimeState.modalSyncDone) {
+      if (twChannels.length === 0 && kkChannels.length === 0 && force && !rt.modalSyncDone) {
         await syncChannelsFromModal(ctx, { force: true });
       }
       const finalTw = selectChannelsToWatch(channelsFor("twitch"), liveCustomTw, twMaxSlots);
@@ -3678,13 +3901,13 @@
       }
       if (CONFIG.live?.watchKick || CONFIG.live?.autoRedeem) {
         const activeKk = new Set(finalKk.map((s) => s.toLowerCase()));
-        for (const [slug, conn] of runtimeState.kickSockets.entries()) {
+        for (const [slug, conn] of rt.kickSockets.entries()) {
           if (!activeKk.has(String(slug).toLowerCase())) {
             try {
               conn.ws?.close?.();
             } catch {
             }
-            runtimeState.kickSockets.delete(slug);
+            rt.kickSockets.delete(slug);
           }
         }
         for (const slug of finalKk) {
@@ -3706,34 +3929,25 @@
       }
       updateHud?.();
     } finally {
-      runtimeState.cycleInFlight = false;
+      rt.cycleInFlight = false;
     }
   };
-  var dispose2 = () => {
-    if (runtimeState.kickTimer) {
-      clearInterval(runtimeState.kickTimer);
-      runtimeState.kickTimer = null;
-    }
-    for (const [, conn] of runtimeState.kickSockets) {
-      try {
-        conn.ws?.close?.();
-      } catch {
+  var dispose2 = (ctx = null) => {
+    if (ctx && ctx.state && typeof ctx.state === "object") {
+      const rt = runtimeStateByObj.get(ctx.state);
+      if (rt) {
+        clearRuntimeState(rt);
+        runtimeStateByObj.delete(ctx.state);
+        activeRuntimeStates.delete(rt);
       }
+      return;
     }
-    runtimeState.kickSockets.clear();
-    runtimeState.spadeCache.clear();
-    runtimeState.twitchLastPingAt.clear();
-    runtimeState.twitchSeenSegments.clear();
-    runtimeState.kickPointsCheckAt.clear();
-    runtimeState.lastPlatformRedeemAt = {};
-    runtimeState.redeemRetryAt = { twitch: /* @__PURE__ */ new Map(), kick: /* @__PURE__ */ new Map() };
-    runtimeState.claimRetryAt.clear();
-    runtimeState.confirmedClaims.clear();
-    runtimeState.guardReads = { twitch: /* @__PURE__ */ new Map(), kick: /* @__PURE__ */ new Map() };
-    runtimeState.twitchIntegrityCache = { token: null, expiresAt: 0 };
-    runtimeState.lastLiveProbeAt = { twitch: 0, kick: 0 };
-    runtimeState.cycleInFlight = false;
-    runtimeState.modalSyncDone = false;
+    sharedSpadeCache.clear();
+    for (const rt of activeRuntimeStates) {
+      clearRuntimeState(rt);
+    }
+    activeRuntimeStates.clear();
+    activeRuntimeStates.add(defaultRuntimeState);
   };
   var liveRewards = {
     id: "liveRewards",

@@ -33,6 +33,8 @@ import {
     parseRewardKinds,
     resolveChannelRewardKinds,
     computeSmartBuffStatus,
+    getLiveLastRedeemMap,
+    getEffectiveBonusStateForCtx,
     mergeGameWsMessage,
     runLiveCycle,
     selectChannelsToWatch,
@@ -1801,7 +1803,7 @@ export function createLiveRewardsBridge({
         liveState.running = false;
         stopTimer();
         try {
-            liveDisposer?.();
+            liveDisposer?.(liveCtx);
         } catch {
             // ignorar cleanup duplicado
         }
@@ -1822,8 +1824,11 @@ export function createLiveRewardsBridge({
             channelRewards,
         };
         const serverNow = Date.now() - (liveState.liveGameData?.skew || 0);
+        const effTwBonus = getEffectiveBonusStateForCtx(liveCtx, 'twitch');
+        const effKkBonus = getEffectiveBonusStateForCtx(liveCtx, 'kick');
         const calcBonusMins = (platform) => {
-            const b = liveState.liveGameData?.[platform]?.bonus || {};
+            const eff = platform === 'twitch' ? effTwBonus : effKkBonus;
+            const b = eff?.bonus || {};
             const out = {};
             for (const kind of LIVE_REWARD_KINDS) {
                 const until = Number(b[kind]) || 0;
@@ -1855,6 +1860,7 @@ export function createLiveRewardsBridge({
                     channel: low,
                     live: Boolean(liveFlag || stObj?.live),
                     balance: bal,
+                    smartNote: stObj?.smartNote || '',
                     override: channelRewards[key] || '',
                     effectiveKinds: resolveChannelRewardKinds(liveCfgView, platform, low),
                 });
@@ -1903,8 +1909,8 @@ export function createLiveRewardsBridge({
             smartBalance: Boolean(cfg.liveSmartBalance ?? true),
             targetHours: Number(cfg.liveTargetHours ?? 24),
             smartStatus: {
-                twitch: computeSmartBuffStatus(twitchRewards, liveState.liveGameData?.twitch, smartCfgView, serverNow),
-                kick: computeSmartBuffStatus(kickRewards, liveState.liveGameData?.kick, smartCfgView, serverNow),
+                twitch: computeSmartBuffStatus(twitchRewards, effTwBonus, smartCfgView, serverNow, getLiveLastRedeemMap(liveCtx, 'twitch')),
+                kick: computeSmartBuffStatus(kickRewards, effKkBonus, smartCfgView, serverNow, getLiveLastRedeemMap(liveCtx, 'kick')),
             },
             channelRewards,
             activeBonuses: {
