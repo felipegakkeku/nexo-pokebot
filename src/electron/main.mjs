@@ -1,6 +1,7 @@
 // Processo principal Electron do Nexo PokeBot: 1 janela, 1 bandeja, 4 contas isoladas + navegador embutido por conta.
 import { app, BrowserWindow, ipcMain, Menu, nativeImage, Notification, powerSaveBlocker, session, shell, Tray } from 'electron';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -368,9 +369,17 @@ function statusShortLabel(snap) {
     return 'Offline';
 }
 
-function refreshTrayMenu() {
+function fmtTrayNum(n) {
+    const v = Number(n || 0);
+    const a = Math.abs(v);
+    if (a >= 1e6) return `${(v / 1e6).toFixed(1).replace('.', ',')} mi`;
+    if (a >= 1e3) return `${(v / 1e3).toFixed(a >= 1e4 ? 0 : 1).replace('.', ',')} mil`;
+    return String(Math.round(v));
+}
+
+function refreshTrayMenu(snapsArg = null) {
     if (!tray || tray.isDestroyed()) return;
-    const snaps = getAllSnapshots();
+    const snaps = snapsArg || getAllSnapshots();
     const sigParts = [];
     const tooltipParts = [];
     const accountItems = [];
@@ -382,17 +391,22 @@ function refreshTrayMenu() {
             : (s?.session?.nick || `Conta ${acc}`);
         const st = statusShortLabel(s);
         const hunt = s?.trainer?.huntName && s.trainer.huntName !== '-' ? ` · ${s.trainer.huntName}` : '';
-        sigParts.push(`${acc}:${nick}:${st}:${hunt}`);
-        if (s?.status === 'connected' || s?.status === 'bridge') {
+        const running = s?.status === 'connected' || s?.status === 'bridge';
+        const rates = running
+            ? `   ${fmtTrayNum(s?.stats?.xpPerHour)} XP/h · ${Number(s?.stats?.netGoldPerHour || 0) >= 0 ? '+' : ''}${fmtTrayNum(s?.stats?.netGoldPerHour)} ouro/h · ${Number(s?.stats?.shiniesCaptured || 0)} shiny`
+            : '';
+        sigParts.push(`${acc}:${nick}:${st}:${hunt}:${rates}`);
+        if (running) {
             tooltipParts.push(`${nick} (${st})`);
         }
         accountItems.push({
             label: `Conta ${acc} · ${nick} [${st}]${hunt}`,
             click: () => showMainWindow(acc),
         });
+        if (rates) accountItems.push({ label: rates, enabled: false });
     }
 
-    const updSig = `${updateState.status}:${updateState.latestVersion}:${updateState.hasUpdate}`;
+    const updSig = `${updateState.status}:${updateState.latestVersion}:${updateState.hasUpdate}:${miniHudWindow ? 1 : 0}`;
     const sig = `${sigParts.join('|')}||${updSig}`;
     if (sig === lastTraySignature) return;
     lastTraySignature = sig;
@@ -424,6 +438,12 @@ function refreshTrayMenu() {
         { type: 'separator' },
         ...accountItems,
         { type: 'separator' },
+        {
+            label: 'Mini-HUD sempre visível',
+            type: 'checkbox',
+            checked: Boolean(miniHudWindow),
+            click: () => toggleMiniHud(),
+        },
         {
             label: 'Modo Eco (fechar embutidos -> Headless)',
             click: () => {
@@ -1203,6 +1223,429 @@ function liveWatchTick() {
     }
 }
 
+// ===== Sons de alerta =====
+// O som escolhido (link do myinstants ou de um arquivo de audio) e baixado uma vez
+// para .pokebot-sounds e tocado pela janela do Hub, mesmo minimizada na bandeja.
+const SOUND_DIR = join(ROOT, '.pokebot-sounds');
+const SOUND_CFG_PATH = join(SOUND_DIR, 'sounds.json');
+const SOUND_EVENTS = ['shinyMiss', 'shinyCaught', 'rareDrop', 'error', 'chest', 'vote'];
+// canais padrão por evento: som, aviso no Hub (toast) e aviso do Windows
+const ALERT_DEFAULTS = {
+    shinyMiss: { enabled: true, toast: true, os: true },
+    shinyCaught: { enabled: true, toast: true, os: true },
+    rareDrop: { enabled: false, toast: true, os: false },
+    error: { enabled: false, toast: true, os: true },
+    chest: { enabled: false, toast: true, os: false },
+    vote: { enabled: false, toast: true, os: false },
+};
+const SOUND_MAX_BYTES = 5 * 1024 * 1024;
+const SOUND_TICK_MS = 2_000;
+const SOUND_EXT_BY_TYPE = { 'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/ogg': 'ogg', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/wave': 'wav', 'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a', 'audio/aac': 'aac', 'audio/webm': 'webm' };
+const SOUND_MIME_BY_EXT = { mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', m4a: 'audio/mp4', aac: 'audio/aac', webm: 'audio/webm' };
+const SOUND_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
+let soundTimer = null;
+let soundStartedAt = Date.now();
+let soundCfg = loadSoundCfg();
+
+function defaultSoundCfg() {
+    const events = {};
+    for (const ev of SOUND_EVENTS) events[ev] = { ...ALERT_DEFAULTS[ev], url: '', file: '', title: '' };
+    return { enabled: true, volume: 0.8, events };
+}
+
+function loadSoundCfg() {
+    const base = defaultSoundCfg();
+    try {
+        const raw = JSON.parse(readFileSync(SOUND_CFG_PATH, 'utf8'));
+        const out = { ...base, ...raw, events: { ...base.events } };
+        for (const ev of SOUND_EVENTS) out.events[ev] = { ...base.events[ev], ...(raw?.events?.[ev] || {}) };
+        out.volume = Math.min(1, Math.max(0, Number(out.volume ?? 0.8)));
+        out.enabled = out.enabled !== false;
+        return out;
+    } catch {
+        return base;
+    }
+}
+
+function saveSoundCfg() {
+    try {
+        mkdirSync(SOUND_DIR, { recursive: true });
+        writeFileSync(SOUND_CFG_PATH, JSON.stringify(soundCfg, null, 2), 'utf8');
+    } catch { /* ignore */ }
+}
+
+function publicSoundCfg() {
+    const events = {};
+    for (const ev of SOUND_EVENTS) {
+        const e = soundCfg.events[ev] || {};
+        events[ev] = {
+            enabled: e.enabled !== false,
+            toast: e.toast !== false,
+            os: e.os !== false,
+            url: e.url || '',
+            title: e.title || '',
+            custom: Boolean(e.file && existsSync(join(SOUND_DIR, e.file))),
+        };
+    }
+    return { enabled: soundCfg.enabled, volume: soundCfg.volume, events };
+}
+
+async function fetchWithTimeout(url, ms = 12_000) {
+    return fetch(url, { headers: { 'user-agent': SOUND_UA, accept: '*/*' }, redirect: 'follow', signal: AbortSignal.timeout(ms) });
+}
+
+async function readLimited(res) {
+    const len = Number(res.headers.get('content-length') || 0);
+    if (len > SOUND_MAX_BYTES) throw new Error('arquivo de som grande demais (máx. 5 MB)');
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.length > SOUND_MAX_BYTES) throw new Error('arquivo de som grande demais (máx. 5 MB)');
+    return buf;
+}
+
+function decodeHtmlEntities(str) {
+    return String(str || '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+}
+
+function audioExtFrom(type, url) {
+    const t = String(type || '').split(';')[0].trim().toLowerCase();
+    if (SOUND_EXT_BY_TYPE[t]) return SOUND_EXT_BY_TYPE[t];
+    const m = /\.(mp3|ogg|wav|m4a|aac|webm)(?:$|[?#])/i.exec(String(url || ''));
+    return m ? m[1].toLowerCase() : null;
+}
+
+function soundNameFromPath(u) {
+    let name = 'som';
+    try { name = decodeURIComponent(u.pathname.split('/').pop() || 'som'); } catch { /* ignore */ }
+    return name.replace(/\.[a-z0-9]+$/i, '');
+}
+
+// Aceita link direto de audio ou pagina que aponte o audio (og:audio, como no myinstants).
+async function resolveSoundLink(rawUrl) {
+    let parsed;
+    try { parsed = new URL(String(rawUrl || '').trim()); } catch { throw new Error('link inválido'); }
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') throw new Error('use um link http ou https');
+    const res = await fetchWithTimeout(parsed.toString());
+    if (!res.ok) throw new Error(`o site respondeu ${res.status}`);
+    const type = res.headers.get('content-type') || '';
+    const directExt = /^audio\//i.test(type) || /octet-stream/i.test(type) ? audioExtFrom(type, res.url || parsed.toString()) : null;
+    if (directExt) {
+        return { buf: await readLimited(res), ext: directExt, title: soundNameFromPath(parsed) };
+    }
+    if (!/html/i.test(type)) throw new Error('o link não é de um som nem de uma página com som');
+    const html = (await readLimited(res)).toString('utf8');
+    const meta = (prop) => {
+        const re = new RegExp(`<meta[^>]+property=["']${prop}["'][^>]*content=["']([^"']+)["']`, 'i');
+        const re2 = new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]*property=["']${prop}["']`, 'i');
+        return decodeHtmlEntities((re.exec(html) || re2.exec(html) || [])[1] || '');
+    };
+    let audioUrl = meta('og:audio') || meta('og:audio:url') || meta('og:audio:secure_url');
+    if (!audioUrl) {
+        // myinstants e parecidos: o botao principal chama play('/media/sounds/x.mp3', ...)
+        const m = /play\(\s*['"]([^'"]+\.(?:mp3|ogg|wav|m4a))['"]/i.exec(html)
+            || /["'(]((?:https?:)?\/[^"'()\s]+\.(?:mp3|ogg|wav|m4a))(?:\?[^"'()\s]*)?["')]/i.exec(html);
+        audioUrl = m ? decodeHtmlEntities(m[1]) : '';
+    }
+    if (!audioUrl) throw new Error('não achei o som nessa página');
+    const abs = new URL(audioUrl, res.url || parsed.toString());
+    if (abs.protocol !== 'https:' && abs.protocol !== 'http:') throw new Error('o som da página tem um link inválido');
+    const audioRes = await fetchWithTimeout(abs.toString());
+    if (!audioRes.ok) throw new Error(`o som respondeu ${audioRes.status}`);
+    const ext = audioExtFrom(audioRes.headers.get('content-type'), abs.toString());
+    if (!ext) throw new Error('o arquivo encontrado não é de áudio');
+    const title = meta('og:title').replace(/\s+-\s+(?:Botão sonoro|Instant Sound Button|Myinstants).*$/i, '').trim()
+        || soundNameFromPath(abs);
+    return { buf: await readLimited(audioRes), ext, title };
+}
+
+function removeSoundFile(file) {
+    if (!file) return;
+    try { rmSync(join(SOUND_DIR, file), { force: true }); } catch { /* ignore */ }
+}
+
+async function setSoundFromLink(event, url) {
+    if (!SOUND_EVENTS.includes(event)) return { ok: false, error: 'evento desconhecido' };
+    try {
+        const { buf, ext, title } = await resolveSoundLink(url);
+        mkdirSync(SOUND_DIR, { recursive: true });
+        const file = `${event}-${createHash('sha1').update(String(url)).digest('hex').slice(0, 10)}.${ext}`;
+        writeFileSync(join(SOUND_DIR, file), buf);
+        const prev = soundCfg.events[event] || {};
+        if (prev.file && prev.file !== file) removeSoundFile(prev.file);
+        soundCfg.events[event] = { ...prev, url: String(url).trim(), file, title: String(title || 'som').slice(0, 80) };
+        saveSoundCfg();
+        return { ok: true, cfg: publicSoundCfg() };
+    } catch (err) {
+        const msg = err?.name === 'TimeoutError' ? 'o site demorou demais para responder' : (err?.message || String(err));
+        return { ok: false, error: msg };
+    }
+}
+
+function soundDataUrl(event) {
+    const file = soundCfg.events[event]?.file;
+    if (!file) return null;
+    try {
+        const ext = file.split('.').pop().toLowerCase();
+        return `data:${SOUND_MIME_BY_EXT[ext] || 'audio/mpeg'};base64,${readFileSync(join(SOUND_DIR, file)).toString('base64')}`;
+    } catch {
+        return null;
+    }
+}
+
+function emitSound(event, info = {}) {
+    if (!soundCfg.enabled || soundCfg.events[event]?.enabled === false) return;
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    mainWindow.webContents.send('hub:play-sound', { event, ...info });
+}
+
+const alertBase = new Map(); // conta -> linha de base dos eventos ja vistos
+let trayStateKey = '';
+const trayIconCache = new Map();
+
+function accountNickOf(snap, acc) {
+    if (snap?.trainer?.nick && snap.trainer.nick !== '-') return snap.trainer.nick;
+    return snap?.session?.nick || `Conta ${acc}`;
+}
+
+function notifyWindows(event, acc, title, body) {
+    if (soundCfg.events[event]?.os === false) return;
+    // com o Hub em foco o aviso ja aparece dentro dele
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && mainWindow.isFocused()) return;
+    try {
+        if (!Notification.isSupported()) return;
+        const icon = getAppIcon();
+        const n = new Notification({ title, body, silent: soundCfg.enabled && soundCfg.events[event]?.enabled !== false, ...(icon ? { icon } : {}) });
+        n.on('click', () => showMainWindow(acc));
+        n.show();
+    } catch { /* aviso opcional */ }
+}
+
+function fireAlert(event, acc, title, body, info = {}) {
+    emitSound(event, { account: acc, ...info });
+    notifyWindows(event, acc, title, body);
+}
+
+function alertTick() {
+    const snaps = getAllSnapshots();
+    for (const acc of ACCOUNT_IDS) {
+        const snap = snaps[acc];
+        if (!snap) continue;
+        const nick = accountNickOf(snap, acc);
+        const missed = Array.isArray(snap.missedShinies) ? snap.missedShinies : [];
+        const own = Array.isArray(snap.ownShinies) ? snap.ownShinies : [];
+        const logs = Array.isArray(snap.logs) ? snap.logs : [];
+        const topDrop = snap.drops?.recent?.[0] || null;
+        const dropSig = topDrop ? `${topDrop.time}|${topDrop.name}|${topDrop.qty}` : '';
+        const chests = new Set(Object.entries(snap.lives?.twitch || {}).filter(([, st]) => st?.manualChest).map(([ch]) => ch));
+        const voteReady = Boolean(snap.vote?.available);
+        const lastLogId = logs.length ? Number(logs[logs.length - 1].id || 0) : 0;
+        const base = alertBase.get(acc);
+        if (!base) {
+            // primeira leitura: so marca a linha de base, sem tocar nada antigo
+            alertBase.set(acc, {
+                missTs: Math.max(soundStartedAt, ...missed.map((e) => Number(e?.ts) || 0)),
+                ownTs: Math.max(0, ...own.map((e) => Number(e?.ts) || 0)),
+                dropSig, chests, voteReady, lastLogId,
+            });
+            continue;
+        }
+        const freshMiss = missed.filter((e) => Number(e?.ts) > base.missTs);
+        if (freshMiss.length) {
+            base.missTs = Math.max(...freshMiss.map((e) => Number(e.ts)));
+            const m = freshMiss[0];
+            fireAlert('shinyMiss', acc, `Shiny escapou · Conta ${acc}`, `${nick} viu ${m.name || 'um shiny'}${m.level ? ` (Nv ${m.level})` : ''} e não capturou.`, { name: m.name || '', count: freshMiss.length });
+        }
+        const freshOwn = own.filter((e) => Number(e?.ts) > base.ownTs);
+        if (freshOwn.length) {
+            base.ownTs = Math.max(...freshOwn.map((e) => Number(e.ts)));
+            const o = freshOwn[0];
+            fireAlert('shinyCaught', acc, `Shiny capturado · Conta ${acc}`, `${nick} capturou ${o.name || 'um shiny'}${o.level ? ` (Nv ${o.level})` : ''}.`, { name: o.name || '' });
+        }
+        if (topDrop?.rare && dropSig !== base.dropSig) {
+            fireAlert('rareDrop', acc, `Drop raro · Conta ${acc}`, `${nick}: ${topDrop.name} x${topDrop.qty || 1}`, { name: topDrop.name || '' });
+        }
+        base.dropSig = dropSig;
+        const freshErr = logs.filter((l) => Number(l.id || 0) > base.lastLogId && l.kind === 'error');
+        if (freshErr.length) {
+            fireAlert('error', acc, `Erro · Conta ${acc}`, `${nick}: ${String(freshErr[freshErr.length - 1].text || '').slice(0, 180)}`);
+        }
+        base.lastLogId = lastLogId;
+        for (const ch of chests) {
+            if (!base.chests.has(ch)) fireAlert('chest', acc, `Caixinha +50 · Conta ${acc}`, `Disponível em ${ch}.`, { name: ch });
+        }
+        base.chests = chests;
+        if (voteReady && !base.voteReady) fireAlert('vote', acc, `Voto liberado · Conta ${acc}`, 'Voto diário liberado no IdleHub.io.');
+        base.voteReady = voteReady;
+    }
+    updateTrayState(snaps);
+}
+
+// Estado geral para o ícone da bandeja: erro > atenção > farmando > parado
+function overallTrayState(snaps) {
+    let state = 'idle';
+    const now = Date.now();
+    for (const acc of ACCOUNT_IDS) {
+        const s = snaps[acc];
+        if (!s) continue;
+        if (s.status === 'error') return 'error';
+        const recentMiss = (s.missedShinies || []).some((e) => now - Number(e?.ts || 0) < 10 * 60_000);
+        if (s.status === 'paused' || recentMiss || (s.modeWarnings || []).some((w) => w.severity === 'danger')) state = 'warn';
+        else if (state === 'idle' && (s.status === 'connected' || s.status === 'bridge')) state = 'ok';
+    }
+    return state;
+}
+
+const TRAY_DOT = { ok: [16, 185, 129], warn: [245, 158, 11], error: [239, 68, 68], idle: [100, 116, 139] };
+
+function trayIconFor(state) {
+    if (trayIconCache.has(state)) return trayIconCache.get(state);
+    const baseIcon = getAppIcon();
+    if (!baseIcon) return null;
+    const size = 32;
+    const img = baseIcon.resize({ width: size, height: size, quality: 'best' });
+    const buf = Buffer.from(img.toBitmap());
+    const [r, g, b] = TRAY_DOT[state] || TRAY_DOT.idle;
+    const cx = size - 8;
+    const cy = size - 8;
+    for (let y = 0; y < size; y++) {
+        for (let x = 0; x < size; x++) {
+            const d = Math.hypot(x + 0.5 - cx, y + 0.5 - cy);
+            if (d > 8) continue;
+            const i = (y * size + x) * 4; // BGRA
+            if (d > 6.2) {
+                buf[i] = 12; buf[i + 1] = 13; buf[i + 2] = 17; buf[i + 3] = 255;
+            } else {
+                buf[i] = b; buf[i + 1] = g; buf[i + 2] = r; buf[i + 3] = 255;
+            }
+        }
+    }
+    const out = nativeImage.createFromBitmap(buf, { width: size, height: size });
+    trayIconCache.set(state, out);
+    return out;
+}
+
+function updateTrayState(snaps) {
+    if (!tray || tray.isDestroyed()) return;
+    const state = overallTrayState(snaps);
+    if (state !== trayStateKey) {
+        trayStateKey = state;
+        const img = trayIconFor(state);
+        if (img && !img.isEmpty()) {
+            try { tray.setImage(img); } catch { /* ignore */ }
+        }
+    }
+    refreshTrayMenu(snaps);
+}
+
+function startSoundWatcher() {
+    if (soundTimer) return;
+    soundStartedAt = Date.now();
+    soundTimer = setInterval(() => {
+        try { alertTick(); } catch { /* ignore */ }
+    }, SOUND_TICK_MS);
+    soundTimer.unref?.();
+}
+
+function stopSoundWatcher() {
+    if (soundTimer) clearInterval(soundTimer);
+    soundTimer = null;
+}
+
+
+// ===== Janelas soltas (pop-out de painel) e mini-HUD =====
+const popoutWindows = new Map(); // painel -> janela
+let miniHudWindow = null;
+const POPOUT_PANELS = new Set(['overview', 'automation', 'connections', 'lives', 'activity']);
+
+function hubWindowPrefs() {
+    return {
+        preload: join(HERE, 'preload.cjs'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        backgroundThrottling: true,
+    };
+}
+
+function openPopout(panel, account) {
+    const key = POPOUT_PANELS.has(panel) ? panel : 'activity';
+    const acc = ACCOUNT_IDS.includes(Number(account)) ? Number(account) : 1;
+    const existing = popoutWindows.get(key);
+    if (existing && !existing.isDestroyed()) {
+        existing.webContents.send('hub:focus-account', acc);
+        existing.show();
+        existing.focus();
+        return { ok: true };
+    }
+    const icon = getAppIcon();
+    const win = new BrowserWindow({
+        width: key === 'overview' ? 560 : 520,
+        height: 760,
+        minWidth: 380,
+        minHeight: 360,
+        autoHideMenuBar: true,
+        backgroundColor: '#080d17',
+        title: 'Nexo PokeBot',
+        ...(icon ? { icon } : {}),
+        webPreferences: hubWindowPrefs(),
+    });
+    popoutWindows.set(key, win);
+    win.on('closed', () => {
+        if (popoutWindows.get(key) === win) popoutWindows.delete(key);
+    });
+    void win.loadFile(join(HERE, 'renderer.html'), { query: { popout: key, acc: String(acc) } });
+    return { ok: true };
+}
+
+function toggleMiniHud(force = null) {
+    const want = force == null ? !miniHudWindow : Boolean(force);
+    if (!want) {
+        if (miniHudWindow && !miniHudWindow.isDestroyed()) miniHudWindow.close();
+        miniHudWindow = null;
+        lastTraySignature = '';
+        refreshTrayMenu();
+        return false;
+    }
+    if (miniHudWindow && !miniHudWindow.isDestroyed()) {
+        miniHudWindow.show();
+        return true;
+    }
+    const win = new BrowserWindow({
+        width: 340,
+        height: 176,
+        minWidth: 260,
+        minHeight: 90,
+        frame: false,
+        resizable: true,
+        alwaysOnTop: true,
+        skipTaskbar: true,
+        transparent: false,
+        backgroundColor: '#080d17',
+        title: 'Nexo PokeBot Mini-HUD',
+        webPreferences: hubWindowPrefs(),
+    });
+    win.setAlwaysOnTop(true, 'floating');
+    miniHudWindow = win;
+    win.on('closed', () => {
+        if (miniHudWindow === win) miniHudWindow = null;
+        lastTraySignature = '';
+        refreshTrayMenu();
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('hub:minihud-state', false);
+    });
+    void win.loadFile(join(HERE, 'minihud.html'));
+    lastTraySignature = '';
+    refreshTrayMenu();
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('hub:minihud-state', true);
+    return true;
+}
+
+function closeExtraWindows() {
+    for (const win of popoutWindows.values()) {
+        try { if (!win.isDestroyed()) win.destroy(); } catch { /* ignore */ }
+    }
+    popoutWindows.clear();
+    try { if (miniHudWindow && !miniHudWindow.isDestroyed()) miniHudWindow.destroy(); } catch { /* ignore */ }
+    miniHudWindow = null;
+}
+
 function startLiveWatchManager() {
     if (liveWatchTimer) return;
     liveWatchTimer = setInterval(() => {
@@ -1440,6 +1883,39 @@ function registerIpcHandlers() {
         return minToTray;
     });
 
+    ipcMain.handle('hub:popout', (_ev, { panel, account } = {}) => openPopout(String(panel || ''), account));
+    ipcMain.handle('hub:minihud-toggle', (_ev, force) => toggleMiniHud(typeof force === 'boolean' ? force : null));
+    ipcMain.handle('hub:minihud-state', () => Boolean(miniHudWindow));
+    ipcMain.handle('hub:minihud-close', () => toggleMiniHud(false));
+    ipcMain.handle('hub:show-main', (_ev, account) => {
+        showMainWindow(ACCOUNT_IDS.includes(Number(account)) ? Number(account) : null);
+        return true;
+    });
+    ipcMain.handle('hub:sound-get', () => publicSoundCfg());
+    ipcMain.handle('hub:sound-set', (_ev, patch = {}) => {
+        if (typeof patch.enabled === 'boolean') soundCfg.enabled = patch.enabled;
+        if (patch.volume != null && Number.isFinite(Number(patch.volume))) soundCfg.volume = Math.min(1, Math.max(0, Number(patch.volume)));
+        if (patch.event && SOUND_EVENTS.includes(patch.event) && typeof patch.eventEnabled === 'boolean') {
+            soundCfg.events[patch.event] = { ...(soundCfg.events[patch.event] || {}), enabled: patch.eventEnabled };
+        }
+        if (patch.event && SOUND_EVENTS.includes(patch.event) && ['toast', 'os'].includes(patch.channel) && typeof patch.value === 'boolean') {
+            soundCfg.events[patch.event] = { ...(soundCfg.events[patch.event] || {}), [patch.channel]: patch.value };
+        }
+        saveSoundCfg();
+        return publicSoundCfg();
+    });
+    ipcMain.handle('hub:sound-link', (_ev, { event, url } = {}) => setSoundFromLink(String(event || ''), String(url || '')));
+    ipcMain.handle('hub:sound-reset', (_ev, { event } = {}) => {
+        if (SOUND_EVENTS.includes(event)) {
+            removeSoundFile(soundCfg.events[event]?.file);
+            const prev = soundCfg.events[event] || {};
+            soundCfg.events[event] = { ...defaultSoundCfg().events[event], enabled: prev.enabled !== false, toast: prev.toast !== false, os: prev.os !== false };
+            saveSoundCfg();
+        }
+        return publicSoundCfg();
+    });
+    ipcMain.handle('hub:sound-data', (_ev, { event } = {}) => soundDataUrl(String(event || '')));
+
     ipcMain.handle('hub:update-get-state', () => updateState);
     ipcMain.handle('hub:update-check', () => runUpdateCheck());
     ipcMain.handle('hub:update-install', () => runUpdateInstall());
@@ -1481,6 +1957,8 @@ async function createMainWindow() {
             contextIsolation: true,
             nodeIntegration: false,
             backgroundThrottling: true,
+            // o alerta sonoro precisa tocar com o Hub minimizado, sem clique antes
+            autoplayPolicy: 'no-user-gesture-required',
         },
     });
 
@@ -1497,6 +1975,7 @@ async function createMainWindow() {
 
     mainWindow.on('close', () => {
         isQuitting = true;
+        closeExtraWindows();
     });
 
     await mainWindow.loadFile(join(HERE, 'renderer.html'));
@@ -1520,6 +1999,8 @@ app.on('before-quit', (ev) => {
         awakeId = null;
     }
     stopLiveWatchJobs();
+    stopSoundWatcher();
+    closeExtraWindows();
     const closing = [...servers.values()].map((entry) => entry.instance.close().catch(() => {}));
     servers.clear();
     for (const popup of actionPopups.values()) {
@@ -1546,6 +2027,7 @@ app.whenReady().then(async () => {
     setupTray();
     startAutoChestWatcher();
     startLiveWatchManager();
+    startSoundWatcher();
     updateBootTimer = setTimeout(() => {
         updateBootTimer = null;
         void runUpdateCheck();

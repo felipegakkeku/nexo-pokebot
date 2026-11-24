@@ -2304,6 +2304,7 @@ export function createHeadlessController(options = {}) {
         captures: 0,
         shiniesSeen: 0,
         shiniesCaptured: 0,
+        shiniesMissed: 0,
         dropsTotal: 0,
         rareDropsCount: 0,
         killDeltaSumMs: 0,
@@ -2315,6 +2316,13 @@ export function createHeadlessController(options = {}) {
     const dropCounts = new Map();
     const recentDrops = [];
     const seenShinySlots = new Set();
+    // Shiny visto e nao capturado: cada shiny vivo no campo fica pendente por slot.
+    // Quando some do campo (fugiu, corpo expirou, bola falhou, troca de hunt) e nenhuma
+    // captura shiny correspondente chega dentro da carencia, vira um evento de "shiny perdido".
+    const SHINY_MISS_GRACE_MS = 12_000;
+    const pendingShinies = new Map();
+    const missedShinies = [];
+    let nextMissedShinyId = 1;
 
     const recordSessionDrop = (rawDrop, { forceRare = false } = {}) => {
         if (!rawDrop || typeof rawDrop !== 'object') return;
@@ -2386,6 +2394,63 @@ export function createHeadlessController(options = {}) {
     const recentShinies = [];
     const ownShinies = []; // ficha dos shinies capturados por esta conta (para o cartao na HUD)
     let lastBallThrown = null;
+
+    const recordMissedShiny = (pending, ts) => {
+        const curSlug = merger.getState()?.huntSlug || '';
+        const name = pending.name || 'Shiny';
+        stats.shiniesMissed = Number(stats.shiniesMissed || 0) + 1;
+        missedShinies.unshift({
+            id: nextMissedShinyId++,
+            ts,
+            seenAt: pending.seenAt,
+            name,
+            level: pending.level ?? null,
+            hunt: curSlug ? (catalog.huntNames?.[curSlug] || curSlug) : '',
+        });
+        if (missedShinies.length > 10) missedShinies.pop();
+        pushLog('shiny-miss', `Shiny visto e não capturado: ${name}${pending.level ? ` (Nv ${pending.level})` : ''}`);
+    };
+
+    const resolveShinyCapture = (name) => {
+        let best = null;
+        for (const [slot, p] of pendingShinies) {
+            const sameName = name && p.name && p.name === name;
+            const score = (sameName ? 2 : 0) + (p.goneAt ? 1 : 0);
+            if (!best || score > best.score || (score === best.score && p.seenAt < best.p.seenAt)) {
+                best = { slot, p, score };
+            }
+        }
+        if (best) pendingShinies.delete(best.slot);
+    };
+
+    const scanShinyField = (ts) => {
+        const live = new Map();
+        for (const mob of field.getMobs?.() ?? []) {
+            if (!mob || mob.slot == null || !mob.shiny || mob.ehTreinador) continue;
+            if (mob.morto && !(Number(mob.expiraEm || 0) > ts)) continue;
+            live.set(mob.slot, mob);
+        }
+        for (const [slot, mob] of live) {
+            const p = pendingShinies.get(slot);
+            if (!p || (p.name && mob.nome && p.name !== mob.nome)) {
+                if (p) recordMissedShiny(p, ts);
+                pendingShinies.set(slot, { seenAt: ts, name: mob.nome || '', level: mob.level ?? null, goneAt: 0 });
+            } else {
+                p.goneAt = 0;
+                if (!p.name && mob.nome) p.name = mob.nome;
+                if (p.level == null && mob.level != null) p.level = mob.level;
+            }
+        }
+        for (const [slot, p] of [...pendingShinies]) {
+            if (live.has(slot)) continue;
+            if (!p.goneAt) p.goneAt = ts;
+            // bola jogada no shiny reinicia a carencia: a proxima tentativa ainda pode capturar
+            if (ts - Math.max(p.goneAt, p.touchAt || 0) >= SHINY_MISS_GRACE_MS) {
+                pendingShinies.delete(slot);
+                recordMissedShiny(p, ts);
+            }
+        }
+    };
     const pushLog = (kind, text) => {
         const ts = nowFn();
         logs.push({
@@ -2720,6 +2785,12 @@ export function createHeadlessController(options = {}) {
                 lastBallThrown = bId;
                 stats.spentGold += Number(catalog.ballPrices?.[bId] ?? DEFAULT_BALL_PRICES[bId] ?? 0);
                 if (e.shiny) {
+                    if (e.slot != null) {
+                        const p = pendingShinies.get(e.slot)
+                            || { seenAt: ts, name: e.nome || '', level: e.level ?? e.nivel ?? null, goneAt: 0 };
+                        p.touchAt = ts;
+                        pendingShinies.set(e.slot, p);
+                    }
                     const slotKey = e.slot != null ? `slot:${e.slot}` : null;
                     if (!slotKey || !seenShinySlots.has(slotKey)) {
                         if (slotKey) seenShinySlots.add(slotKey);
@@ -2730,6 +2801,7 @@ export function createHeadlessController(options = {}) {
                 stats.captures += 1;
                 const isShiny = Boolean(e.pokemon?.shiny);
                 if (isShiny) {
+                    resolveShinyCapture(e.pokemon?.nome || e.pokemon?.name || '');
                     stats.shiniesCaptured += 1;
                     if (stats.shiniesSeen < stats.shiniesCaptured) {
                         stats.shiniesSeen = stats.shiniesCaptured;
@@ -2757,6 +2829,7 @@ export function createHeadlessController(options = {}) {
                 void refreshVoteStatus({ force: true });
             }
         }
+        scanShinyField(ts);
         if (addedCorpse && config.caidosEnabled !== false) {
             runTickForState(merger.getState());
         }
@@ -2963,6 +3036,7 @@ export function createHeadlessController(options = {}) {
                     if (!activeSlots.has(oldKey)) seenShinySlots.delete(oldKey);
                 }
             }
+            scanShinyField(nowFn());
             if (pendingHuntSlug) schedulePendingHuntFlush();
             runTickForState(merger.getState());
             return;
@@ -4048,6 +4122,7 @@ export function createHeadlessController(options = {}) {
             dropCounts.clear();
             recentDrops.length = 0;
             seenShinySlots.clear();
+            pendingShinies.clear();
             pushLog('info', 'Estatísticas e drops da sessão zerados.');
             return true;
         }
@@ -4286,6 +4361,7 @@ export function createHeadlessController(options = {}) {
             logs: [...logs],
             recentShinies: [...recentShinies],
             ownShinies: [...ownShinies],
+            missedShinies: [...missedShinies],
         };
     };
 
@@ -4397,6 +4473,7 @@ export function createHeadlessController(options = {}) {
         getLiveCredentials,
         noteLiveChestClaimed: (channel, source) => liveBridge.noteChestClaimed(channel, source),
         noteLiveWatchSession: (channel, info) => liveBridge.noteWatchSession(channel, info),
+        getMissedShinies: () => [...missedShinies],
         syncWebviewSession,
         openGame,
         openLives,

@@ -28,8 +28,30 @@ export default [
         },
     },
     {
-        files: ['src/electron/renderer.js'],
+        files: ['src/electron/renderer.js', 'src/electron/icons.js', 'src/electron/minihud.js'],
         languageOptions: { ecmaVersion: 2022, sourceType: 'script', globals: { ...globals.browser } },
+        rules: {
+            'no-undef': 'error',
+            'no-unused-vars': ['error', { args: 'none', caughtErrors: 'none' }],
+        },
+    },
+    {
+        // hub-ui.js roda depois do renderer.js e usa os globais dele
+        files: ['src/electron/hub-ui.js'],
+        languageOptions: {
+            ecmaVersion: 2022,
+            sourceType: 'script',
+            globals: {
+                ...globals.browser,
+                ...Object.fromEntries([
+                    'snapshots', 'activeAccount', 'viewMode', 'gridState', 'webviews', 'ACCOUNTS', 'STATUS_LABELS',
+                    'dirtyByAcc', 'currentUpdateState', 'BUFF_KINDS', '$', 'fmtNum', 'escapeHtml', 'pokemonSpriteUrl',
+                    'selectAccount', 'setViewMode', 'setSubtab', 'sendAction', 'claimTwitchChest', 'isAccountMuted',
+                    'setAccountMuted', 'renderActiveAccountPanel', 'renderAll', 'saveConfig', 'readConfigForm',
+                    'applyConfigTo', 'applyGridLayout', 'renderGridToolbar', 'requestLivesRefresh',
+                ].map((name) => [name, 'readonly'])),
+            },
+        },
         rules: {
             'no-undef': 'error',
             'no-unused-vars': ['error', { args: 'none', caughtErrors: 'none' }],

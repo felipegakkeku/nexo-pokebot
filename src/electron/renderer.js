@@ -68,6 +68,12 @@ const LIVE_CHANNEL_REWARD_OPTIONS = [
 ];
 
 const $ = (id) => document.getElementById(id);
+// hub-ui.js preenche window.hubUi; aqui só chamamos se existir
+const hubHook = (name, ...args) => {
+    const fn = window.hubUi?.[name];
+    if (typeof fn !== 'function') return undefined;
+    try { return fn(...args); } catch (err) { console.error(`hubUi.${name}`, err); return undefined; }
+};
 
 function fmtNum(n) {
     return Number(n || 0).toLocaleString('pt-BR');
@@ -524,7 +530,11 @@ function renderGridToolbar() {
         const mb = document.querySelector(`[data-slot-act="max"][data-slot="${acc}"]`);
         if (!mb) continue;
         const on = gridState.max === acc;
-        mb.textContent = on ? '⤡' : '⤢';
+        const want = on ? 'columns' : 'maximize';
+        if (mb.dataset.ico !== want) {
+            mb.dataset.ico = want;
+            mb.innerHTML = window.nexoIcons ? window.nexoIcons.icon(on ? 'grid' : 'maximize') : (on ? '⤡' : '⤢');
+        }
         mb.title = on ? 'Voltar para a grade' : 'Maximizar esta tela';
         mb.classList.toggle('active-toggle', on);
     }
@@ -692,6 +702,193 @@ async function handlePanelCardAction(acc, act) {
     }
 }
 
+// ===== Sons de alerta =====
+// A configuracao fica no main (.pokebot-sounds), que tambem avisa quando tocar.
+let soundCfg = null;
+const soundDataCache = new Map(); // evento -> data URL do som escolhido
+let soundCtx = null;
+
+function setSoundStatus(event, text, kind = '') {
+    const el = document.querySelector(`[data-snd-status="${event}"]`);
+    if (!el) return;
+    el.textContent = text || '';
+    el.className = `sound-status hint-text${kind ? ` ${kind}` : ''}`;
+}
+
+function renderSoundCard() {
+    const cfg = soundCfg;
+    if (!cfg) return;
+    const card = document.getElementById('soundCard');
+    const en = document.getElementById('sndEnabled');
+    const vol = document.getElementById('sndVolume');
+    const volVal = document.getElementById('sndVolumeVal');
+    if (en) en.checked = cfg.enabled !== false;
+    if (vol && document.activeElement !== vol) vol.value = String(Math.round((cfg.volume ?? 0.8) * 100));
+    if (volVal) volVal.textContent = `${Math.round((cfg.volume ?? 0.8) * 100)}%`;
+    card?.classList.toggle('is-off', cfg.enabled === false);
+    for (const [event, ev] of Object.entries(cfg.events || {})) {
+        const tg = document.querySelector(`[data-snd-toggle="${event}"]`);
+        if (tg) tg.checked = ev.enabled !== false;
+        for (const ch of ['toast', 'os']) {
+            const box = document.querySelector(`[data-alert-ch="${ch}"][data-alert-ev="${event}"]`);
+            if (box) box.checked = ev[ch] !== false;
+        }
+        const cur = document.querySelector(`[data-snd-current="${event}"]`);
+        if (cur) {
+            cur.textContent = ev.custom ? (ev.title || 'Som escolhido') : 'Som padrão';
+            cur.title = ev.custom ? ev.url : 'Bipe do Nexo';
+            cur.classList.toggle('custom', Boolean(ev.custom));
+        }
+        const input = document.querySelector(`[data-snd-url="${event}"]`);
+        if (input && document.activeElement !== input && !input.dataset.touched) input.value = ev.url || '';
+    }
+}
+
+// Bipe padrao quando nao ha som escolhido: tres notas descendo ("perdeu").
+const DEFAULT_BEEPS = {
+    shinyMiss: [880, 660, 440],
+    shinyCaught: [523, 659, 784, 1047],
+    rareDrop: [784, 988, 1175],
+    error: [330, 262],
+    chest: [659, 880],
+    vote: [587, 784],
+};
+function playDefaultBeep(volume, event = 'shinyMiss') {
+    try {
+        soundCtx = soundCtx || new AudioContext();
+        const ctx = soundCtx;
+        if (ctx.state === 'suspended') void ctx.resume();
+        const notes = DEFAULT_BEEPS[event] || DEFAULT_BEEPS.shinyMiss;
+        notes.forEach((freq, i) => {
+            const t0 = ctx.currentTime + i * 0.17;
+            const osc = ctx.createOscillator();
+            const gain = ctx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(freq, t0);
+            gain.gain.setValueAtTime(0.0001, t0);
+            gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, 0.35 * volume), t0 + 0.02);
+            gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+            osc.connect(gain).connect(ctx.destination);
+            osc.start(t0);
+            osc.stop(t0 + 0.18);
+        });
+    } catch {
+        // sem WebAudio
+    }
+}
+
+async function playSoundEvent(event, { force = false } = {}) {
+    const cfg = soundCfg || (soundCfg = await window.pokeHub.getSoundConfig?.().catch(() => null));
+    if (!cfg) return false;
+    const ev = cfg.events?.[event];
+    if (!force && (cfg.enabled === false || ev?.enabled === false)) return false;
+    const volume = Math.min(1, Math.max(0, Number(cfg.volume ?? 0.8)));
+    if (ev?.custom) {
+        let src = soundDataCache.get(event);
+        if (!src) {
+            src = await window.pokeHub.getSoundData?.(event).catch(() => null);
+            if (src) soundDataCache.set(event, src);
+        }
+        if (src) {
+            try {
+                const audio = new Audio(src);
+                audio.volume = volume;
+                await audio.play();
+                return true;
+            } catch {
+                // cai no bipe padrao
+            }
+        }
+    }
+    playDefaultBeep(volume, event);
+    return true;
+}
+
+async function initSoundControls() {
+    if (!window.pokeHub.getSoundConfig) return;
+    soundCfg = await window.pokeHub.getSoundConfig().catch(() => null);
+    renderSoundCard();
+
+    document.getElementById('sndEnabled')?.addEventListener('change', async (e) => {
+        soundCfg = await window.pokeHub.setSoundConfig({ enabled: e.target.checked });
+        renderSoundCard();
+    });
+    const vol = document.getElementById('sndVolume');
+    let volTimer = null;
+    vol?.addEventListener('input', () => {
+        const v = Number(vol.value) / 100;
+        document.getElementById('sndVolumeVal').textContent = `${Math.round(v * 100)}%`;
+        if (soundCfg) soundCfg.volume = v;
+        clearTimeout(volTimer);
+        volTimer = setTimeout(async () => {
+            soundCfg = await window.pokeHub.setSoundConfig({ volume: v });
+        }, 300);
+    });
+    document.querySelectorAll('[data-snd-toggle]').forEach((tg) => {
+        tg.addEventListener('change', async () => {
+            soundCfg = await window.pokeHub.setSoundConfig({ event: tg.dataset.sndToggle, eventEnabled: tg.checked });
+            renderSoundCard();
+        });
+    });
+    document.querySelectorAll('[data-alert-ch]').forEach((tg) => {
+        tg.addEventListener('change', async () => {
+            soundCfg = await window.pokeHub.setSoundConfig({ event: tg.dataset.alertEv, channel: tg.dataset.alertCh, value: tg.checked });
+            renderSoundCard();
+        });
+    });
+    document.querySelectorAll('[data-snd-url]').forEach((input) => {
+        input.addEventListener('input', () => { input.dataset.touched = '1'; });
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') document.querySelector(`[data-snd-act="save"][data-snd-event="${input.dataset.sndUrl}"]`)?.click();
+        });
+    });
+    document.querySelectorAll('[data-snd-act]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+            const event = btn.dataset.sndEvent;
+            const act = btn.dataset.sndAct;
+            if (act === 'test') {
+                await playSoundEvent(event, { force: true });
+                return;
+            }
+            if (act === 'reset') {
+                soundCfg = await window.pokeHub.resetSound(event);
+                soundDataCache.delete(event);
+                const input = document.querySelector(`[data-snd-url="${event}"]`);
+                if (input) { input.value = ''; delete input.dataset.touched; }
+                renderSoundCard();
+                setSoundStatus(event, 'Voltou para o som padrão.', 'ok');
+                return;
+            }
+            if (act === 'save') {
+                const input = document.querySelector(`[data-snd-url="${event}"]`);
+                const url = String(input?.value || '').trim();
+                if (!url) {
+                    setSoundStatus(event, 'Cole um link primeiro.', 'err');
+                    return;
+                }
+                btn.disabled = true;
+                setSoundStatus(event, 'Baixando o som...', 'busy');
+                const res = await window.pokeHub.setSoundLink(event, url).catch((err) => ({ ok: false, error: err?.message || String(err) }));
+                btn.disabled = false;
+                if (!res?.ok) {
+                    setSoundStatus(event, `Não deu: ${res?.error || 'erro desconhecido'}.`, 'err');
+                    return;
+                }
+                soundCfg = res.cfg;
+                soundDataCache.delete(event);
+                if (input) delete input.dataset.touched;
+                renderSoundCard();
+                setSoundStatus(event, `Pronto: "${soundCfg.events?.[event]?.title || 'som'}" salvo. Tocando para conferir.`, 'ok');
+                void playSoundEvent(event, { force: true });
+            }
+        });
+    });
+
+    window.pokeHub.onPlaySound?.(({ event } = {}) => {
+        if (event) void playSoundEvent(event);
+    });
+}
+
 function initGridControls() {
     $('gridToolbar')?.addEventListener('click', (ev) => {
         const layoutBtn = ev.target.closest('[data-grid-layout]');
@@ -745,6 +942,7 @@ function initGridControls() {
 
 function setViewMode(mode, { skipAutoClose = false } = {}) {
     viewMode = mode;
+    hubHook('onViewMode', mode);
     const ws = $('workspace');
     ws.classList.remove('mode-split', 'mode-grid', 'mode-panel-only', 'mode-panels-grid');
     ws.classList.add(`mode-${mode}`);
@@ -757,9 +955,15 @@ function setViewMode(mode, { skipAutoClose = false } = {}) {
     applyGridLayout();
     renderGridToolbar();
     renderPanelsGrid();
+    hubHook('afterViewMode', mode);
 }
 
 function setSubtab(tab) {
+    if (hubHook('onSubtab', tab) === true) {
+        if (tab === 'lives') setTimeout(requestLivesRefresh, 0);
+        renderActiveAccountPanel();
+        return;
+    }
     document.querySelectorAll('.subtab').forEach((b) => {
         b.classList.toggle('active', b.dataset.subtab === tab);
     });
@@ -818,6 +1022,7 @@ function setConfigDirty(dirty) {
     dirtyByAcc[activeAccount] = dirty;
     $('btnSaveCfg').disabled = !dirty;
     const hint = $('cfgHint');
+    if (hubHook('onConfigDirty', dirty) === true) return;
     hint.textContent = dirty ? 'Alterações pendentes' : '';
     hint.className = dirty ? 'hint-text dirty' : 'hint-text';
 }
@@ -842,7 +1047,7 @@ function formatBonusMins(mins) {
     return h > 0 ? `${h}h${String(r).padStart(2, '0')}m` : `${r}m`;
 }
 
-async function saveConfig() {
+function readConfigForm() {
     const targetRevives = Math.max(0, Number($('cTargetRevives').value) || 0);
     const liveTwitchRewards = readCheckedRewards('data-tw-reward');
     const liveKickRewards = readCheckedRewards('data-kk-reward');
@@ -881,15 +1086,27 @@ async function saveConfig() {
         liveCustomTwitch: $('cLiveCustomTw').value.trim(),
         liveCustomKick: $('cLiveCustomKk').value.trim(),
     };
-    setConfigDirty(false);
-    const res = await sendAction('set-config', { config });
-    const activeWv = webviews.get(activeAccount);
-    if (activeWv) {
-        activeWv.executeJavaScript(`window.__pbSetNeedCampoFeed && window.__pbSetNeedCampoFeed(${JSON.stringify(Boolean(config.caidosEnabled))})`).catch(() => {});
+    return config;
+}
+
+async function applyConfigTo(acc, config) {
+    const res = await sendAction('set-config', { config }, acc);
+    const wv = webviews.get(acc);
+    if (wv && 'caidosEnabled' in config) {
+        wv.executeJavaScript(`window.__pbSetNeedCampoFeed && window.__pbSetNeedCampoFeed(${JSON.stringify(Boolean(config.caidosEnabled))})`).catch(() => {});
     }
+    return res;
+}
+
+async function saveConfig() {
+    const acc = activeAccount;
+    const config = readConfigForm();
+    setConfigDirty(false);
+    const res = await applyConfigTo(acc, config);
     if (res?.ok) {
         $('cfgHint').textContent = 'Alterações salvas';
     }
+    return res;
 }
 
 let lastModeWarnSig = '';
@@ -1592,9 +1809,23 @@ function renderActivity(data) {
         list.replaceChildren();
         for (const entry of feed) {
             const item = document.createElement('li');
+            item.className = 'shiny-feed-item';
+            if (entry.speciesId) {
+                const img = document.createElement('img');
+                img.className = 'shiny-feed-sprite';
+                img.alt = '';
+                img.loading = 'lazy';
+                img.src = pokemonSpriteUrl(entry.speciesId, true);
+                item.append(img);
+            }
+            const txt = document.createElement('span');
+            txt.className = 'shiny-feed-text';
             const name = document.createElement('strong');
             name.textContent = entry.name;
-            item.append(name, ` · ${entry.trainer} · ${entry.egg ? 'Ovo' : 'Captura'} · ${new Date(entry.ts).toLocaleTimeString('pt-BR')}`);
+            const meta = document.createElement('small');
+            meta.textContent = `${entry.trainer} · ${entry.egg ? 'Ovo' : 'Captura'} · ${new Date(entry.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+            txt.append(name, meta);
+            item.append(txt);
             list.append(item);
         }
         if (!feed.length) list.textContent = 'Aguardando o próximo anúncio do servidor. O histórico começa quando a conta se conecta.';
@@ -1603,6 +1834,7 @@ function renderActivity(data) {
     const logs = data.logs || [];
     const lastLog = logs[logs.length - 1];
     const logSig = `${activeAccount}:${logs.length}:${lastLog?.time || ''}:${lastLog?.text || ''}`;
+    if (hubHook('renderMainLog', data) === true) return;
     if (logSig !== lastLogSig) {
         lastLogSig = logSig;
         const logBox = $('logBox');
@@ -1753,9 +1985,12 @@ function buildToastCard(card) {
 
 function showToast({
     kind = 'info', title = 'Nexo PokeBot', text = '', account = null, onClick = null,
-    actionLabel = '', card = null, duration = 0,
+    actionLabel = '', card = null, duration = 0, event = '',
 } = {}) {
+    if (event && soundCfg?.events?.[event]?.toast === false) return;
+    hubHook('recordEvent', { kind, title, text, account, event, card, ts: Date.now() });
     if (!toastsEnabled || (!text && !card)) return;
+    if (hubHook('routeToast', { kind, title, text, account, onClick, actionLabel, card, duration, event }) === true) return;
     const stack = $('toastStack');
     if (!stack) return;
     const now = Date.now();
@@ -1866,7 +2101,7 @@ function isToastWorthyLog(entry) {
     if (!entry || !entry.text) return false;
     const k = String(entry.kind || '');
     const txt = String(entry.text || '');
-    if (k === 'shiny' || k === 'reward' || k === 'error') return true;
+    if (k === 'shiny' || k === 'shiny-miss' || k === 'reward' || k === 'error') return true;
     if (k === 'warn') return /sess[aã]o|combate|falha|desconect|expir|erro|morreu|morte|cancelad|limita|shiny|captura|somente ping|feed de campo/i.test(txt);
     if (k === 'ok') return /troca de hunt|centro m[eé]dico|equipe curada|conectad|cookies|sincronizad|salva/i.test(txt);
     if (k === 'info') return /\/hunt recomenda|troca .* agendada|indo para o centro/i.test(txt);
@@ -1916,7 +2151,8 @@ function processActivityToasts(allSnaps) {
                     // A captura shiny ganha o cartao com a ficha logo abaixo; nao repete em texto
                     if (hasShinyCards && entry.kind === 'shiny' && /^Capturado SHINY/i.test(entry.text || '')) continue;
                     if (isToastWorthyLog(entry)) {
-                        showToast({ kind: entry.kind || 'info', title: accLabel, text: entry.text, account: acc });
+                        const ev = entry.kind === 'shiny-miss' ? 'shinyMiss' : (entry.kind === 'error' ? 'error' : '');
+                        showToast({ kind: entry.kind === 'shiny-miss' ? 'warn' : (entry.kind || 'info'), title: accLabel, text: entry.text, account: acc, event: ev });
                     }
                 }
                 base.lastSig = sigOf(logs[logs.length - 1]);
@@ -1934,6 +2170,7 @@ function processActivityToasts(allSnaps) {
                         text: `Disponível em ${ch}. O bot resgata sozinho em instantes.`,
                         account: acc,
                         actionLabel: 'Resgatar agora',
+                        event: 'chest',
                         onClick: () => void claimTwitchChest(ch, acc),
                     });
                 }
@@ -1948,6 +2185,7 @@ function processActivityToasts(allSnaps) {
                     text: 'Voto diário liberado no IdleHub.io.',
                     account: acc,
                     actionLabel: 'Abrir voto',
+                    event: 'vote',
                     onClick: () => void sendAction('open-vote-embedded', {}, acc),
                 });
             }
@@ -1960,6 +2198,7 @@ function processActivityToasts(allSnaps) {
                     showToast({
                         kind: 'reward',
                         title: `Drop raro · ${accLabel}`,
+                        event: 'rareDrop',
                         text: `${topDrop.name} x${topDrop.qty || 1}`,
                         account: acc,
                     });
@@ -1976,6 +2215,7 @@ function processActivityToasts(allSnaps) {
                     kind: 'shiny',
                     title: `Shiny capturado · ${accLabel}`,
                     account: acc,
+                    event: 'shinyCaught',
                     card: {
                         sprite: pokemonSpriteUrl(sh.speciesId, true),
                         name: sh.name,
@@ -2141,7 +2381,14 @@ function renderUpdateUi(st) {
     if (!st) return;
     currentUpdateState = st;
     renderUpdateBanner(st);
-    const btn = $('btnUpdateToggle');
+    const btnEl = $('btnUpdateToggle');
+    const btnLabel = btnEl.querySelector('.btn-label') || btnEl;
+    const btn = {
+        classList: btnEl.classList,
+        set textContent(v) { btnLabel.textContent = v === 'Atualizar' ? '' : v; },
+        set title(v) { btnEl.title = v; },
+        set disabled(v) { btnEl.disabled = v; },
+    };
     const title = $('updatePopTitle');
     const verTag = $('updatePopVer');
     const desc = $('updatePopDesc');
@@ -2166,7 +2413,7 @@ function renderUpdateUi(st) {
     } else if (st.status === 'extracting' || st.status === 'applying') {
         btn.textContent = 'Aplicando...';
     } else if (hasUpd) {
-        btn.textContent = `⬇ v${(st.latestVersion || '').replace(/\.0$/, '')}`;
+        btn.textContent = `v${(st.latestVersion || '').replace(/\.0$/, '')}`;
     } else {
         btn.textContent = 'Atualizar';
     }
@@ -2242,10 +2489,16 @@ function renderUpdateUi(st) {
 }
 
 function renderAll() {
+    if (hubHook('isPopout') === true) {
+        renderActiveAccountPanel();
+        hubHook('afterRender');
+        return;
+    }
     renderTopTabsAndSlots();
     renderPanelsGrid();
     if (viewMode === 'grid') renderGridToolbar();
     renderActiveAccountPanel();
+    hubHook('afterRender');
 }
 
 async function pollSnapshots() {
@@ -2467,21 +2720,21 @@ function wireEvents() {
             showToast({
                 kind: 'warn',
                 title: 'Atenção: Economia do servidor',
-                text: 'Este modo corta o feed de campo no Headless e impede detectar Shiny antes de jogar a Pokébola (clique em Salvar para aplicar).',
+                text: 'Este modo corta o feed de campo no Headless e impede detectar Shiny antes de jogar a Pokébola (já aplicado; use Desfazer para voltar).',
                 account: activeAccount,
             });
         } else if (target.id === 'cEconomyPingOnly' && target.checked) {
             showToast({
                 kind: 'error',
                 title: 'Atenção: Modo Somente Ping',
-                text: 'Pausa captura, Shiny, restock, passe, prey e /hunt, mantendo apenas keepalive e lives (clique em Salvar para aplicar).',
+                text: 'Pausa captura, Shiny, restock, passe, prey e /hunt, mantendo apenas keepalive e lives (já aplicado; use Desfazer para voltar).',
                 account: activeAccount,
             });
         } else if (target.id === 'cCaidos' && !target.checked) {
             showToast({
                 kind: 'warn',
                 title: 'Captura automática desmarcada',
-                text: 'O bot deixará de jogar Pokébolas em caídos e Shinies ao salvar.',
+                text: 'O bot deixou de jogar Pokébolas em caídos e Shinies (use Desfazer para voltar).',
                 account: activeAccount,
             });
         }
@@ -2609,6 +2862,7 @@ function wireEvents() {
     });
 
     initGridControls();
+    void initSoundControls();
 
     // IPC callbacks from main process
     window.pokeHub.onWebviewSend(({ account, rawJson }) => {

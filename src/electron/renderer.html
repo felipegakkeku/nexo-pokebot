@@ -3,8 +3,9 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://raw.githubusercontent.com data:; style-src 'self' 'unsafe-inline'; script-src 'self';" />
-  <title>Nexo PokeBot v1.0.4</title>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://raw.githubusercontent.com data:; media-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+  <title>Nexo PokeBot</title>
+  <script src="icons.js"></script>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -13,36 +14,40 @@
       <div class="brand">
         <img src="../../assets/nexo-pokebot-icon.png" width="28" height="28" alt="Nexo PokeBot" class="brand-icon" />
         <span class="brand-title">Nexo PokeBot</span>
-        <span class="brand-ver">v1.0.4</span>
+        <span class="brand-ver">v1.0.6</span>
       </div>
 
       <nav class="account-tabs" id="accountTabs" aria-label="Contas">
-        <button type="button" class="acc-tab active" data-acc="1">
-          <span class="acc-dot" id="dot-1"></span>
+        <button type="button" class="acc-tab active" data-acc="1" aria-label="Conta 1">
+          <span class="acc-num">1</span>
+          <span class="acc-avatar"><img class="acc-sprite" id="tabSprite-1" alt="" hidden /><span class="acc-dot" id="dot-1"></span></span>
           <span class="acc-meta">
             <span class="acc-name" id="tabName-1">Conta 1</span>
             <span class="acc-sub" id="tabSub-1">Offline</span>
           </span>
           <span class="acc-audio" id="tabAudio-1" role="button" hidden></span>
         </button>
-        <button type="button" class="acc-tab" data-acc="2">
-          <span class="acc-dot" id="dot-2"></span>
+        <button type="button" class="acc-tab" data-acc="2" aria-label="Conta 2">
+          <span class="acc-num">2</span>
+          <span class="acc-avatar"><img class="acc-sprite" id="tabSprite-2" alt="" hidden /><span class="acc-dot" id="dot-2"></span></span>
           <span class="acc-meta">
             <span class="acc-name" id="tabName-2">Conta 2</span>
             <span class="acc-sub" id="tabSub-2">Offline</span>
           </span>
           <span class="acc-audio" id="tabAudio-2" role="button" hidden></span>
         </button>
-        <button type="button" class="acc-tab" data-acc="3">
-          <span class="acc-dot" id="dot-3"></span>
+        <button type="button" class="acc-tab" data-acc="3" aria-label="Conta 3">
+          <span class="acc-num">3</span>
+          <span class="acc-avatar"><img class="acc-sprite" id="tabSprite-3" alt="" hidden /><span class="acc-dot" id="dot-3"></span></span>
           <span class="acc-meta">
             <span class="acc-name" id="tabName-3">Conta 3</span>
             <span class="acc-sub" id="tabSub-3">Offline</span>
           </span>
           <span class="acc-audio" id="tabAudio-3" role="button" hidden></span>
         </button>
-        <button type="button" class="acc-tab" data-acc="4">
-          <span class="acc-dot" id="dot-4"></span>
+        <button type="button" class="acc-tab" data-acc="4" aria-label="Conta 4">
+          <span class="acc-num">4</span>
+          <span class="acc-avatar"><img class="acc-sprite" id="tabSprite-4" alt="" hidden /><span class="acc-dot" id="dot-4"></span></span>
           <span class="acc-meta">
             <span class="acc-name" id="tabName-4">Conta 4</span>
             <span class="acc-sub" id="tabSub-4">Offline</span>
@@ -52,19 +57,27 @@
       </nav>
 
       <div class="segmented" role="group" aria-label="Modo de exibição">
-        <button type="button" class="seg-btn active" data-view="split">Painel + Jogo</button>
-        <button type="button" class="seg-btn" data-view="grid">Grade 2x2</button>
-        <button type="button" class="seg-btn" data-view="panel-only">Só Painel (Eco)</button>
-        <button type="button" class="seg-btn" data-view="panels-grid" title="As 4 contas em cartões lado a lado, sem abrir o jogo (Eco)">Painéis 2x2</button>
+        <button type="button" class="seg-btn active" data-view="split" title="Painel ao lado do jogo (tecla S)" data-icon="split"><span class="seg-label">Painel + Jogo</span></button>
+        <button type="button" class="seg-btn" data-view="grid" title="As 4 telas do jogo em grade (tecla G)" data-icon="grid"><span class="seg-label">Grade</span></button>
+        <button type="button" class="seg-btn" data-view="panel-only" title="Só o painel, em colunas que você monta (tecla P)" data-icon="columns"><span class="seg-label">Só Painel</span></button>
+        <button type="button" class="seg-btn" data-view="panels-grid" title="As 4 contas em cartões lado a lado, sem abrir o jogo (tecla C)" data-icon="cards"><span class="seg-label">Painéis</span></button>
       </div>
 
       <div class="top-actions">
+        <button type="button" class="btn sm eco-btn" id="btnAllHeadless" title="Fecha todos os jogos embutidos e mantém as contas farmando em Headless (~90% menos RAM/CPU)" data-icon="leaf">Modo Eco</button>
+        <div class="bell-wrap" id="bellWrap">
+          <button type="button" class="top-icon" id="btnBell" aria-expanded="false" aria-controls="bellPopover" aria-label="Precisa de você" title="Precisa de você (tecla B)" data-icon="bell"><span class="bell-count hidden" id="bellCount">0</span></button>
+          <div class="top-popover bell-popover hidden" id="bellPopover" role="dialog" aria-label="Precisa de você">
+            <div class="pop-head"><span class="pop-title">Precisa de você</span><button type="button" class="link-btn" id="btnBellClear">Dispensar tudo</button></div>
+            <ul class="bell-list" id="bellList"></ul>
+          </div>
+        </div>
         <div class="update-wrap" id="updateWrap">
-          <button type="button" class="btn sm update-btn" id="btnUpdateToggle" aria-expanded="false" aria-controls="updatePopover" title="Verificar atualizações do Nexo PokeBot">Atualizar</button>
+          <button type="button" class="top-icon update-btn" id="btnUpdateToggle" aria-expanded="false" aria-controls="updatePopover" aria-label="Atualizações" title="Atualizações do Nexo PokeBot" data-icon="download"><span class="btn-label"></span></button>
           <div class="update-popover hidden" id="updatePopover" role="dialog" aria-label="Atualização do Nexo PokeBot">
             <div class="update-pop-head">
               <span class="update-pop-title" id="updatePopTitle">Atualizações</span>
-              <span class="update-ver-tag" id="updatePopVer">v1.0.4</span>
+              <span class="update-ver-tag" id="updatePopVer">v1.0.6</span>
             </div>
             <div class="update-pop-desc" id="updatePopDesc">Verificando Releases do GitHub...</div>
             <div class="update-progress hidden" id="updateProgWrap">
@@ -81,7 +94,7 @@
           </div>
         </div>
         <div class="pix-wrap hidden" id="pixSupport" data-pix-key="0a2a3538-4d9e-4eeb-836e-5ee6136ab7ff">
-          <button type="button" class="btn sm pix-btn" id="btnPixToggle" aria-expanded="false" aria-controls="pixPopover" title="Apoiar o desenvolvimento do Nexo PokeBot">Apoiar ♥</button>
+          <button type="button" class="top-icon pix-btn" id="btnPixToggle" aria-expanded="false" aria-controls="pixPopover" aria-label="Apoiar o desenvolvimento" title="Apoiar o desenvolvimento do Nexo PokeBot" data-icon="heart"></button>
           <div class="pix-popover hidden" id="pixPopover" role="dialog" aria-label="Apoiar o Nexo PokeBot">
             <div class="pix-pop-title">Apoiar o Nexo PokeBot</div>
             <div class="pix-pop-sub">Escaneie o QR Code ou copie a chave Pix aleatória:</div>
@@ -96,9 +109,56 @@
             <div class="pix-pop-gold">Ou se preferir envie gold para "gake" no jogo kkkkkkk</div>
           </div>
         </div>
-        <button type="button" class="btn sm primary" id="btnAllHeadless" title="Fecha todos os jogos embutidos e mantém as contas farmando em Headless (~90% menos RAM/CPU)">Modo Eco</button>
-        <button type="button" class="btn sm" id="btnAwake" title="Impedir o Windows de suspender enquanto farma">PC Acordado</button>
-        <button type="button" class="btn sm" id="btnTray">Bandeja</button>
+        <div class="more-wrap" id="moreWrap">
+          <button type="button" class="top-icon" id="btnMore" aria-expanded="false" aria-controls="moreMenu" aria-label="Mais opções" title="Mais opções" data-icon="more"></button>
+          <div class="top-popover more-menu hidden" id="moreMenu" role="menu" aria-label="Mais opções">
+            <div class="menu-sec">
+              <div class="menu-label" data-icon="palette">Tema</div>
+              <div class="swatch-row" id="themeSwatches" role="radiogroup" aria-label="Tema">
+                <button type="button" class="swatch theme-sw" data-theme-pick="marinho" role="radio" title="Marinho" aria-label="Tema marinho"></button>
+                <button type="button" class="swatch theme-sw" data-theme-pick="grafite" role="radio" title="Grafite" aria-label="Tema grafite"></button>
+                <button type="button" class="swatch theme-sw" data-theme-pick="oled" role="radio" title="Preto OLED" aria-label="Tema preto OLED"></button>
+                <button type="button" class="swatch theme-sw" data-theme-pick="contraste" role="radio" title="Alto contraste" aria-label="Tema alto contraste"></button>
+              </div>
+              <div class="menu-label">Cor de destaque</div>
+              <div class="swatch-row" id="accentSwatches" role="radiogroup" aria-label="Cor de destaque">
+                <button type="button" class="swatch accent-sw" data-accent-pick="azul" role="radio" title="Azul" aria-label="Destaque azul"></button>
+                <button type="button" class="swatch accent-sw" data-accent-pick="ciano" role="radio" title="Ciano" aria-label="Destaque ciano"></button>
+                <button type="button" class="swatch accent-sw" data-accent-pick="violeta" role="radio" title="Violeta" aria-label="Destaque violeta"></button>
+                <button type="button" class="swatch accent-sw" data-accent-pick="rosa" role="radio" title="Rosa" aria-label="Destaque rosa"></button>
+                <button type="button" class="swatch accent-sw" data-accent-pick="esmeralda" role="radio" title="Esmeralda" aria-label="Destaque esmeralda"></button>
+                <button type="button" class="swatch accent-sw" data-accent-pick="laranja" role="radio" title="Laranja" aria-label="Destaque laranja"></button>
+              </div>
+            </div>
+            <div class="menu-sec">
+              <div class="menu-label" data-icon="hud">Barra sobre o jogo</div>
+              <div class="mini-seg" id="hudPosSeg" role="radiogroup" aria-label="Posição da barra sobre o jogo">
+                <button type="button" data-hud-pos="top" role="radio">Em cima</button>
+                <button type="button" data-hud-pos="bottom" role="radio">Embaixo</button>
+                <button type="button" data-hud-pos="off" role="radio">Desligada</button>
+              </div>
+            </div>
+            <div class="menu-sec">
+              <div class="menu-label" data-icon="layout">Layouts salvos</div>
+              <div class="layout-row">
+                <select id="layoutSelect" aria-label="Layout salvo"><option value="">Escolha um layout</option></select>
+                <button type="button" class="icon-btn" id="btnLayoutSave" title="Salvar o layout atual com um nome" aria-label="Salvar layout" data-icon="save"></button>
+                <button type="button" class="icon-btn" id="btnLayoutDelete" title="Excluir o layout escolhido" aria-label="Excluir layout" data-icon="trash"></button>
+              </div>
+              <div class="layout-name-row hidden" id="layoutNameRow">
+                <input type="text" id="layoutName" maxlength="32" placeholder="Nome do layout" spellcheck="false" />
+                <button type="button" class="btn sm primary" id="btnLayoutNameOk">Salvar</button>
+              </div>
+            </div>
+            <div class="menu-sec menu-items">
+              <button type="button" class="menu-item" id="btnPinActivityMenu" role="menuitemcheckbox" aria-checked="false" data-icon="pin">Atividade fixa ao lado<kbd>A</kbd></button>
+              <button type="button" class="menu-item" id="btnMiniHud" role="menuitemcheckbox" aria-checked="false" data-icon="hud">Mini-HUD sempre visível<kbd>H</kbd></button>
+              <button type="button" class="menu-item" id="btnAwake" role="menuitemcheckbox" aria-checked="false" title="Impedir o Windows de suspender enquanto farma" data-icon="coffee">Manter o PC acordado</button>
+              <button type="button" class="menu-item" id="btnTray" role="menuitem" data-icon="tray">Minimizar para a bandeja</button>
+              <button type="button" class="menu-item" id="btnShortcuts" role="menuitem" data-icon="keyboard">Atalhos do teclado<kbd>?</kbd></button>
+            </div>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -134,11 +194,15 @@
         </div>
 
         <div class="subtabs" id="subtabs">
-          <button type="button" class="subtab active" data-subtab="overview">Visão geral</button>
-          <button type="button" class="subtab" data-subtab="automation">Automação</button>
-          <button type="button" class="subtab" data-subtab="connections">Conexões</button>
-          <button type="button" class="subtab" data-subtab="lives">Lives</button>
-          <button type="button" class="subtab" data-subtab="activity">Atividade</button>
+          <button type="button" class="subtab active" data-subtab="overview" draggable="true">Visão geral</button>
+          <button type="button" class="subtab" data-subtab="automation" draggable="true">Automação</button>
+          <button type="button" class="subtab" data-subtab="connections" draggable="true">Conexões</button>
+          <button type="button" class="subtab" data-subtab="lives" draggable="true">Lives</button>
+          <button type="button" class="subtab" data-subtab="activity" draggable="true">Atividade<span class="subtab-badge hidden" id="activityBadge"></span></button>
+          <span class="subtab-tools">
+            <button type="button" class="icon-btn" id="btnPinActivity" title="Fixar a Atividade numa coluna ao lado (tecla A)" aria-label="Fixar a Atividade ao lado" aria-pressed="false" data-icon="pin"></button>
+            <button type="button" class="icon-btn" id="btnPopoutTab" title="Soltar esta aba numa janela própria" aria-label="Soltar esta aba numa janela" data-icon="external"></button>
+          </span>
         </div>
 
         <div class="pane-scroll">
@@ -175,6 +239,7 @@
                 <h3>Desempenho e eficiência</h3>
                 <button type="button" class="btn sm" id="btnResetStats" title="Zerar contadores e drops desta sessão">Zerar sessão</button>
               </div>
+              <div class="hero-kpis" id="heroKpis"></div>
               <div class="kpis">
                 <div class="kpi green"><div class="lbl">Abates</div><div class="val" id="kKills">0</div><div class="sub" id="kKillsSub">0/min</div></div>
                 <div class="kpi"><div class="lbl">XP Ganho</div><div class="val" id="kXp">0</div><div class="sub" id="kXpSub">0/h</div></div>
@@ -240,6 +305,11 @@
 
           <!-- AUTOMAÇÃO -->
           <div id="tab-automation" class="tab-panel hidden">
+            <div class="cfg-scope-bar" id="cfgScopeBar">
+              <span class="scope-badge acc" id="cfgScopeBadge" data-icon="user">Só a Conta 1</span>
+              <span class="scope-hint">Rotinas e preferências valem para a conta escolhida no topo. Salva sozinho a cada mudança.</span>
+              <button type="button" class="btn sm" id="btnCopyCfg" title="Copia rotinas e preferências desta conta para as outras três" data-icon="copy">Copiar para as outras contas</button>
+            </div>
             <div class="card">
               <h3>Rotinas automáticas</h3>
               <div class="toggle-list" id="cfgToggles">
@@ -380,39 +450,152 @@
                 </div>
               </div>
 
-              <div class="save-bar">
-                <span class="hint-text" id="cfgHint"></span>
-                <button type="button" class="btn primary" id="btnSaveCfg" disabled>Salvar alterações</button>
+              <div class="save-bar autosave">
+                <span class="hint-text save-state" id="cfgHint" role="status" aria-live="polite"></span>
+                <button type="button" class="btn primary hidden" id="btnSaveCfg" disabled>Salvar alterações</button>
               </div>
             </div>
 
-            <details class="card guide-card" id="capabilitiesGuide">
-              <summary>Como funciona e capacidades do Nexo PokeBot</summary>
-              <ul class="guide-list">
-                <li>
-                  <strong>Modos de economia e captura garantida</strong>
-                  <span class="tag-ok">Modo Eco do Hub (Headless):</span> fecha o navegador embutido (~90% menos RAM, 0% GPU) e mantém 100% da captura, detecção de Shiny, Restock, Passe, Prey, /hunt e ~40 lives sem vídeo.<br />
-                  <span class="tag-ok">Modo Economia / ULTRA do jogo (embutido):</span> desliga o canvas do PokeIdle (0% GPU) enquanto o bot preserva o feed leve de caídos para continuar capturando e detectando Shinies normalmente.<br />
-                  <span class="tag-warn">Economia do servidor (checkbox acima):</span> corta o feed de campo no Headless para economizar banda; o bot ainda tenta lançar Pokébolas via eventos de batalha, mas perde a detecção prévia de Shiny.
-                </li>
-                <li>
-                  <strong>Detecção de Shiny antes de jogar a Pokébola</strong>
-                  Lê a flag Shiny direto do feed de campo antes do arremesso, coloca Shinies na frente de qualquer mob comum e usa exclusivamente a <b>Bola shiny</b> configurada (mesmo em contas VIP). Se o feed sumir em combate, o bot se autorecupera sozinho.
-                </li>
-                <li>
-                  <strong>Gestor Inteligente de Buffs (~40 lives sem vídeo)</strong>
-                  Assiste Twitch e Kick em protocolo leve (~400 MB RAM para 4 contas), isola cada conta de forma independente e reserva pontos nos canais para subir os buffs atrasados (XP, Captura e Shiny) até a meta configurada.
-                </li>
-                <li>
-                  <strong>Vote &amp; Ganhe e Caixinha +50 direto na HUD</strong>
-                  Notifica quando o voto no IdleHub.io libera ou quando há caixinha +50 na Twitch. A caixinha se resgata em 1 clique direto na HUD, sem abrir o chat; o voto abre numa janela leve integrada.
-                </li>
-                <li>
-                  <strong>Centro Médico e /hunt automático</strong>
-                  Sincroniza trocas de hunt e ida ao Centro Médico ao tempo exato de saída de combate do jogo, evitando falhas enquanto o Pokémon está levando dano.
-                </li>
-              </ul>
-            </details>
+            <div class="card sound-card" id="soundCard">
+              <div class="card-head-row">
+                <h3>Alertas</h3>
+                <span class="scope-badge all" data-icon="sliders">Vale para as 4 contas</span>
+              </div>
+              <div class="sound-top">
+                <label class="toggle-item"><input type="checkbox" id="sndEnabled" /> Tocar sons de alerta</label>
+                <label class="sound-volume" for="sndVolume">
+                  <span>Volume</span>
+                  <input type="range" id="sndVolume" min="0" max="100" step="5" />
+                  <span id="sndVolumeVal">80%</span>
+                </label>
+              </div>
+              <div class="sound-event" data-sound-event="shinyMiss">
+                <div class="sound-event-head">
+                  <span class="alert-ev-name" data-icon="sparkles">Shiny visto e não capturado</span>
+                  <span class="alert-channels">
+                    <label class="ch-chk" title="Tocar som"><input type="checkbox" data-snd-toggle="shinyMiss" /> Som</label>
+                    <label class="ch-chk" title="Aviso dentro do Hub"><input type="checkbox" data-alert-ch="toast" data-alert-ev="shinyMiss" /> Hub</label>
+                    <label class="ch-chk" title="Aviso do Windows quando o Hub não está em foco"><input type="checkbox" data-alert-ch="os" data-alert-ev="shinyMiss" /> Windows</label>
+                  </span>
+                </div>
+                <div class="sound-event-sub">Um shiny apareceu no campo e sumiu sem captura (fugiu, o corpo expirou ou a bola falhou).</div>
+                <details class="sound-more">
+                  <summary><span class="sound-current" data-snd-current="shinyMiss">Som padrão</span> · trocar som</summary>
+                  <div class="sound-link-row">
+                    <input type="text" data-snd-url="shinyMiss" placeholder="Cole um link do myinstants.com ou de um arquivo .mp3" spellcheck="false" aria-label="Link do som: Shiny visto e não capturado" />
+                    <button type="button" class="btn sm primary" data-snd-act="save" data-snd-event="shinyMiss">Usar link</button>
+                    <button type="button" class="btn sm" data-snd-act="test" data-snd-event="shinyMiss" data-icon="volume">Testar</button>
+                    <button type="button" class="btn sm" data-snd-act="reset" data-snd-event="shinyMiss" title="Voltar para o som padrão">Padrão</button>
+                  </div>
+                  <div class="sound-status hint-text" data-snd-status="shinyMiss"></div>
+                </details>
+              </div>
+              <div class="sound-event" data-sound-event="shinyCaught">
+                <div class="sound-event-head">
+                  <span class="alert-ev-name" data-icon="star">Shiny capturado</span>
+                  <span class="alert-channels">
+                    <label class="ch-chk" title="Tocar som"><input type="checkbox" data-snd-toggle="shinyCaught" /> Som</label>
+                    <label class="ch-chk" title="Aviso dentro do Hub"><input type="checkbox" data-alert-ch="toast" data-alert-ev="shinyCaught" /> Hub</label>
+                    <label class="ch-chk" title="Aviso do Windows quando o Hub não está em foco"><input type="checkbox" data-alert-ch="os" data-alert-ev="shinyCaught" /> Windows</label>
+                  </span>
+                </div>
+                <div class="sound-event-sub">Uma das contas capturou um shiny.</div>
+                <details class="sound-more">
+                  <summary><span class="sound-current" data-snd-current="shinyCaught">Som padrão</span> · trocar som</summary>
+                  <div class="sound-link-row">
+                    <input type="text" data-snd-url="shinyCaught" placeholder="Cole um link do myinstants.com ou de um arquivo .mp3" spellcheck="false" aria-label="Link do som: Shiny capturado" />
+                    <button type="button" class="btn sm primary" data-snd-act="save" data-snd-event="shinyCaught">Usar link</button>
+                    <button type="button" class="btn sm" data-snd-act="test" data-snd-event="shinyCaught" data-icon="volume">Testar</button>
+                    <button type="button" class="btn sm" data-snd-act="reset" data-snd-event="shinyCaught" title="Voltar para o som padrão">Padrão</button>
+                  </div>
+                  <div class="sound-status hint-text" data-snd-status="shinyCaught"></div>
+                </details>
+              </div>
+              <div class="sound-event" data-sound-event="rareDrop">
+                <div class="sound-event-head">
+                  <span class="alert-ev-name" data-icon="gift">Drop raro</span>
+                  <span class="alert-channels">
+                    <label class="ch-chk" title="Tocar som"><input type="checkbox" data-snd-toggle="rareDrop" /> Som</label>
+                    <label class="ch-chk" title="Aviso dentro do Hub"><input type="checkbox" data-alert-ch="toast" data-alert-ev="rareDrop" /> Hub</label>
+                    <label class="ch-chk" title="Aviso do Windows quando o Hub não está em foco"><input type="checkbox" data-alert-ch="os" data-alert-ev="rareDrop" /> Windows</label>
+                  </span>
+                </div>
+                <div class="sound-event-sub">Item raro caiu (Outland, ovo shiny, boss e parecidos).</div>
+                <details class="sound-more">
+                  <summary><span class="sound-current" data-snd-current="rareDrop">Som padrão</span> · trocar som</summary>
+                  <div class="sound-link-row">
+                    <input type="text" data-snd-url="rareDrop" placeholder="Cole um link do myinstants.com ou de um arquivo .mp3" spellcheck="false" aria-label="Link do som: Drop raro" />
+                    <button type="button" class="btn sm primary" data-snd-act="save" data-snd-event="rareDrop">Usar link</button>
+                    <button type="button" class="btn sm" data-snd-act="test" data-snd-event="rareDrop" data-icon="volume">Testar</button>
+                    <button type="button" class="btn sm" data-snd-act="reset" data-snd-event="rareDrop" title="Voltar para o som padrão">Padrão</button>
+                  </div>
+                  <div class="sound-status hint-text" data-snd-status="rareDrop"></div>
+                </details>
+              </div>
+              <div class="sound-event" data-sound-event="error">
+                <div class="sound-event-head">
+                  <span class="alert-ev-name" data-icon="alert">Erro na conta</span>
+                  <span class="alert-channels">
+                    <label class="ch-chk" title="Tocar som"><input type="checkbox" data-snd-toggle="error" /> Som</label>
+                    <label class="ch-chk" title="Aviso dentro do Hub"><input type="checkbox" data-alert-ch="toast" data-alert-ev="error" /> Hub</label>
+                    <label class="ch-chk" title="Aviso do Windows quando o Hub não está em foco"><input type="checkbox" data-alert-ch="os" data-alert-ev="error" /> Windows</label>
+                  </span>
+                </div>
+                <div class="sound-event-sub">Falha de sessão, desconexão ou erro do bot.</div>
+                <details class="sound-more">
+                  <summary><span class="sound-current" data-snd-current="error">Som padrão</span> · trocar som</summary>
+                  <div class="sound-link-row">
+                    <input type="text" data-snd-url="error" placeholder="Cole um link do myinstants.com ou de um arquivo .mp3" spellcheck="false" aria-label="Link do som: Erro na conta" />
+                    <button type="button" class="btn sm primary" data-snd-act="save" data-snd-event="error">Usar link</button>
+                    <button type="button" class="btn sm" data-snd-act="test" data-snd-event="error" data-icon="volume">Testar</button>
+                    <button type="button" class="btn sm" data-snd-act="reset" data-snd-event="error" title="Voltar para o som padrão">Padrão</button>
+                  </div>
+                  <div class="sound-status hint-text" data-snd-status="error"></div>
+                </details>
+              </div>
+              <div class="sound-event" data-sound-event="chest">
+                <div class="sound-event-head">
+                  <span class="alert-ev-name" data-icon="tv">Caixinha +50 na live</span>
+                  <span class="alert-channels">
+                    <label class="ch-chk" title="Tocar som"><input type="checkbox" data-snd-toggle="chest" /> Som</label>
+                    <label class="ch-chk" title="Aviso dentro do Hub"><input type="checkbox" data-alert-ch="toast" data-alert-ev="chest" /> Hub</label>
+                    <label class="ch-chk" title="Aviso do Windows quando o Hub não está em foco"><input type="checkbox" data-alert-ch="os" data-alert-ev="chest" /> Windows</label>
+                  </span>
+                </div>
+                <div class="sound-event-sub">Caixinha da Twitch liberada para resgatar.</div>
+                <details class="sound-more">
+                  <summary><span class="sound-current" data-snd-current="chest">Som padrão</span> · trocar som</summary>
+                  <div class="sound-link-row">
+                    <input type="text" data-snd-url="chest" placeholder="Cole um link do myinstants.com ou de um arquivo .mp3" spellcheck="false" aria-label="Link do som: Caixinha +50 na live" />
+                    <button type="button" class="btn sm primary" data-snd-act="save" data-snd-event="chest">Usar link</button>
+                    <button type="button" class="btn sm" data-snd-act="test" data-snd-event="chest" data-icon="volume">Testar</button>
+                    <button type="button" class="btn sm" data-snd-act="reset" data-snd-event="chest" title="Voltar para o som padrão">Padrão</button>
+                  </div>
+                  <div class="sound-status hint-text" data-snd-status="chest"></div>
+                </details>
+              </div>
+              <div class="sound-event" data-sound-event="vote">
+                <div class="sound-event-head">
+                  <span class="alert-ev-name" data-icon="thumbs">Voto diário liberado</span>
+                  <span class="alert-channels">
+                    <label class="ch-chk" title="Tocar som"><input type="checkbox" data-snd-toggle="vote" /> Som</label>
+                    <label class="ch-chk" title="Aviso dentro do Hub"><input type="checkbox" data-alert-ch="toast" data-alert-ev="vote" /> Hub</label>
+                    <label class="ch-chk" title="Aviso do Windows quando o Hub não está em foco"><input type="checkbox" data-alert-ch="os" data-alert-ev="vote" /> Windows</label>
+                  </span>
+                </div>
+                <div class="sound-event-sub">O Vote & Ganhe do IdleHub.io liberou.</div>
+                <details class="sound-more">
+                  <summary><span class="sound-current" data-snd-current="vote">Som padrão</span> · trocar som</summary>
+                  <div class="sound-link-row">
+                    <input type="text" data-snd-url="vote" placeholder="Cole um link do myinstants.com ou de um arquivo .mp3" spellcheck="false" aria-label="Link do som: Voto diário liberado" />
+                    <button type="button" class="btn sm primary" data-snd-act="save" data-snd-event="vote">Usar link</button>
+                    <button type="button" class="btn sm" data-snd-act="test" data-snd-event="vote" data-icon="volume">Testar</button>
+                    <button type="button" class="btn sm" data-snd-act="reset" data-snd-event="vote" title="Voltar para o som padrão">Padrão</button>
+                  </div>
+                  <div class="sound-status hint-text" data-snd-status="vote"></div>
+                </details>
+              </div>
+            </div>
           </div>
 
           <!-- CONEXÕES -->
@@ -496,14 +679,15 @@
 
           <!-- ATIVIDADE -->
           <div id="tab-activity" class="tab-panel hidden">
-            <div class="card"><h3>Últimos shinies do servidor</h3><ul id="shinyFeed" class="shiny-feed"></ul></div>
             <div class="card">
               <div class="activity-head">
                 <h3>Registro de eventos</h3>
-                <label class="toast-toggle"><input type="checkbox" id="cToastEnabled" checked /> Notificações toast</label>
+                <label class="toast-toggle"><input type="checkbox" id="cToastEnabled" checked /> Avisos no Hub</label>
               </div>
-              <div class="log-box" id="logBox"></div>
+              <div class="log-view" id="logViewMain" data-log-view="main"></div>
+              <div class="log-box hidden" id="logBox"></div>
             </div>
+            <div class="card"><h3>Últimos shinies do servidor</h3><ul id="shinyFeed" class="shiny-feed"></ul></div>
           </div>
         </div>
       </section>
@@ -533,22 +717,23 @@
         <div class="wv-slot slot-active" id="wv-slot-1" data-slot="1">
           <div class="wv-bar">
             <div class="wv-bar-left">
-              <span class="wv-grip grid-only" title="Arraste para trocar de lugar" aria-hidden="true">⠿</span>
+              <span class="wv-grip grid-only" title="Arraste para trocar de lugar" aria-hidden="true" data-icon="grip"></span>
               <span class="acc-dot" id="slotDot-1"></span>
               <span class="wv-title" id="slotTitle-1">Conta 1</span>
               <span class="wv-hunt" id="slotHunt-1"></span>
             </div>
             <div class="wv-bar-actions">
               <button type="button" class="btn sm slot-audio is-muted" data-slot-act="mute" data-slot="1" id="slotAudio-1" hidden>Mudo</button>
-              <button type="button" class="btn sm" data-slot-act="focus" data-slot="1">Focar</button>
-              <button type="button" class="btn sm" data-slot-act="reload" data-slot="1">Recarregar</button>
+              <button type="button" class="btn sm icon-btn" data-slot-act="focus" data-slot="1" title="Focar nesta conta" aria-label="Focar na Conta 1" data-icon="crosshair"></button>
+              <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="1" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 1" data-icon="refresh"></button>
               <button type="button" class="btn sm teal" data-slot-act="toggle" data-slot="1">Abrir Embutido</button>
-              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="1" title="Maximizar esta tela">⤢</button>
-              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="hide" data-slot="1" title="Ocultar esta tela da grade">✕</button>
+              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="1" title="Maximizar esta tela" aria-label="Maximizar a tela da Conta 1" data-icon="maximize"></button>
+              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="hide" data-slot="1" title="Ocultar esta tela da grade" aria-label="Ocultar a tela da Conta 1" data-icon="eyeoff"></button>
             </div>
           </div>
           <div class="wv-body" id="wv-body-1">
             <div class="wv-placeholder" id="wv-ph-1">
+              <div class="stage-live" id="stageLive-1"></div>
               <div class="wv-placeholder-title" id="phTitle-1">Conta 1 · Modo Headless</div>
               <div class="wv-placeholder-sub" id="phSub-1">O bot pode farmar e trocar de hunt (/hunt) em 2º plano sem consumir RAM de navegador, ou abrir o jogo embutido aqui dentro.</div>
               <div class="wv-placeholder-stats" id="phStats-1"></div>
@@ -563,22 +748,23 @@
         <div class="wv-slot" id="wv-slot-2" data-slot="2">
           <div class="wv-bar">
             <div class="wv-bar-left">
-              <span class="wv-grip grid-only" title="Arraste para trocar de lugar" aria-hidden="true">⠿</span>
+              <span class="wv-grip grid-only" title="Arraste para trocar de lugar" aria-hidden="true" data-icon="grip"></span>
               <span class="acc-dot" id="slotDot-2"></span>
               <span class="wv-title" id="slotTitle-2">Conta 2</span>
               <span class="wv-hunt" id="slotHunt-2"></span>
             </div>
             <div class="wv-bar-actions">
               <button type="button" class="btn sm slot-audio is-muted" data-slot-act="mute" data-slot="2" id="slotAudio-2" hidden>Mudo</button>
-              <button type="button" class="btn sm" data-slot-act="focus" data-slot="2">Focar</button>
-              <button type="button" class="btn sm" data-slot-act="reload" data-slot="2">Recarregar</button>
+              <button type="button" class="btn sm icon-btn" data-slot-act="focus" data-slot="2" title="Focar nesta conta" aria-label="Focar na Conta 2" data-icon="crosshair"></button>
+              <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="2" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 2" data-icon="refresh"></button>
               <button type="button" class="btn sm teal" data-slot-act="toggle" data-slot="2">Abrir Embutido</button>
-              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="2" title="Maximizar esta tela">⤢</button>
-              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="hide" data-slot="2" title="Ocultar esta tela da grade">✕</button>
+              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="2" title="Maximizar esta tela" aria-label="Maximizar a tela da Conta 2" data-icon="maximize"></button>
+              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="hide" data-slot="2" title="Ocultar esta tela da grade" aria-label="Ocultar a tela da Conta 2" data-icon="eyeoff"></button>
             </div>
           </div>
           <div class="wv-body" id="wv-body-2">
             <div class="wv-placeholder" id="wv-ph-2">
+              <div class="stage-live" id="stageLive-2"></div>
               <div class="wv-placeholder-title" id="phTitle-2">Conta 2 · Modo Headless</div>
               <div class="wv-placeholder-sub" id="phSub-2">O bot pode farmar e trocar de hunt (/hunt) em 2º plano sem consumir RAM de navegador, ou abrir o jogo embutido aqui dentro.</div>
               <div class="wv-placeholder-stats" id="phStats-2"></div>
@@ -593,22 +779,23 @@
         <div class="wv-slot" id="wv-slot-3" data-slot="3">
           <div class="wv-bar">
             <div class="wv-bar-left">
-              <span class="wv-grip grid-only" title="Arraste para trocar de lugar" aria-hidden="true">⠿</span>
+              <span class="wv-grip grid-only" title="Arraste para trocar de lugar" aria-hidden="true" data-icon="grip"></span>
               <span class="acc-dot" id="slotDot-3"></span>
               <span class="wv-title" id="slotTitle-3">Conta 3</span>
               <span class="wv-hunt" id="slotHunt-3"></span>
             </div>
             <div class="wv-bar-actions">
               <button type="button" class="btn sm slot-audio is-muted" data-slot-act="mute" data-slot="3" id="slotAudio-3" hidden>Mudo</button>
-              <button type="button" class="btn sm" data-slot-act="focus" data-slot="3">Focar</button>
-              <button type="button" class="btn sm" data-slot-act="reload" data-slot="3">Recarregar</button>
+              <button type="button" class="btn sm icon-btn" data-slot-act="focus" data-slot="3" title="Focar nesta conta" aria-label="Focar na Conta 3" data-icon="crosshair"></button>
+              <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="3" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 3" data-icon="refresh"></button>
               <button type="button" class="btn sm teal" data-slot-act="toggle" data-slot="3">Abrir Embutido</button>
-              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="3" title="Maximizar esta tela">⤢</button>
-              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="hide" data-slot="3" title="Ocultar esta tela da grade">✕</button>
+              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="3" title="Maximizar esta tela" aria-label="Maximizar a tela da Conta 3" data-icon="maximize"></button>
+              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="hide" data-slot="3" title="Ocultar esta tela da grade" aria-label="Ocultar a tela da Conta 3" data-icon="eyeoff"></button>
             </div>
           </div>
           <div class="wv-body" id="wv-body-3">
             <div class="wv-placeholder" id="wv-ph-3">
+              <div class="stage-live" id="stageLive-3"></div>
               <div class="wv-placeholder-title" id="phTitle-3">Conta 3 · Offline</div>
               <div class="wv-placeholder-sub" id="phSub-3">Abra o jogo embutido aqui dentro para logar ou configure a conta na aba Conexões.</div>
               <div class="wv-placeholder-stats" id="phStats-3"></div>
@@ -623,22 +810,23 @@
         <div class="wv-slot" id="wv-slot-4" data-slot="4">
           <div class="wv-bar">
             <div class="wv-bar-left">
-              <span class="wv-grip grid-only" title="Arraste para trocar de lugar" aria-hidden="true">⠿</span>
+              <span class="wv-grip grid-only" title="Arraste para trocar de lugar" aria-hidden="true" data-icon="grip"></span>
               <span class="acc-dot" id="slotDot-4"></span>
               <span class="wv-title" id="slotTitle-4">Conta 4</span>
               <span class="wv-hunt" id="slotHunt-4"></span>
             </div>
             <div class="wv-bar-actions">
               <button type="button" class="btn sm slot-audio is-muted" data-slot-act="mute" data-slot="4" id="slotAudio-4" hidden>Mudo</button>
-              <button type="button" class="btn sm" data-slot-act="focus" data-slot="4">Focar</button>
-              <button type="button" class="btn sm" data-slot-act="reload" data-slot="4">Recarregar</button>
+              <button type="button" class="btn sm icon-btn" data-slot-act="focus" data-slot="4" title="Focar nesta conta" aria-label="Focar na Conta 4" data-icon="crosshair"></button>
+              <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="4" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 4" data-icon="refresh"></button>
               <button type="button" class="btn sm teal" data-slot-act="toggle" data-slot="4">Abrir Embutido</button>
-              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="4" title="Maximizar esta tela">⤢</button>
-              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="hide" data-slot="4" title="Ocultar esta tela da grade">✕</button>
+              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="4" title="Maximizar esta tela" aria-label="Maximizar a tela da Conta 4" data-icon="maximize"></button>
+              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="hide" data-slot="4" title="Ocultar esta tela da grade" aria-label="Ocultar a tela da Conta 4" data-icon="eyeoff"></button>
             </div>
           </div>
           <div class="wv-body" id="wv-body-4">
             <div class="wv-placeholder" id="wv-ph-4">
+              <div class="stage-live" id="stageLive-4"></div>
               <div class="wv-placeholder-title" id="phTitle-4">Conta 4 · Offline</div>
               <div class="wv-placeholder-sub" id="phSub-4">Abra o jogo embutido aqui dentro para logar ou configure a conta na aba Conexões.</div>
               <div class="wv-placeholder-stats" id="phStats-4"></div>
@@ -657,5 +845,6 @@
 
   <div class="toast-stack" id="toastStack" aria-live="polite"></div>
   <script src="renderer.js"></script>
+  <script src="hub-ui.js"></script>
 </body>
 </html>

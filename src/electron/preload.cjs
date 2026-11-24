@@ -15,6 +15,26 @@ contextBridge.exposeInMainWorld('pokeHub', {
     setAwake: (enabled) => ipcRenderer.invoke('hub:awake-set', Boolean(enabled)),
     setMinToTray: (enabled) => ipcRenderer.invoke('hub:mintray-set', Boolean(enabled)),
     openExternal: (url, account) => ipcRenderer.invoke('hub:open-external', url, account),
+    getSoundConfig: () => ipcRenderer.invoke('hub:sound-get'),
+    setSoundConfig: (patch) => ipcRenderer.invoke('hub:sound-set', patch || {}),
+    setSoundLink: (event, url) => ipcRenderer.invoke('hub:sound-link', { event, url }),
+    resetSound: (event) => ipcRenderer.invoke('hub:sound-reset', { event }),
+    getSoundData: (event) => ipcRenderer.invoke('hub:sound-data', { event }),
+    onPlaySound: (cb) => {
+        const fn = (_ev, data) => cb(data);
+        ipcRenderer.on('hub:play-sound', fn);
+        return () => ipcRenderer.removeListener('hub:play-sound', fn);
+    },
+    popout: (panel, account) => ipcRenderer.invoke('hub:popout', { panel, account }),
+    toggleMiniHud: (force) => ipcRenderer.invoke('hub:minihud-toggle', force),
+    getMiniHudState: () => ipcRenderer.invoke('hub:minihud-state'),
+    closeMiniHud: () => ipcRenderer.invoke('hub:minihud-close'),
+    showMain: (account) => ipcRenderer.invoke('hub:show-main', account),
+    onMiniHudState: (cb) => {
+        const fn = (_ev, open) => cb(Boolean(open));
+        ipcRenderer.on('hub:minihud-state', fn);
+        return () => ipcRenderer.removeListener('hub:minihud-state', fn);
+    },
     getUpdateState: () => ipcRenderer.invoke('hub:update-get-state'),
     checkUpdate: () => ipcRenderer.invoke('hub:update-check'),
     installUpdate: () => ipcRenderer.invoke('hub:update-install'),

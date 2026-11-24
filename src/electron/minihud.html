@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://raw.githubusercontent.com data:; style-src 'self' 'unsafe-inline'; script-src 'self';" />
+  <title>Nexo PokeBot Mini-HUD</title>
+  <script src="icons.js"></script>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="minihud-body">
+  <header class="mh-bar">
+    <span class="mh-brand">Nexo PokeBot</span>
+    <span class="mh-total" id="mhTotal"></span>
+    <button class="mh-btn" id="mhOpen" type="button" title="Abrir o Hub" aria-label="Abrir o Hub" data-icon="external"></button>
+    <button class="mh-btn" id="mhClose" type="button" title="Fechar mini-HUD" aria-label="Fechar mini-HUD" data-icon="x"></button>
+  </header>
+  <ul class="mh-list" id="mhList" aria-live="polite"></ul>
+  <script src="minihud.js"></script>
+</body>
+</html>
