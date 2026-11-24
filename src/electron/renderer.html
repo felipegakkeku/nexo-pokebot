@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https://raw.githubusercontent.com data:; style-src 'self' 'unsafe-inline'; script-src 'self';" />
-  <title>Nexo PokeBot v1.0.3</title>
+  <title>Nexo PokeBot v1.0.4</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -13,7 +13,7 @@
       <div class="brand">
         <img src="../../assets/nexo-pokebot-icon.png" width="28" height="28" alt="Nexo PokeBot" class="brand-icon" />
         <span class="brand-title">Nexo PokeBot</span>
-        <span class="brand-ver">v1.0.3</span>
+        <span class="brand-ver">v1.0.4</span>
       </div>
 
       <nav class="account-tabs" id="accountTabs" aria-label="Contas">
@@ -59,7 +59,7 @@
           <div class="update-popover hidden" id="updatePopover" role="dialog" aria-label="Atualização do Nexo PokeBot">
             <div class="update-pop-head">
               <span class="update-pop-title" id="updatePopTitle">Atualizações</span>
-              <span class="update-ver-tag" id="updatePopVer">v1.0.3</span>
+              <span class="update-ver-tag" id="updatePopVer">v1.0.4</span>
             </div>
             <div class="update-pop-desc" id="updatePopDesc">Verificando Releases do GitHub...</div>
             <div class="update-progress hidden" id="updateProgWrap">
@@ -126,6 +126,7 @@
         <div class="pane-scroll">
           <!-- VISÃO GERAL -->
           <div id="tab-overview" class="tab-panel">
+            <div class="mode-warn-banner hidden" id="modeWarnBanner" role="alert"></div>
             <div class="card">
               <h3>Pokémon ativo e hunt</h3>
               <div class="poke-row">
@@ -224,17 +225,18 @@
             <div class="card">
               <h3>Rotinas automáticas</h3>
               <div class="toggle-list" id="cfgToggles">
-                <label class="toggle-item"><input type="checkbox" id="cCaidos" /> Capturar Pokémon caídos</label>
+                <label class="toggle-item with-sub"><input type="checkbox" id="cCaidos" /><span class="toggle-copy"><span>Capturar Pokémon caídos</span><span class="toggle-sub">Detecta Shiny antes do arremesso e prioriza a Bola Shiny (funciona também no Modo Economia do jogo com 0% GPU)</span></span></label>
                 <label class="toggle-item"><input type="checkbox" id="cNativeHeal" /> Usar cura e Revive do jogo</label>
                 <label class="toggle-item"><input type="checkbox" id="cRestock" /> Repor itens no mercado</label>
                 <label class="toggle-item"><input type="checkbox" id="cPass" /> Resgatar o passe diário</label>
                 <label class="toggle-item"><input type="checkbox" id="cPrey" /> Rolar o Prey diário</label>
                 <label class="toggle-item"><input type="checkbox" id="cLives" /> Coletar recompensas de lives</label>
                 <label class="toggle-item"><input type="checkbox" id="cLiveSmart" /> Balancear buffs das lives até a meta</label>
-                <label class="toggle-item" title="Corta o feed de campo no servidor no modo Headless (economiza banda, mas impede detectar Shiny antes de jogar a bola; no jogo embutido o Modo Economia visual já preserva a captura com 0% GPU)"><input type="checkbox" id="cEconomy" /> Ativar economia do servidor</label>
-                <label class="toggle-item"><input type="checkbox" id="cEconomyPingOnly" /> Só enviar ping no modo economia</label>
+                <label class="toggle-item with-sub" title="Corta o feed de campo no servidor no modo Headless (economiza banda, mas impede detectar Shiny antes de jogar a bola; no jogo embutido o Modo Economia visual já preserva a captura com 0% GPU)"><input type="checkbox" id="cEconomy" /><span class="toggle-copy"><span>Ativar economia do servidor</span><span class="toggle-sub warn">Limita: corta o feed de campo no Headless e desativa detecção prévia de Shiny (usa fallback de batalha)</span></span></label>
+                <label class="toggle-item with-sub"><input type="checkbox" id="cEconomyPingOnly" /><span class="toggle-copy"><span>Só enviar ping no modo economia</span><span class="toggle-sub warn">Limita: pausa captura, Shiny, restock, passe, prey e /hunt (mantém só keepalive e lives)</span></span></label>
                 <label class="toggle-item"><input type="checkbox" id="cStandby" /> Entrar em espera no erro 4001</label>
               </div>
+              <div class="mode-warn-box" id="cfgModeWarnBox"></div>
             </div>
 
             <div class="card">
@@ -363,6 +365,34 @@
                 <button type="button" class="btn primary" id="btnSaveCfg" disabled>Salvar alterações</button>
               </div>
             </div>
+
+            <details class="card guide-card" id="capabilitiesGuide">
+              <summary>Como funciona e capacidades do Nexo PokeBot</summary>
+              <ul class="guide-list">
+                <li>
+                  <strong>Modos de economia e captura garantida</strong>
+                  <span class="tag-ok">Modo Eco do Hub (Headless):</span> fecha o navegador embutido (~90% menos RAM, 0% GPU) e mantém 100% da captura, detecção de Shiny, Restock, Passe, Prey, /hunt e ~40 lives sem vídeo.<br />
+                  <span class="tag-ok">Modo Economia / ULTRA do jogo (embutido):</span> desliga o canvas do PokeIdle (0% GPU) enquanto o bot preserva o feed leve de caídos para continuar capturando e detectando Shinies normalmente.<br />
+                  <span class="tag-warn">Economia do servidor (checkbox acima):</span> corta o feed de campo no Headless para economizar banda; o bot ainda tenta lançar Pokébolas via eventos de batalha, mas perde a detecção prévia de Shiny.
+                </li>
+                <li>
+                  <strong>Detecção de Shiny antes de jogar a Pokébola</strong>
+                  Lê a flag Shiny direto do feed de campo antes do arremesso, coloca Shinies na frente de qualquer mob comum e usa exclusivamente a <b>Bola shiny</b> configurada (mesmo em contas VIP). Se o feed sumir em combate, o bot se autorecupera sozinho.
+                </li>
+                <li>
+                  <strong>Gestor Inteligente de Buffs (~40 lives sem vídeo)</strong>
+                  Assiste Twitch e Kick em protocolo leve (~400 MB RAM para 4 contas), isola cada conta de forma independente e reserva pontos nos canais para subir os buffs atrasados (XP, Captura e Shiny) até a meta configurada.
+                </li>
+                <li>
+                  <strong>Vote &amp; Ganhe e Caixinha +50 direto na HUD</strong>
+                  Notifica quando o voto no IdleHub.io libera ou quando há caixinha +50 na Twitch e abre janelas leves integradas (sem player de vídeo na Twitch) para confirmação manual em 1 clique.
+                </li>
+                <li>
+                  <strong>Centro Médico e /hunt automático</strong>
+                  Sincroniza trocas de hunt e ida ao Centro Médico ao tempo exato de saída de combate do jogo, evitando falhas enquanto o Pokémon está levando dano.
+                </li>
+              </ul>
+            </details>
           </div>
 
           <!-- CONEXÕES -->

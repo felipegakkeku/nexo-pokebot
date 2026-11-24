@@ -160,6 +160,13 @@ async function openEmbeddedForAccount(acc) {
             window.pokeHub.sendWsFrame(acc, ev.args[0]);
         } else if (ev.channel === 'pb-session' && ev.args?.[0]) {
             window.pokeHub.syncWebviewSession(acc, ev.args[0]);
+        } else if (ev.channel === 'pb-game-eco') {
+            showToast({
+                kind: 'ok',
+                title: `Modo Economia do jogo · Conta ${acc}`,
+                text: 'Canvas em 0% GPU com captura automática e detecção de Shiny 100% preservadas.',
+                account: acc,
+            });
         }
     });
 
@@ -196,6 +203,13 @@ async function closeAllEmbeddedToHeadless() {
         await closeEmbeddedForAccount(acc, { startHeadless: hasSession });
     }
     setViewMode('panel-only', { skipAutoClose: true });
+    if (openAccs.length > 0) {
+        showToast({
+            kind: 'ok',
+            title: 'Modo Eco (Headless)',
+            text: 'Navegador fechado (~90% menos RAM e 0% GPU). Captura, detecção de Shiny, lives e /hunt continuam 100% ativos.',
+        });
+    }
 }
 
 function selectAccount(acc) {
@@ -330,6 +344,117 @@ async function saveConfig() {
     }
 }
 
+let lastModeWarnSig = '';
+
+function renderModeWarningsBanner(data) {
+    const host = $('modeWarnBanner');
+    if (!host) return;
+    const list = Array.isArray(data?.modeWarnings) ? data.modeWarnings : [];
+    const sig = `${activeAccount}|${list.map((w) => `${w.code}:${w.severity}`).join(',')}`;
+    if (sig === lastModeWarnSig) return;
+    lastModeWarnSig = sig;
+    host.classList.toggle('hidden', list.length === 0);
+    if (list.length === 0) {
+        host.replaceChildren();
+        return;
+    }
+    const frag = document.createDocumentFragment();
+    for (const w of list) {
+        const card = document.createElement('div');
+        card.className = `mode-warn-item ${w.severity === 'danger' ? 'danger' : 'warn'}`;
+        const title = document.createElement('div');
+        title.className = 'mode-warn-title';
+        title.textContent = w.title;
+        const detail = document.createElement('div');
+        detail.className = 'mode-warn-detail';
+        detail.textContent = w.detail;
+        card.append(title, detail);
+        if (w.fixConfig) {
+            const actRow = document.createElement('div');
+            actRow.className = 'mode-warn-actions';
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn sm primary';
+            btn.textContent = w.fixLabel || 'Restaurar modo completo';
+            btn.addEventListener('click', async () => {
+                dirtyByAcc[activeAccount] = false;
+                await sendAction('set-config', { config: w.fixConfig });
+                const activeWv = webviews.get(activeAccount);
+                if (activeWv && w.fixConfig.caidosEnabled !== false) {
+                    activeWv.executeJavaScript('window.__pbSetNeedCampoFeed && window.__pbSetNeedCampoFeed(true)').catch(() => {});
+                }
+                showToast({
+                    kind: 'ok',
+                    title: `Conta ${activeAccount}`,
+                    text: 'Captura automática e detecção de Shiny restauradas.',
+                    account: activeAccount,
+                });
+            });
+            actRow.appendChild(btn);
+            card.appendChild(actRow);
+        }
+        frag.appendChild(card);
+    }
+    host.replaceChildren(frag);
+}
+
+function renderConfigModePreview() {
+    const box = $('cfgModeWarnBox');
+    if (!box) return;
+    const pingOnly = Boolean($('cEconomyPingOnly')?.checked);
+    const serverEco = Boolean($('cEconomy')?.checked);
+    const caidosOn = Boolean($('cCaidos')?.checked);
+    const livesOn = Boolean($('cLives')?.checked);
+    const smartOn = Boolean($('cLiveSmart')?.checked);
+
+    const items = [];
+    if (pingOnly) {
+        items.push({
+            cls: 'danger',
+            title: 'Limitação ativa: Modo Somente Ping',
+            detail: 'Pausa captura automática, detecção de Shiny, restock, passe diário, prey e /hunt (mantém só keepalive e lives).',
+        });
+    } else {
+        if (!caidosOn) {
+            items.push({
+                cls: 'warn',
+                title: 'Limitação ativa: Captura automática desligada',
+                detail: 'O bot não vai lançar Pokébolas em Pokémon caídos nem em Shinies.',
+            });
+        }
+        if (serverEco) {
+            items.push({
+                cls: 'warn',
+                title: 'Limitação ativa: Economia do servidor (sem detecção prévia de Shiny)',
+                detail: 'No Headless, o servidor corta o feed de campo. O bot tenta capturar pelo fallback de batalha, mas não identifica Shiny antes de jogar a bola. Deixe desmarcado para manter 0% GPU + captura 100% garantida + Shiny.',
+            });
+        }
+    }
+
+    if (items.length === 0) {
+        items.push({
+            cls: 'ok',
+            title: 'Modo completo: captura e detecção de Shiny garantidas',
+            detail: `Captura em caídos ativa com detecção de Shiny antes da Pokébola (inclusive no Modo Eco Headless e no Modo Economia visual do jogo com 0% GPU)${livesOn ? (smartOn ? ' · Gestor Inteligente de Buffs ligado.' : ' · Lives ligadas.') : '.'}`,
+        });
+    }
+
+    const frag = document.createDocumentFragment();
+    for (const it of items) {
+        const el = document.createElement('div');
+        el.className = `mode-warn-item ${it.cls}`;
+        const t = document.createElement('div');
+        t.className = 'mode-warn-title';
+        t.textContent = it.title;
+        const d = document.createElement('div');
+        d.className = 'mode-warn-detail';
+        d.textContent = it.detail;
+        el.append(t, d);
+        frag.appendChild(el);
+    }
+    box.replaceChildren(frag);
+}
+
 function renderTopTabsAndSlots() {
     for (const acc of ACCOUNTS) {
         const s = snapshots[acc];
@@ -340,13 +465,22 @@ function renderTopTabsAndSlots() {
         const hunt = s?.trainer?.huntName && s.trainer.huntName !== '-' ? s.trainer.huntName : '';
         const stLabel = STATUS_LABELS[status] || status.toUpperCase();
         const isEmbedded = webviews.has(acc);
+        const warns = Array.isArray(s?.modeWarnings) ? s.modeWarnings : [];
 
+        const tabBtn = document.querySelector(`.acc-tab[data-acc="${acc}"]`);
+        if (tabBtn) {
+            tabBtn.classList.toggle('has-mode-warn', warns.length > 0);
+            tabBtn.title = warns.length > 0 ? warns.map((w) => w.title).join(' | ') : '';
+        }
         const dot = $(`dot-${acc}`);
         if (dot) dot.className = `acc-dot ${status}`;
         const tabName = $(`tabName-${acc}`);
         if (tabName) tabName.textContent = `${acc}. ${nick}`;
         const tabSub = $(`tabSub-${acc}`);
-        if (tabSub) tabSub.textContent = hunt ? `${stLabel} · ${hunt}` : stLabel;
+        if (tabSub) {
+            const baseSub = hunt ? `${stLabel} · ${hunt}` : stLabel;
+            tabSub.textContent = warns.length > 0 ? `⚠ ${baseSub}` : baseSub;
+        }
 
         // Browser slot header & placeholder
         const sDot = $(`slotDot-${acc}`);
@@ -430,6 +564,8 @@ function renderActiveAccountPanel() {
 
     const btnEmb = $('btnToggleEmbedded');
     btnEmb.textContent = isEmbedded ? 'Fechar Embutido (Ir Headless)' : 'Abrir no Embutido';
+
+    renderModeWarningsBanner(data);
 
     // Active Pokemon & Hunt
     const pk = data.activePokemon;
@@ -650,6 +786,7 @@ function renderActiveAccountPanel() {
             el.checked = kkRews.has(el.dataset.kkReward);
         });
         setConfigDirty(Boolean(dirtyByAcc[activeAccount]));
+        renderConfigModePreview();
     }
 
     // Connections
@@ -939,7 +1076,7 @@ function isToastWorthyLog(entry) {
     const k = String(entry.kind || '');
     const txt = String(entry.text || '');
     if (k === 'shiny' || k === 'reward' || k === 'error') return true;
-    if (k === 'warn') return /sess[aã]o|combate|falha|desconect|expir|erro|morreu|morte|cancelad/i.test(txt);
+    if (k === 'warn') return /sess[aã]o|combate|falha|desconect|expir|erro|morreu|morte|cancelad|limita|shiny|captura|somente ping|feed de campo/i.test(txt);
     if (k === 'ok') return /troca de hunt|centro m[eé]dico|equipe curada|conectad|cookies|sincronizad|salva/i.test(txt);
     if (k === 'info') return /\/hunt recomenda|troca .* agendada|indo para o centro/i.test(txt);
     return false;
@@ -1129,7 +1266,7 @@ function renderUpdateUi(st) {
     const btnCheck = $('btnUpdateCheck');
     const brandVer = document.querySelector('.brand-ver');
 
-    const curVer = st.currentVersion || '1.0.3';
+    const curVer = st.currentVersion || '1.0.4';
     const shortCur = curVer.replace(/\.0$/, '');
     if (brandVer) brandVer.textContent = `v${shortCur}`;
     document.title = `Nexo PokeBot v${shortCur}`;
@@ -1412,7 +1549,34 @@ function wireEvents() {
         }, 20 * 60 * 1000);
     });
 
-    $('cfgToggles').addEventListener('change', () => setConfigDirty(true));
+    $('cfgToggles').addEventListener('change', (ev) => {
+        setConfigDirty(true);
+        renderConfigModePreview();
+        const target = ev.target;
+        if (!target || target.tagName !== 'INPUT') return;
+        if (target.id === 'cEconomy' && target.checked) {
+            showToast({
+                kind: 'warn',
+                title: 'Atenção: Economia do servidor',
+                text: 'Este modo corta o feed de campo no Headless e impede detectar Shiny antes de jogar a Pokébola (clique em Salvar para aplicar).',
+                account: activeAccount,
+            });
+        } else if (target.id === 'cEconomyPingOnly' && target.checked) {
+            showToast({
+                kind: 'error',
+                title: 'Atenção: Modo Somente Ping',
+                text: 'Pausa captura, Shiny, restock, passe, prey e /hunt, mantendo apenas keepalive e lives (clique em Salvar para aplicar).',
+                account: activeAccount,
+            });
+        } else if (target.id === 'cCaidos' && !target.checked) {
+            showToast({
+                kind: 'warn',
+                title: 'Captura automática desmarcada',
+                text: 'O bot deixará de jogar Pokébolas em caídos e Shinies ao salvar.',
+                account: activeAccount,
+            });
+        }
+    });
     $('cfgFields').addEventListener('change', () => setConfigDirty(true));
     $('cfgFields').addEventListener('input', () => setConfigDirty(true));
     $('cfgChips').addEventListener('change', () => setConfigDirty(true));

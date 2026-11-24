@@ -49,6 +49,10 @@ const MAIN_WORLD_HOOK = `(() => {
                 if (parsed && parsed.t === 'cliente.economia' && parsed.ativo === true) {
                     // Mantem o Modo Economia visual do jogo (canvas desligado / 0% GPU),
                     // mas preserva o feed leve de caidos no servidor para o Auto-Catch lancar Pokebolas.
+                    if (!this.__pbEcoNotified) {
+                        this.__pbEcoNotified = true;
+                        window.postMessage({ __pbHub: 'game-eco-preserved' }, '*');
+                    }
                     return origSend.call(this, JSON.stringify({ t: 'cliente.economia', ativo: false }));
                 }
             }
@@ -155,11 +159,15 @@ const MAIN_WORLD_HOOK = `(() => {
     setTimeout(checkSession, 800);
 })();`;
 
-try {
-    webFrame.executeJavaScript(MAIN_WORLD_HOOK, false);
-} catch {
-    // Re-injetado no dom-ready caso falhe antes da carga inicial
-}
+const injectMainWorldHook = () => {
+    try {
+        webFrame.executeJavaScript(MAIN_WORLD_HOOK, false);
+    } catch {
+        // Re-injetado no DOMContentLoaded caso falhe antes da carga inicial
+    }
+};
+injectMainWorldHook();
+window.addEventListener('DOMContentLoaded', injectMainWorldHook, { once: true });
 
 window.addEventListener('message', (ev) => {
     if (ev.source !== window || !ev.data || typeof ev.data !== 'object') return;
@@ -167,5 +175,7 @@ window.addEventListener('message', (ev) => {
         ipcRenderer.sendToHost('pb-ws-frame', ev.data.data);
     } else if (ev.data.__pbHub === 'session' && ev.data.session) {
         ipcRenderer.sendToHost('pb-session', ev.data.session);
+    } else if (ev.data.__pbHub === 'game-eco-preserved') {
+        ipcRenderer.sendToHost('pb-game-eco', true);
     }
 });

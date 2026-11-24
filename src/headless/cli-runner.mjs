@@ -579,7 +579,11 @@ export async function runHeadlessFarm(argv = process.argv.slice(2), options = {}
                     ? true
                     : args.economy === 'off'
                         ? false
-                        : Boolean(state?.loja?.vip && (state?.automation?.autoBallSemParar || state?.automation?.autoBallAteCapturar));
+                        : Boolean(
+                            config.caidosEnabled === false &&
+                            state?.loja?.vip &&
+                            (state?.automation?.autoBallSemParar || state?.automation?.autoBallAteCapturar)
+                        );
                 sendFrame({ t: 'cliente.economia', ativo: ecoActive });
                 runTickForState(state);
                 liveBridge.startTimer();

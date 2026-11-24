@@ -131,9 +131,36 @@ export function createStateMerger() {
  */
 export function createFieldTracker() {
     const mobs = new Map();
+    const recentBattleSlots = [];
     let serverNow = Date.now();
-    let lastBattleSlot = null;
-    let lastBattleSlotAt = 0;
+
+    const pruneRecentSlots = (ts) => {
+        for (let i = recentBattleSlots.length - 1; i >= 0; i--) {
+            if (ts - recentBattleSlots[i].ts > 15_000) {
+                recentBattleSlots.splice(i, 1);
+            }
+        }
+    };
+
+    const recordAttackedSlot = (slot, ts) => {
+        pruneRecentSlots(ts);
+        const existingIdx = recentBattleSlots.findIndex((item) => item.slot === slot);
+        if (existingIdx !== -1) recentBattleSlots.splice(existingIdx, 1);
+        recentBattleSlots.push({ slot, ts });
+        if (recentBattleSlots.length > 8) recentBattleSlots.shift();
+    };
+
+    const consumeFallbackSlot = (ts) => {
+        pruneRecentSlots(ts);
+        while (recentBattleSlots.length > 0) {
+            const candidate = recentBattleSlots.shift();
+            if (!candidate) continue;
+            const cur = mobs.get(candidate.slot);
+            if (cur && cur.morto && Number(cur.expiraEm || 0) > ts) continue;
+            return candidate.slot;
+        }
+        return null;
+    };
 
     const applyCampo = (m, nowMs) => {
         serverNow = Number(m?.ts || nowMs || serverNow);
@@ -161,8 +188,7 @@ export function createFieldTracker() {
 
     const applyCampoInit = (m, nowMs) => {
         mobs.clear();
-        lastBattleSlot = null;
-        lastBattleSlotAt = 0;
+        recentBattleSlots.length = 0;
         serverNow = Number(m?.ts || nowMs || Date.now());
         if (m?.mobs || m?.fora) {
             applyCampo(m, nowMs);
@@ -174,17 +200,16 @@ export function createFieldTracker() {
         const ts = Number(nowMs || Date.now());
         const kind = e.k || e.t || e.tipo || e.acao;
         if (kind === 'ataque' && e.slot != null) {
-            lastBattleSlot = e.slot;
-            lastBattleSlotAt = ts;
+            recordAttackedSlot(e.slot, ts);
             return false;
         }
         if (kind === 'morte' && e.quem === 'selvagem' && !e.safari) {
-            const usedFallbackSlot = e.slot == null;
-            const slot = e.slot != null
-                ? e.slot
-                : (lastBattleSlot != null && ts - lastBattleSlotAt <= 15_000 ? lastBattleSlot : null);
+            const slot = e.slot != null ? e.slot : consumeFallbackSlot(ts);
             if (slot == null) return false;
-            if (usedFallbackSlot) lastBattleSlot = null;
+            if (e.slot != null) {
+                const idx = recentBattleSlots.findIndex((item) => item.slot === e.slot);
+                if (idx !== -1) recentBattleSlots.splice(idx, 1);
+            }
             const prev = mobs.get(slot) || {};
             if (prev.morto && Number(prev.expiraEm || 0) > ts) return false;
             mobs.set(slot, {
@@ -200,7 +225,11 @@ export function createFieldTracker() {
             return true;
         }
         if (kind === 'bola' || kind === 'capturado' || kind === 'fugiu') {
-            if (e.slot != null) mobs.delete(e.slot);
+            if (e.slot != null) {
+                mobs.delete(e.slot);
+                const idx = recentBattleSlots.findIndex((item) => item.slot === e.slot);
+                if (idx !== -1) recentBattleSlots.splice(idx, 1);
+            }
         }
         return false;
     };
@@ -235,11 +264,72 @@ export function createFieldTracker() {
     const getMobs = () => [...mobs.values()];
     const reset = () => {
         mobs.clear();
-        lastBattleSlot = null;
-        lastBattleSlotAt = 0;
+        recentBattleSlots.length = 0;
     };
 
     return { applyCampoInit, applyCampo, applyBattleEvent, getFallenCorpses, getMobs, reset };
+}
+
+/**
+ * Calcula os avisos ativos quando alguma configuracao ou estado de economia limita funcoes do bot.
+ * @param {object} [params] Estado atual: config, status, mode, economyActive e campoFeedDegraded.
+ * @returns {Array<{ code: string, severity: 'danger'|'warn', title: string, detail: string, fixLabel?: string, fixConfig?: object }>}
+ */
+export function computeModeWarnings({
+    config = {},
+    status = 'disconnected',
+    mode = 'headless',
+    economyActive = false,
+    campoFeedDegraded = false,
+} = {}) {
+    const warnings = [];
+    const cfg = config || {};
+    const isOnline = status === 'connected' || status === 'bridge';
+
+    if (cfg.economyPingOnly) {
+        warnings.push({
+            code: 'economy-ping-only',
+            severity: 'danger',
+            title: 'Modo Somente Ping ativo: automações pausadas',
+            detail: 'Captura automática, detecção de Shiny, Restock, Passe, Prey e /hunt estão pausados neste modo (mantém apenas keepalive e lives).',
+            fixLabel: 'Restaurar captura + Shiny',
+            fixConfig: { economyPingOnly: false, economyMode: 'auto', caidosEnabled: true },
+        });
+        return warnings;
+    }
+
+    if (cfg.caidosEnabled === false) {
+        warnings.push({
+            code: 'caidos-disabled',
+            severity: 'warn',
+            title: 'Captura automática desligada',
+            detail: 'O bot não vai lançar Pokébolas em Pokémon caídos nem em Shinies enquanto "Capturar Pokémon caídos" estiver desmarcado.',
+            fixLabel: 'Reativar captura',
+            fixConfig: { caidosEnabled: true },
+        });
+    }
+
+    if (cfg.economyMode === 'on' && mode !== 'browser-bridge') {
+        warnings.push({
+            code: 'server-economy-no-shiny',
+            severity: 'warn',
+            title: 'Economia do servidor ativa: sem detecção de Shiny',
+            detail: 'O servidor corta o feed de campo neste modo. O bot tenta capturar pelo fallback de batalha, mas não detecta Shiny antes de jogar a Pokébola (nem escolhe a Bola Shiny) e pode perder caídos se o servidor omitir o slot. No Modo Eco padrão (desmarcado), o bot já roda com 0% GPU e mantém 100% da captura + Shiny.',
+            fixLabel: 'Ativar captura + Shiny',
+            fixConfig: { economyMode: 'auto', caidosEnabled: true },
+        });
+    } else if (isOnline && cfg.caidosEnabled !== false && (campoFeedDegraded || (economyActive && mode !== 'browser-bridge'))) {
+        warnings.push({
+            code: 'campo-feed-missing',
+            severity: 'warn',
+            title: 'Feed de campo indisponível: detecção de Shiny limitada',
+            detail: 'O servidor não está enviando o feed de campo nesta hunt. O bot continua tentando lançar Pokébolas pelo fallback de batalha, mas não consegue identificar Shiny antes do arremesso.',
+            fixLabel: 'Restaurar feed de campo',
+            fixConfig: { economyMode: 'auto', economyPingOnly: false, caidosEnabled: true },
+        });
+    }
+
+    return warnings;
 }
 
 const SHINY_BALL_ORDERS = {

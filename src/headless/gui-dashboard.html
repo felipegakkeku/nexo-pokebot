@@ -181,6 +181,8 @@
       </div>
     </div>
 
+    <div id="modeWarnBanner" hidden style="margin-bottom:12px;display:flex;flex-direction:column;gap:8px;"></div>
+
     <div class="grid-main">
       <div class="col">
         <div class="card">
@@ -285,10 +287,10 @@
             <label class="chk"><input type="checkbox" id="cLiveSmart" /> Balancear buffs ate a meta</label>
           </div>
           <div class="cfg-inputs">
-            <div class="field"><label>Modo Economia</label>
-              <select id="cEco">
-                <option value="auto">Auto (VIP)</option>
-                <option value="on">Sempre ON</option>
+            <div class="field"><label>Economia do Servidor</label>
+              <select id="cEco" title="Auto mantém o feed de campo ativo para captura 100% garantida + detecção de Shiny">
+                <option value="auto">Auto (captura + Shiny)</option>
+                <option value="on">Sempre ON (sem Shiny previo)</option>
                 <option value="off">Sempre OFF</option>
               </select>
             </div>
@@ -805,6 +807,31 @@
 
       const fmtDec = (n) => String(Number(n || 0)).replace('.', ',');
       const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const warnHost = document.getElementById('modeWarnBanner');
+      if (warnHost) {
+        const mw = Array.isArray(data.modeWarnings) ? data.modeWarnings : [];
+        warnHost.hidden = mw.length === 0;
+        if (mw.length > 0) {
+          warnHost.innerHTML = mw.map((w, idx) => {
+            const isDanger = w.severity === 'danger';
+            const border = isDanger ? 'rgba(239,68,68,0.55)' : 'rgba(245,158,11,0.5)';
+            const bg = isDanger ? 'rgba(239,68,68,0.12)' : 'rgba(245,158,11,0.1)';
+            const tc = isDanger ? '#fca5a5' : '#fde68a';
+            const btnHtml = w.fixConfig
+              ? `<button type="button" data-fix-idx="${idx}" style="margin-top:6px;padding:4px 9px;font-size:11px;background:#1e3a8a;border-color:#3b82f6;color:#fff;">${esc(w.fixLabel || 'Restaurar modo completo')}</button>`
+              : '';
+            return `<div style="padding:10px 12px;border-radius:10px;border:1px solid ${border};border-left:3px solid ${isDanger ? '#ef4444' : '#f59e0b'};background:${bg};"><div style="font-size:12.5px;font-weight:800;color:${tc};">${esc(w.title)}</div><div style="font-size:12px;margin-top:3px;line-height:1.4;">${esc(w.detail)}</div>${btnHtml}</div>`;
+          }).join('');
+          warnHost.querySelectorAll('[data-fix-idx]').forEach((btn) => {
+            btn.onclick = () => {
+              const item = mw[Number(btn.dataset.fixIdx)];
+              if (item?.fixConfig) postAction('set-config', { config: item.fixConfig });
+            };
+          });
+        } else {
+          warnHost.innerHTML = '';
+        }
+      }
       document.getElementById('kKills').textContent = fmtNum(st.kills);
       document.getElementById('kKillsRate').textContent = `${fmtDec(st.killsPerMin || 0)}/min`;
       document.getElementById('kXp').textContent = fmtNum(st.xpGained);

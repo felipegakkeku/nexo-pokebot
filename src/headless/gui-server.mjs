@@ -23,6 +23,7 @@ import {
     createStateMerger,
     createFieldTracker,
     evaluateHeadlessTick,
+    computeModeWarnings,
 } from './protocol-engine.mjs';
 import {
     liveRewards,
@@ -2111,6 +2112,10 @@ export function createHeadlessController(options = {}) {
     let ondaSeq = 0;
     let combateOndaSeq = 0;
     let fieldInitialized = false;
+    let lastCampoAt = 0;
+    let lastCampoHealAt = 0;
+    let battleKillsWithoutCampo = 0;
+    let campoFeedDegraded = false;
     let pendingHuntSlug = null;
     let huntFlushTimer = null;
 
@@ -2514,6 +2519,9 @@ export function createHeadlessController(options = {}) {
     const resolveEconomyFlag = (state) => {
         if (config.economyPingOnly || config.economyMode === 'on') return true;
         if (config.economyMode === 'off') return false;
+        // Em modo auto, so ativa cliente.economia no servidor se a captura de caidos estiver desligada;
+        // mesmo em contas VIP, o feed de campo e obrigatorio para detectar Shinies (b.sh) antes do arremesso.
+        if (config.caidosEnabled !== false) return false;
         return Boolean(state?.loja?.vip && (state?.automation?.autoBallSemParar || state?.automation?.autoBallAteCapturar));
     };
 
@@ -2653,6 +2661,35 @@ export function createHeadlessController(options = {}) {
         if (addedCorpse && config.caidosEnabled !== false) {
             runTickForState(merger.getState());
         }
+        const stNow = merger.getState();
+        const inActiveHunt = Boolean(
+            stNow?.huntSlug &&
+            !stNow.noCentro &&
+            !stNow.casa?.dentro &&
+            !stNow.boss?.arena
+        );
+        const hadWildKill = eventos.some((ev) => {
+            if (!ev || typeof ev !== 'object') return false;
+            const k = ev.k || ev.t || ev.tipo || ev.acao;
+            return k === 'morte' && ev.quem === 'selvagem' && !ev.safari;
+        });
+        if (hadWildKill && inActiveHunt && config.caidosEnabled !== false && !config.economyPingOnly) {
+            const campoStale = lastCampoAt === 0 || ts - lastCampoAt >= 8_000;
+            if (campoStale) {
+                battleKillsWithoutCampo += 1;
+                const shouldKeepCampo = connectionMode === 'browser-bridge' || config.economyMode !== 'on';
+                if (shouldKeepCampo && battleKillsWithoutCampo >= 2 && ts - lastCampoHealAt >= 15_000) {
+                    lastCampoHealAt = ts;
+                    if (sendFrame({ t: 'cliente.economia', ativo: false })) {
+                        economyActive = false;
+                        pushLog('warn', 'Feed de campo ausente em combate: reativando feed leve para garantir captura e detecção de Shiny.');
+                    }
+                }
+                if (battleKillsWithoutCampo >= 3) {
+                    campoFeedDegraded = true;
+                }
+            }
+        }
     };
 
     const handleMessage = (rawData) => {
@@ -2745,10 +2782,16 @@ export function createHeadlessController(options = {}) {
 
             if (isBridge) {
                 economyActive = false;
+                lastCampoAt = 0;
+                battleKillsWithoutCampo = 0;
+                campoFeedDegraded = false;
                 ensureHuntGuideTimer();
                 void checkHuntGuide();
             } else {
                 economyActive = resolveEconomyFlag(state);
+                lastCampoAt = 0;
+                battleKillsWithoutCampo = 0;
+                campoFeedDegraded = false;
                 sendFrame({ t: 'cliente.economia', ativo: economyActive });
                 if (config.huntGuideMode !== 'off') {
                     ensureHuntGuideTimer();
@@ -2789,6 +2832,9 @@ export function createHeadlessController(options = {}) {
         if (m.t === 'campo.init') {
             if (m.ts != null) syncServerClock(m.ts);
             fieldInitialized = true;
+            lastCampoAt = nowFn();
+            battleKillsWithoutCampo = 0;
+            campoFeedDegraded = false;
             field.applyCampoInit(m, nowFn());
             if (pendingHuntSlug) schedulePendingHuntFlush();
             return;
@@ -2797,6 +2843,9 @@ export function createHeadlessController(options = {}) {
         if (m.t === 'campo') {
             if (m.ts != null) syncServerClock(m.ts);
             fieldInitialized = true;
+            lastCampoAt = nowFn();
+            battleKillsWithoutCampo = 0;
+            campoFeedDegraded = false;
             field.applyCampo(m, nowFn());
             if (Array.isArray(m.mobs)) {
                 const activeSlots = new Set();
@@ -3705,6 +3754,7 @@ export function createHeadlessController(options = {}) {
         const prevGuideMetric = config.huntGuideMetric;
         const prevEcoMode = config.economyMode;
         const prevPingOnly = config.economyPingOnly;
+        const prevCaidosEnabled = config.caidosEnabled;
         const prevLiveEnabled = config.liveEnabled;
         const prevBrowserProfile = config.browserProfile;
         const prevPotionsKey = JSON.stringify(config.preferredPotionIds || []);
@@ -3745,15 +3795,33 @@ export function createHeadlessController(options = {}) {
             (ws && ws.readyState === 1) ||
             (connectionMode === 'browser-bridge' && activeBridge && activeBridge.isReady())
         );
-        if (connectionMode !== 'browser-bridge' && ws && ws.readyState === 1 && (config.economyMode !== prevEcoMode || config.economyPingOnly !== prevPingOnly)) {
-            economyActive = resolveEconomyFlag(state);
-            sendFrame({ t: 'cliente.economia', ativo: economyActive });
-            pushLog(
-                'info',
-                config.economyPingOnly
-                    ? 'Modo Economia (So Ping): ON (apenas keepalive).'
-                    : `Modo economia atualizado no servidor: ${economyActive ? 'ON' : 'OFF'}`
-            );
+        const ecoChanged = config.economyMode !== prevEcoMode ||
+            config.economyPingOnly !== prevPingOnly ||
+            config.caidosEnabled !== prevCaidosEnabled;
+        if (connectionMode !== 'browser-bridge' && ws && ws.readyState === 1 && ecoChanged) {
+            const nextEco = resolveEconomyFlag(state);
+            if (nextEco !== economyActive || config.economyMode !== prevEcoMode || config.economyPingOnly !== prevPingOnly) {
+                economyActive = nextEco;
+                if (!economyActive) {
+                    campoFeedDegraded = false;
+                    battleKillsWithoutCampo = 0;
+                }
+                sendFrame({ t: 'cliente.economia', ativo: economyActive });
+                pushLog(
+                    'info',
+                    config.economyPingOnly
+                        ? 'Modo Economia (So Ping): ON (apenas keepalive).'
+                        : `Modo economia atualizado no servidor: ${economyActive ? 'ON' : 'OFF'}`
+                );
+            }
+        }
+        if (config.economyPingOnly && !prevPingOnly) {
+            pushLog('warn', 'Aviso de limitação: Modo Somente Ping pausa captura, Shiny, restock, passe, prey e /hunt.');
+        } else if (config.economyMode === 'on' && prevEcoMode !== 'on' && !config.economyPingOnly) {
+            pushLog('warn', 'Aviso de limitação: Economia do servidor corta o feed de campo e desativa detecção prévia de Shiny antes da Pokébola.');
+        }
+        if (config.caidosEnabled === false && prevCaidosEnabled !== false) {
+            pushLog('warn', 'Aviso de limitação: Captura automática desligada (o bot não vai jogar Pokébolas em caídos nem em Shinies).');
         }
         if (config.liveEnabled !== prevLiveEnabled) {
             if (config.liveEnabled) {
@@ -3976,11 +4044,21 @@ export function createHeadlessController(options = {}) {
             ? ''
             : (config.browserProfile && activeExistingProfile?.id ? activeExistingProfile.id : (config.browserProfile || ''));
 
+        const modeWarnings = computeModeWarnings({
+            config,
+            status,
+            mode: connectionMode,
+            economyActive,
+            campoFeedDegraded,
+        });
+
         return {
-            version: '1.0.3',
+            version: '1.0.4',
             status,
             mode: connectionMode,
             lastError,
+            modeWarnings,
+            campoFeedDegraded,
             loginInProgress,
             browserProfile: activeExistingProfile?.name || null,
             browserProfileSetting: normalizedProfileSetting,

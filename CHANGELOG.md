@@ -2,6 +2,14 @@
 
 Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova versão (o workflow usa o texto da seção como nota da Release).
 
+## 1.0.4
+
+Captura garantida em todos os modos de economia, autorecuperação do feed de campo e avisos claros de limitações e capacidades na HUD:
+
+- **Captura e detecção de Shiny garantidas em contas VIP no Modo Eco (`src/headless/gui-server.mjs`, `src/headless/cli-runner.mjs`)**: no modo `auto`, o Headless não ativa mais `cliente.economia: true` enquanto a captura de caídos estiver ligada, garantindo que contas VIP continuem recebendo `campo` com `sh: true` para priorizar Shinies e jogar a Bola Shiny.
+- **Autorecuperação automática do feed de campo + fila AoE (`src/headless/protocol-engine.mjs`, `src/headless/gui-server.mjs`, `src/electron/webview-preload.cjs`)**: fila de múltiplos slots em combate (`recentBattleSlots`) para abates simultâneos em fallback de batalha, watchdog que reativa o feed leve automaticamente caso `campo` suma durante o combate (mantendo 0% GPU no Modo Economia visual do jogo) e re-injeção garantida no `DOMContentLoaded`.
+- **Avisos de limitações ao trocar de modo + guia de capacidades (`src/electron/renderer.html`, `renderer.js`, `styles.css`, `src/headless/gui-dashboard.html`)**: banner com botão 1-clique **Restaurar captura + Shiny**, toast instantâneo ao ativar modos que limitam funções (como **Economia do servidor** sem detecção prévia de Shiny ou **Somente Ping**), aviso nas abas de conta e cartão recolhível explicando como cada modo e capacidade do Nexo PokeBot funciona.
+
 ## 1.0.3
 
 Correção de captura automática (**Auto-Catch**) com o **Modo Economia / ULTRA Economia** do PokeIdle ativado:

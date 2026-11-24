@@ -38,6 +38,7 @@ import {
     resolveRestockBallId,
     resolveRestockPotionId,
     evaluateHeadlessTick,
+    computeModeWarnings,
 } from '../src/headless/protocol-engine.mjs';
 import { parseCliArgs } from '../src/headless/cli-runner.mjs';
 import {
@@ -2994,4 +2995,146 @@ test('modo economia: Auto-Catch lanca pokebola via eventos batalha no headless e
     // Usuario religa Capturar caidos -> preload reenvia ativo: false imediatamente
     sandboxWindow.__pbSetNeedCampoFeed(true);
     assert.deepEqual(wireSent[2], { t: 'cliente.economia', ativo: false });
+});
+
+test('garantia de captura e avisos: AoE multi-kill, VIP preserva campo, watchdog auto-recupera e computeModeWarnings alerta limitacoes', async () => {
+    // 1) computeModeWarnings: vazio no modo completo/embutido, alerta claro em modos limitados
+    assert.deepEqual(computeModeWarnings({ config: { caidosEnabled: true, economyMode: 'auto', economyPingOnly: false }, status: 'connected', mode: 'headless' }), []);
+    assert.deepEqual(computeModeWarnings({ config: { caidosEnabled: true, economyMode: 'on', economyPingOnly: false }, status: 'bridge', mode: 'browser-bridge' }), []);
+    const wEco = computeModeWarnings({ config: { caidosEnabled: true, economyMode: 'on', economyPingOnly: false }, status: 'connected', mode: 'headless' });
+    assert.equal(wEco.length, 1);
+    assert.equal(wEco[0].code, 'server-economy-no-shiny');
+    assert.match(wEco[0].title, /Shiny/i);
+    assert.deepEqual(wEco[0].fixConfig, { economyMode: 'auto', caidosEnabled: true });
+
+    const wPing = computeModeWarnings({ config: { caidosEnabled: true, economyMode: 'auto', economyPingOnly: true }, status: 'connected', mode: 'headless' });
+    assert.equal(wPing.length, 1);
+    assert.equal(wPing[0].code, 'economy-ping-only');
+    assert.equal(wPing[0].severity, 'danger');
+
+    const wDegraded = computeModeWarnings({ config: { caidosEnabled: true, economyMode: 'auto', economyPingOnly: false }, status: 'connected', mode: 'headless', campoFeedDegraded: true });
+    assert.equal(wDegraded.length, 1);
+    assert.equal(wDegraded[0].code, 'campo-feed-missing');
+
+    // 2) AoE multi-kill em fallback de batalha: captura TODOS os slots abatidos na mesma onda
+    const aoeField = createFieldTracker();
+    aoeField.applyBattleEvent({ k: 'ataque', por: 'jogador', slot: 2 }, 20_000);
+    aoeField.applyBattleEvent({ k: 'ataque', por: 'jogador', slot: 5 }, 20_050);
+    assert.equal(aoeField.applyBattleEvent({ k: 'morte', quem: 'selvagem', nome: 'MobA', level: 15 }, 20_100), true);
+    assert.equal(aoeField.applyBattleEvent({ k: 'morte', quem: 'selvagem', nome: 'MobB', level: 16 }, 20_120), true);
+    const aoeSlots = aoeField.getFallenCorpses(20_200).map((c) => c.slot).sort((a, b) => a - b);
+    assert.deepEqual(aoeSlots, [2, 5]);
+
+    // 3) VIP com autoBallSemParar no Headless auto + caidosEnabled=true preserva cliente.economia=false + watchdog auto-recupera feed campo
+    const dir = makeTempDir('pokebot-vip-guard-');
+    const sent = [];
+    let sock = null;
+    try {
+        const controller = createHeadlessController({
+            cwd: dir,
+            configPath: join(dir, '.pokebot-headless-config.json'),
+            disableBrowserProfileSync: true,
+            disableHeadlessHuntGuide: true,
+            disableVotePolling: true,
+            initialConfig: {
+                economyMode: 'auto',
+                caidosEnabled: true,
+                preferredBall: 'ultra',
+                shinyBall: 'beast',
+                restockEnabled: false,
+                dailyPassEnabled: false,
+                preyEnabled: false,
+                liveEnabled: false,
+                ensureNativeAutoHeal: false,
+            },
+            liveRunner: async () => {},
+            liveDisposer: () => {},
+            resolveSession: () => ({
+                nick: 'VipGuard',
+                token: makeFakeJwt({ nick: 'VipGuard', exp: Date.now() + 3_600_000 }),
+                dispositivo: 'uuid-vip',
+                prefs: {},
+                payload: { nick: 'VipGuard', exp: Date.now() + 3_600_000 },
+                source: 'mock',
+            }),
+            wsFactory: () => {
+                sock = {
+                    readyState: 1,
+                    send(raw) { sent.push(JSON.parse(raw)); },
+                    close() { this.readyState = 3; },
+                };
+                queueMicrotask(() => {
+                    sock.onopen?.();
+                    sock.onmessage?.({
+                        data: JSON.stringify({
+                            t: 'welcome',
+                            hunts: [],
+                            estado: {
+                                cheio: true,
+                                nick: 'VipGuard',
+                                level: 50,
+                                gold: 100_000,
+                                huntSlug: 'abra',
+                                loja: { vip: true },
+                                balls: { 4: 20, 5: 5 },
+                                items: {},
+                                automation: { autoBallSemParar: true, autoRevive: true, autoPotion: true, autoVoltarHunt: true },
+                                pokemons: [{ id: 1, level: 50 }],
+                            },
+                        }),
+                    });
+                });
+                return sock;
+            },
+        });
+        try {
+            controller.start();
+            await new Promise((r) => setTimeout(r, 30));
+            const initialEco = sent.filter((f) => f.t === 'cliente.economia');
+            assert.equal(initialEco.length, 1);
+            assert.equal(initialEco[0].ativo, false, 'VIP com caidosEnabled=true deve manter cliente.economia=false para detectar Shiny');
+            assert.deepEqual(controller.getSnapshot({ includeHunts: false }).modeWarnings, []);
+
+            // Simula 3 mortes sem nenhum frame campo chegar -> watchdog reenvia cliente.economia=false e sinaliza degradacao
+            for (const sl of [1, 2, 3]) {
+                sock.onmessage?.({
+                    data: JSON.stringify({
+                        t: 'batalha',
+                        ev: [
+                            { k: 'ataque', por: 'jogador', slot: sl },
+                            { k: 'morte', quem: 'selvagem', nome: 'Abra', level: 10 },
+                        ],
+                    }),
+                });
+            }
+            const ecoAfterWatchdog = sent.filter((f) => f.t === 'cliente.economia' && f.ativo === false);
+            assert.ok(ecoAfterWatchdog.length >= 2, 'Watchdog deve reenviar cliente.economia=false se campo sumir em combate');
+            const snapDeg = controller.getSnapshot({ includeHunts: false });
+            assert.equal(snapDeg.campoFeedDegraded, true);
+            assert.ok(snapDeg.modeWarnings.some((w) => w.code === 'campo-feed-missing'));
+
+            // Assim que um frame campo chega (inclusive com Shiny), degradacao limpa e Bola Shiny e lancada
+            sock.onmessage?.({
+                data: JSON.stringify({
+                    t: 'campo',
+                    ts: Date.now(),
+                    mobs: [{ s: 7, n: 'Abra', nv: 10, sh: true, x: true, xr: 15_000 }],
+                }),
+            });
+            const snapOk = controller.getSnapshot({ includeHunts: false });
+            assert.equal(snapOk.campoFeedDegraded, false);
+            assert.deepEqual(snapOk.modeWarnings, []);
+            assert.ok(sent.some((f) => f.t === 'ball.throw' && f.slot === 7 && f.ballId === 5), 'Shiny deve receber Beast Ball (#5)');
+
+            // Ligar economyMode: 'on' gera aviso imediato no snapshot e log
+            controller.updateConfig({ economyMode: 'on' });
+            const snapWarn = controller.getSnapshot({ includeHunts: false });
+            assert.ok(snapWarn.modeWarnings.some((w) => w.code === 'server-economy-no-shiny'));
+            assert.ok(snapWarn.logs.some((l) => l.kind === 'warn' && /Shiny/i.test(l.text)));
+        } finally {
+            controller.stop();
+        }
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
 });
