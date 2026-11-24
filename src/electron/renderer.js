@@ -530,10 +530,11 @@ function renderGridToolbar() {
         const mb = document.querySelector(`[data-slot-act="max"][data-slot="${acc}"]`);
         if (!mb) continue;
         const on = gridState.max === acc;
-        const want = on ? 'columns' : 'maximize';
+        const want = on ? 'grid' : 'maximize';
         if (mb.dataset.ico !== want) {
             mb.dataset.ico = want;
-            mb.innerHTML = window.nexoIcons ? window.nexoIcons.icon(on ? 'grid' : 'maximize') : (on ? '⤡' : '⤢');
+            mb.setAttribute('data-icon-done', '');
+            mb.innerHTML = window.nexoIcons ? window.nexoIcons.icon(want) : (on ? '⤡' : '⤢');
         }
         mb.title = on ? 'Voltar para a grade' : 'Maximizar esta tela';
         mb.classList.toggle('active-toggle', on);
@@ -770,12 +771,56 @@ const DEFAULT_BEEPS = {
     chest: [659, 880],
     vote: [587, 784],
 };
-function playDefaultBeep(volume, event = 'shinyMiss') {
+const activeSoundNodes = new Set();
+
+function ensureSoundContext() {
+    if (!soundCtx) {
+        const Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return null;
+        soundCtx = new Ctx();
+    }
+    return soundCtx;
+}
+
+function dataUrlToArrayBuffer(dataUrl) {
+    const comma = String(dataUrl || '').indexOf(',');
+    if (comma < 0) return null;
+    const b64 = dataUrl.slice(comma + 1);
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes.buffer;
+}
+
+async function playBufferViaWebAudio(dataUrl, volume) {
+    const ctx = ensureSoundContext();
+    if (!ctx) return false;
+    if (ctx.state === 'suspended') {
+        await ctx.resume().catch(() => {});
+    }
+    if (ctx.state !== 'running') return false;
+    const arr = dataUrlToArrayBuffer(dataUrl);
+    if (!arr) return false;
+    const decoded = await ctx.decodeAudioData(arr);
+    const src = ctx.createBufferSource();
+    const gain = ctx.createGain();
+    src.buffer = decoded;
+    gain.gain.setValueAtTime(volume, ctx.currentTime);
+    src.connect(gain).connect(ctx.destination);
+    activeSoundNodes.add(src);
+    src.onended = () => activeSoundNodes.delete(src);
+    src.start(0);
+    return true;
+}
+
+async function playDefaultBeep(volume, event = 'shinyMiss') {
     if (volume <= 0) return;
     try {
-        soundCtx = soundCtx || new AudioContext();
-        const ctx = soundCtx;
-        if (ctx.state === 'suspended') void ctx.resume();
+        const ctx = ensureSoundContext();
+        if (!ctx) return;
+        if (ctx.state === 'suspended') {
+            await ctx.resume().catch(() => {});
+        }
         const notes = DEFAULT_BEEPS[event] || DEFAULT_BEEPS.shinyMiss;
         notes.forEach((freq, i) => {
             const t0 = ctx.currentTime + i * 0.17;
@@ -814,14 +859,22 @@ async function playSoundEvent(event, { force = false } = {}) {
             try {
                 const audio = new Audio(src);
                 audio.volume = volume;
+                activeSoundNodes.add(audio);
+                const cleanup = () => activeSoundNodes.delete(audio);
+                audio.addEventListener('ended', cleanup, { once: true });
+                audio.addEventListener('error', cleanup, { once: true });
                 await audio.play();
                 return true;
             } catch {
-                // cai no bipe padrao
+                try {
+                    if (await playBufferViaWebAudio(src, volume)) return true;
+                } catch {
+                    // cai no bipe padrao
+                }
             }
         }
     }
-    playDefaultBeep(volume, event);
+    await playDefaultBeep(volume, event);
     return true;
 }
 
@@ -926,7 +979,14 @@ async function initSoundControls() {
     });
 
     window.pokeHub.onPlaySound?.(({ event } = {}) => {
-        if (event) void playSoundEvent(event);
+        if (event && !window.hubUi?.isPopout?.()) void playSoundEvent(event);
+    });
+    window.pokeHub.onSoundConfigChanged?.(({ cfg, invalidateEvent } = {}) => {
+        if (cfg) {
+            soundCfg = cfg;
+            if (invalidateEvent) soundDataCache.delete(invalidateEvent);
+            renderSoundCard();
+        }
     });
 }
 
@@ -1684,12 +1744,12 @@ function renderBuffManager(lv) {
     const targetH = Number(lv.targetHours || 24);
     const guardMin = Number(lv.guardThresholdMin || 30);
     const platforms = [
-        ['twitch', 'Twitch', 'tw', lv.twitchRewards],
         ['kick', 'Kick', 'kk', lv.kickRewards],
+        ['twitch', 'Twitch', 'tw', lv.twitchRewards],
     ];
     const html = [];
     html.push(`<div class="bm-head"><div class="bm-title"><b>Gestor inteligente de buffs</b><span>${smartOn
-        ? `Mantém cada buff marcado com até <b>${targetH}h</b> guardadas e gasta os pontos primeiro no que está acabando.`
+        ? `Meta individual de <b>${targetH}h</b> na Kick e <b>${targetH}h</b> na Twitch (os bônus somam): completa cada buff nas duas plataformas antes de avançar para o próximo.`
         : `Desligado: só resgata um buff quando faltam ${guardMin} min ou menos.`}</span></div>`
         + `<span class="bm-state ${smartOn ? 'on' : 'off'}">${smartOn ? 'Ligado' : 'Desligado'}</span></div>`);
     for (const [plat, label, cls, kindsRaw] of platforms) {
@@ -1700,7 +1760,11 @@ function renderBuffManager(lv) {
         let summary = '';
         if (!kinds.length) summary = '<span class="bm-sum muted">Nenhum buff marcado</span>';
         else if (smartOn && st.allReached) summary = '<span class="bm-sum ok">✓ Todos na meta</span>';
-        else if (smartOn && st.nextKind) {
+        else if (smartOn && st.waitingPlatform && st.waitingKind) {
+            const wk = BUFF_KINDS.find(([k]) => k === st.waitingKind);
+            const wp = st.waitingPlatform === 'kick' ? 'Kick' : 'Twitch';
+            summary = `<span class="bm-sum muted">Aguardando <b>${escapeHtml(wk ? wk[1] : st.waitingKind)}</b> na ${wp}</span>`;
+        } else if (smartOn && st.nextKind) {
             const nk = BUFF_KINDS.find(([k]) => k === st.nextKind);
             summary = `<span class="bm-sum next">Próximo resgate: <b>${escapeHtml(nk ? nk[1] : st.nextKind)}</b></span>`;
         }
@@ -1714,7 +1778,7 @@ function renderBuffManager(lv) {
             else if (m <= 0) state = 'empty';
             else if (smartOn && pct >= 99.5) state = 'full';
             else if (m <= Math.max(guardMin, scaleMin * 0.15)) state = 'low';
-            const isNext = smartOn && on && st.nextKind === kind;
+            const isNext = smartOn && on && st.nextKind === kind && !st.waitingPlatform;
             const timeTxt = !on
                 ? 'não coletado'
                 : m <= 0
@@ -2268,6 +2332,11 @@ function processActivityToasts(allSnaps) {
 
         const logs = Array.isArray(snap.logs) ? snap.logs : [];
         const sigOf = (l) => `${l.time || ''}|${l.kind || ''}|${l.text || ''}`;
+        const rareList = Array.isArray(snap.drops?.recentRare)
+            ? snap.drops.recentRare
+            : (Array.isArray(snap.drops?.recent) ? snap.drops.recent.filter((d) => d?.rare) : []);
+        const dropKeyOf = (d) => (Number(d?.id) > 0 ? Number(d.id) : Number(d?.ts || 0));
+        const maxRareKey = rareList.reduce((m, d) => Math.max(m, dropKeyOf(d)), 0);
         const base = toastBaselineByAcc[acc];
         if (!base) {
             const initChests = new Set(
@@ -2277,7 +2346,7 @@ function processActivityToasts(allSnaps) {
             );
             toastBaselineByAcc[acc] = {
                 lastSig: logs.length > 0 ? sigOf(logs[logs.length - 1]) : '',
-                lastDropSig: snap.drops?.recent?.[0] ? `${snap.drops.recent[0].time}|${snap.drops.recent[0].name}|${snap.drops.recent[0].qty}` : '',
+                lastRareKey: maxRareKey,
                 manualChests: initChests,
                 voteReady: Boolean(snap.vote?.available),
                 lastOwnShinyTs: Number(snap.ownShinies?.[0]?.ts || 0),
@@ -2297,7 +2366,7 @@ function processActivityToasts(allSnaps) {
                 const hasShinyCards = Array.isArray(snap.ownShinies);
                 for (const entry of fresh) {
                     // A captura shiny ganha o cartao com a ficha logo abaixo; nao repete em texto
-                    if (hasShinyCards && entry.kind === 'shiny' && /^Capturado SHINY/i.test(entry.text || '')) continue;
+                    if (hasShinyCards && entry.kind === 'shiny' && /^(?:Capturado|Chocado) SHINY/i.test(entry.text || '')) continue;
                     if (isToastWorthyLog(entry)) {
                         const ev = entry.kind === 'shiny-miss' ? 'shinyMiss' : (entry.kind === 'error' ? 'error' : '');
                         showToast({ kind: entry.kind === 'shiny-miss' ? 'warn' : (entry.kind || 'info'), title: accLabel, text: entry.text, account: acc, event: ev });
@@ -2338,19 +2407,16 @@ function processActivityToasts(allSnaps) {
                 });
             }
             base.voteReady = voteReadyNow;
-            const topDrop = snap.drops?.recent?.[0];
-            if (topDrop && topDrop.rare) {
-                const dropSig = `${topDrop.time}|${topDrop.name}|${topDrop.qty}`;
-                if (dropSig !== base.lastDropSig) {
-                    base.lastDropSig = dropSig;
-                    showToast({
-                        kind: 'reward',
-                        title: `Drop raro · ${accLabel}`,
-                        event: 'rareDrop',
-                        text: `${topDrop.name} x${topDrop.qty || 1}`,
-                        account: acc,
-                    });
-                }
+            const freshRare = rareList.filter((d) => dropKeyOf(d) > Number(base.lastRareKey || 0)).reverse();
+            for (const rareDrop of freshRare) {
+                showToast({
+                    kind: 'reward',
+                    title: `Drop raro · ${accLabel}`,
+                    event: 'rareDrop',
+                    text: `${rareDrop.name} x${rareDrop.qty || 1}`,
+                    account: acc,
+                });
+                base.lastRareKey = Math.max(Number(base.lastRareKey || 0), dropKeyOf(rareDrop));
             }
         }
 
@@ -2554,7 +2620,7 @@ function renderUpdateUi(st) {
     const btnCheck = $('btnUpdateCheck');
     const brandVer = document.querySelector('.brand-ver');
 
-    const curVer = st.currentVersion || '1.0.9';
+    const curVer = st.currentVersion || '1.0.10';
     const shortCur = curVer.replace(/\.0$/, '');
     if (brandVer) brandVer.textContent = `v${shortCur}`;
     document.title = `Nexo PokeBot v${shortCur}`;

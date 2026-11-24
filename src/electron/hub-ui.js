@@ -977,7 +977,7 @@
         cLives: 'Assiste Twitch e Kick em protocolo leve (sem vídeo, ~40 lives para 4 contas) e resgata as recompensas.',
         cLiveStreak: 'Assiste os primeiros 15 min de cada live no player real da Twitch, invisível, em 160p e sem som, para contar a sequência.',
         cLiveFollow: 'Segue os canais das lives para liberar as recompensas que pedem follow.',
-        cLiveSmart: 'Reserva pontos e sobe primeiro o buff (XP, Captura ou Shiny) que está mais perto de acabar, até a meta escolhida.',
+        cLiveSmart: 'Aplica a meta individualmente na Kick e na Twitch (os bônus somam) e completa cada buff nas duas plataformas (XP, depois Captura, depois Shiny) antes de avançar para o próximo.',
         cEconomy: 'Corta o feed de campo no servidor no modo Headless. Economiza banda, mas impede detectar Shiny antes de jogar a bola (o bot usa os eventos de batalha). No jogo embutido, prefira o Modo Economia visual do jogo.',
         cEconomyPingOnly: 'Com a economia ligada, só mantém a conexão viva e as lives. Pausa captura, Shiny, restock, passe, prey e /hunt.',
         cStandby: 'Quando o servidor devolve o erro 4001 (sessão em outro lugar), espera em vez de reconectar sem parar.',
@@ -1265,11 +1265,27 @@
             }
             const lv = s.lives || {};
             const bonus = lv.activeBonuses || {};
-            const target = Math.max(60, Number(lv.targetHours || 24) * 60);
+            const target = Math.max(30, Number(lv.targetHours || 24) * 60);
+            const twList = Array.isArray(lv.twitchRewards) ? lv.twitchRewards : [lv.rewardType || 'xp'];
+            const kkList = Array.isArray(lv.kickRewards) ? lv.kickRewards : [lv.rewardType || 'xp'];
+            const fmtMinShort = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${Math.round(m % 60)}m` : `${Math.round(m)}m`);
             const buffs = BUFF_KINDS.map(([k, label]) => {
-                const min = Math.max(Number(bonus.twitch?.[k] || 0), Number(bonus.kick?.[k] || 0));
-                const pct = Math.min(100, (min / target) * 100);
-                return `<span class="pbuff ${k}" title="${label}: ${min >= 60 ? `${Math.floor(min / 60)} h ${Math.round(min % 60)} min` : `${Math.round(min)} min`} guardados"><b>${label}</b><i><u style="width:${pct.toFixed(0)}%"></u></i></span>`;
+                const twOn = Boolean(lv.hasTwitchToken) && twList.includes(k);
+                const kkOn = Boolean(lv.hasKickToken) && kkList.includes(k);
+                const twMin = Number(bonus.twitch?.[k] || 0);
+                const kkMin = Number(bonus.kick?.[k] || 0);
+                let pct = 0;
+                if (twOn && kkOn) {
+                    pct = Math.min(100, ((Math.min(twMin, target) + Math.min(kkMin, target)) / (2 * target)) * 100);
+                } else if (twOn) {
+                    pct = Math.min(100, (twMin / target) * 100);
+                } else if (kkOn) {
+                    pct = Math.min(100, (kkMin / target) * 100);
+                } else {
+                    pct = Math.min(100, (Math.max(twMin, kkMin) / target) * 100);
+                }
+                const tip = `${label}: Kick ${fmtMinShort(kkMin)} + Twitch ${fmtMinShort(twMin)} (meta individual: ${fmtMinShort(target)} cada)`;
+                return `<span class="pbuff ${k}" title="${esc(tip)}"><b>${label}</b><i><u style="width:${pct.toFixed(0)}%"></u></i></span>`;
             }).join('');
             const bbox = extra.querySelector('.pcard-buffs');
             if (bbox.innerHTML !== buffs) bbox.innerHTML = buffs;

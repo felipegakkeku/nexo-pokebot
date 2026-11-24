@@ -10,8 +10,10 @@ import {
     parseRewardKinds,
     resolveChannelRewardKinds,
     extractRewardHours,
+    needsBuffRedeem,
     orderBuffsForRedeem,
     resolveEffectiveThresholdMin,
+    resolveCrossPlatformBlocker,
     computeSmartBuffStatus,
     pickBonusGuardCandidate,
     encodeSpadePayload,
@@ -803,24 +805,37 @@ test('live: buff por canal, multiplos buffs simultaneos e escolha de pacote (tie
     }
 });
 
-test('live: gestor inteligente prioriza buffs zerados, pula quem ja bateu 1d (24h) e equilibra pelo menor tempo', async () => {
+test('live: gestor inteligente completa cada buff ate a meta na ordem de prioridade (XP -> Captura -> Shiny)', async () => {
     const now = 1_700_000_000_000;
     const h = (hrs) => now + hrs * 3_600_000;
     const smartCfg = { smartBalance: true, targetHours: 24, guardThresholdMin: 30 };
     assert.equal(resolveEffectiveThresholdMin(smartCfg), 1440);
+    assert.equal(needsBuffRedeem(1440, smartCfg), false, '24h exatas ja atingem a meta de 24h');
+    assert.equal(needsBuffRedeem(1430, smartCfg), true, '23h50m ainda falta para 24h');
+    assert.equal(needsBuffRedeem(30, { smartBalance: true, targetHours: 0.5, guardThresholdMin: 30 }), true, '30m em modo manter ligado renova antes de expirar');
+    assert.equal(needsBuffRedeem(34, { smartBalance: true, targetHours: 0.5, guardThresholdMin: 30 }), false, '34m ja cumpre meta de 30m');
 
-    // XP ja tem 26h (>= 1d), Captura tem 8h, Shiny tem 2h -> ordem deve ser shiny, captura, xp
+    // XP ja tem 26h (>= 1d), Captura tem 8h, Shiny tem 2h -> completa Captura ate 24h antes de ir para Shiny
     const bonusState = { bonus: { xp: h(26), captura: h(8), shiny: h(2) } };
     assert.deepEqual(
         orderBuffsForRedeem(['xp', 'captura', 'shiny'], bonusState, smartCfg, now),
-        ['shiny', 'captura', 'xp']
+        ['captura', 'shiny', 'xp']
     );
     const st1 = computeSmartBuffStatus(['xp', 'captura', 'shiny'], bonusState, smartCfg, now);
-    assert.equal(st1.nextKind, 'shiny');
+    assert.equal(st1.nextKind, 'captura');
     assert.equal(st1.allReached, false);
 
+    // Mesmo com Shiny zerado, XP em 4m (< 30m) tem prioridade maxima sobre Shiny
+    const keepOnCfg = { smartBalance: true, targetHours: 0.5, guardThresholdMin: 30 };
+    const lowXpState = { bonus: { xp: now + 4 * 60_000, captura: now + 32 * 60_000, shiny: 0 } };
+    assert.deepEqual(
+        orderBuffsForRedeem(['xp', 'captura', 'shiny'], lowXpState, keepOnCfg, now),
+        ['xp', 'shiny', 'captura']
+    );
+    assert.equal(computeSmartBuffStatus(['xp', 'captura', 'shiny'], lowXpState, keepOnCfg, now).nextKind, 'xp');
+
     // Quando todos atingem >= 24h, allReached = true e nenhum resgate e necessario
-    const fullState = { bonus: { xp: h(25), captura: h(24.5), shiny: h(30) } };
+    const fullState = { bonus: { xp: h(24), captura: h(24.5), shiny: h(30) } };
     const stFull = computeSmartBuffStatus(['xp', 'captura', 'shiny'], fullState, smartCfg, now);
     assert.equal(stFull.allReached, true);
     assert.equal(stFull.nextKind, null);
@@ -838,8 +853,8 @@ test('live: gestor inteligente prioriza buffs zerados, pula quem ja bateu 1d (24
     assert.equal(pickRewardForChannel(rewards, 'xp', 'twitch', { tier: 'smart', balance: 5000, deficitMin: 1200 })?.id, 'xp10');
     assert.equal(pickRewardForChannel(rewards, 'xp', 'twitch', { tier: 'smart', balance: 5000, deficitMin: 1200, preferQuickTurnOn: true })?.id, 'xp1');
 
-    // Execucao real: XP ja tem 26h (>= 24h), Shiny tem 2h, Captura tem 0m (desligado!)
-    // Com 1800 pts: liga Captura (500 pts) primeiro (critico!), depois Shiny (1000 pts), e PULA XP (ja tem > 1d)!
+    // Execucao real (meta 24h): XP ja tem 26h (>= 24h), Captura tem 23h30m (falta 30m -> 1h completa 24h!), Shiny tem 2h
+    // Com 1800 pts: completa Captura (+1h -> 24h30m, meta batida!) e imediatamente avanca para Shiny (+1h), pulando XP!
     const redeemed = [];
     const ctx = {
         CONFIG: {
@@ -859,7 +874,7 @@ test('live: gestor inteligente prioriza buffs zerados, pula quem ja bateu 1d (24
             running: true,
             lastActionNote: '',
             liveGameData: {
-                twitch: { bonus: { xp: Date.now() + 26 * 3_600_000, captura: 0, shiny: Date.now() + 2 * 3_600_000 } },
+                twitch: { bonus: { xp: Date.now() + 26 * 3_600_000, captura: Date.now() + 23.5 * 3_600_000, shiny: Date.now() + 2 * 3_600_000 } },
                 kick: null,
                 skew: 0,
             },
@@ -898,20 +913,23 @@ test('live: gestor inteligente prioriza buffs zerados, pula quem ja bateu 1d (24
     };
     try {
         await stepTwitchChannel(ctx, 'smartch', { token: 'tok', force: false });
-        assert.deepEqual(redeemed, ['cap1', 'sh1'], 'liga Captura zerada primeiro, depois completa Shiny e pula XP que ja tem 26h');
+        assert.deepEqual(redeemed, ['cap1', 'sh1'], 'completa Captura ate 24h e so entao avanca para Shiny, pulando XP que ja tem 26h');
     } finally {
-        liveRewards.dispose();
+        liveRewards.dispose(ctx);
     }
 });
 
-test('live: gestor inteligente segura pontos p/ buff zerado (evita starvation de XP) e usa desempate LRU', async () => {
+test('live: gestor inteligente nao vaza pontos para o proximo buff antes de bater 24h na Kick e +24h na Twitch', async () => {
     liveRewards.dispose();
+    const now = Date.now();
+    const h = (hrs) => now + hrs * 3_600_000;
     const rewards = [
         { id: 'xp1', title: 'Bônus +15% XP PokeIdle', prompt: '1 hora', cost: 300, isEnabled: true, isPaused: false, isInStock: true },
+        { id: 'xp3', title: 'Bônus +15% XP PokeIdle (3h)', prompt: '3 horas', cost: 900, isEnabled: true, isPaused: false, isInStock: true },
         { id: 'cap1', title: 'Bônus de +15% Capture Boost', prompt: '1 hora PokeIdle', cost: 500, isEnabled: true, isPaused: false, isInStock: true },
         { id: 'sh1', title: 'Bônus de +15% Secret Lure', prompt: '1 hora PokeIdle', cost: 1000, isEnabled: true, isPaused: false, isInStock: true },
     ];
-    let balance = 350;
+    let balance = 1600;
     const redeemed = [];
     const mockFetch = async (url, opts = {}) => {
         if (url === 'https://gql.twitch.tv/gql') {
@@ -941,17 +959,22 @@ test('live: gestor inteligente segura pontos p/ buff zerado (evita starvation de
         return { ok: false, status: 404 };
     };
 
+    // 1) Mesma plataforma: XP tem 45m (falta 23h15m para 24h), Captura 0m, saldo 1600 pts -> compra xp3 (900) e SEGURA os 700 restantes para XP (nao compra cap1!)
     const ctx = {
         CONFIG: {
             live: {
                 enabled: true,
-                watchTwitch: false,
+                watchTwitch: true,
+                watchKick: true,
+                twitchToken: 'tw-tok',
+                kickToken: 'kk-tok',
                 autoClaimChest: false,
                 autoRedeem: true,
                 smartBalance: true,
                 targetHours: 24,
                 rewardTier: 'smart',
                 twitchRewards: ['xp', 'captura', 'shiny'],
+                kickRewards: ['xp', 'captura', 'shiny'],
                 guardThresholdMin: 30,
             },
         },
@@ -959,8 +982,8 @@ test('live: gestor inteligente segura pontos p/ buff zerado (evita starvation de
             running: true,
             lastActionNote: '',
             liveGameData: {
-                twitch: { bonus: { xp: Date.now() + 45 * 60_000, captura: 0, shiny: 0 } },
-                kick: null,
+                twitch: { bonus: { xp: now + 45 * 60_000, captura: 0, shiny: 0 } },
+                kick: { bonus: { xp: h(12), captura: 0, shiny: 0 } },
                 skew: 0,
             },
             liveStatus: { twitch: {}, kick: {} },
@@ -970,26 +993,44 @@ test('live: gestor inteligente segura pontos p/ buff zerado (evita starvation de
     };
 
     try {
-        // XP tem 45m (< 24h), Captura tem 0m (500 pts), saldo 350 pts -> DEVE guardar para Captura e NAO gastar em XP!
-        const st1 = await stepTwitchChannel(ctx, 'guaxilol1', { token: 'tok', force: true });
-        assert.deepEqual(redeemed, [], 'nao deve torrar 300 pts em XP enquanto Captura esta zerada');
-        assert.match(st1.smartNote, /CAPTURA.*500/i);
+        const st1 = await stepTwitchChannel(ctx, 'guaxilol1', { token: 'tw-tok', force: true });
+        assert.deepEqual(redeemed, ['xp3'], 'compra maior pacote de XP (3h) e NAO vaza os 700 pts restantes em Captura');
+        assert.equal(st1.balance, 700);
+        assert.match(st1.smartNote, /XP/i);
 
-        // Saldo sobe para 850 pts (paga Captura 500 + sobra 350, mas Shiny=0m precisa 1000 -> paga Captura e guarda os 350 p/ Shiny!)
-        balance = 850;
-        const st2 = await stepTwitchChannel(ctx, 'guaxilol1', { token: 'tok', force: false });
-        assert.deepEqual(redeemed, ['cap1'], 'resgata Captura e guarda saldo restante para Shiny zerado');
-        assert.equal(st2.balance, 350);
+        // 2) Coordenacao Kick + Twitch: Twitch ja tem 24h de XP, mas Kick so tem 12h de XP -> Twitch aguarda Kick completar 24h de XP antes de pegar Captura!
+        ctx.state.liveGameData.twitch.bonus.xp = h(24.5);
+        balance = 1000;
+        const st2 = await stepTwitchChannel(ctx, 'guaxilol1', { token: 'tw-tok', force: false });
+        assert.deepEqual(redeemed, ['xp3'], 'nao avanca para Captura na Twitch enquanto Kick ainda nao bateu 24h de XP');
+        assert.match(st2.smartNote, /aguardando XP na Kick/i);
 
-        // Desempate LRU quando XP e Captura empatam em 0m (XP foi resgatado mais recentemente -> Captura vem antes)
-        const orderedLru = orderBuffsForRedeem(
+        const crossStatus = computeSmartBuffStatus(
             ['xp', 'captura', 'shiny'],
-            { bonus: { xp: 0, captura: 0, shiny: 0 } },
-            { smartBalance: true, targetHours: 24, guardThresholdMin: 30 },
-            Date.now(),
-            { xp: 2000, captura: 0, shiny: 1000 }
+            ctx.state.liveGameData.twitch,
+            ctx.CONFIG.live,
+            now,
+            null,
+            { platform: 'twitch', otherKinds: ['xp', 'captura', 'shiny'], otherBonusState: ctx.state.liveGameData.kick }
         );
-        assert.deepEqual(orderedLru, ['captura', 'shiny', 'xp']);
+        assert.equal(crossStatus.nextKind, 'captura');
+        assert.equal(crossStatus.waitingPlatform, 'kick');
+        assert.equal(crossStatus.waitingKind, 'xp');
+
+        // 3) Assim que a Kick tambem completa 24h de XP, a Twitch libera Captura imediatamente!
+        ctx.state.liveGameData.kick.bonus.xp = h(24);
+        const blockerCleared = resolveCrossPlatformBlocker({
+            platform: 'twitch',
+            kind: 'captura',
+            configuredKinds: ['xp', 'captura', 'shiny'],
+            liveConfig: ctx.CONFIG.live,
+            otherBonusState: ctx.state.liveGameData.kick,
+            now,
+        });
+        assert.equal(blockerCleared.blocked, false);
+        const st3 = await stepTwitchChannel(ctx, 'guaxilol1', { token: 'tw-tok', force: false });
+        assert.deepEqual(redeemed, ['xp3', 'cap1'], 'com 24h de XP na Kick e 24h na Twitch, libera Captura');
+        assert.equal(st3.balance, 500);
     } finally {
         liveRewards.dispose(ctx);
     }

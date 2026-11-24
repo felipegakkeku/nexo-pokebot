@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Nexo PokeBot (PokeIdle)
 // @namespace    https://github.com/felipegakkeku/nexo-pokebot
-// @version      1.0.9
+// @version      1.0.10
 // @description  Automação desenvolvida especificamente para o PokeIdle (pokeidle.io): captura, restock, equipe, auto-evoluir, bosses, mapa/hunt, lives e HUD flutuante
 // @match        https://pokeidle.io/app*
 // @run-at       document-idle
@@ -2707,31 +2707,75 @@
     }
     return baseGuard;
   };
-  var orderBuffsForRedeem = (kinds = [], bonusState = null, liveConfig = {}, now = Date.now(), lastRedeemByKind = null) => {
+  var needsBuffRedeem = (remainingMin, liveConfig = {}) => {
+    const rem = Math.max(0, Number(remainingMin) || 0);
+    const targetMin = resolveEffectiveThresholdMin(liveConfig);
+    const baseGuard = Math.max(0, Number(liveConfig?.guardThresholdMin ?? 30) || 0);
+    if (liveConfig?.smartBalance === true && targetMin > baseGuard) {
+      return rem < targetMin - 0.5;
+    }
+    return rem <= targetMin;
+  };
+  var resolvePlatformConfiguredKinds = (liveConfig = {}, platform = "twitch") => {
+    const pref = platform === "twitch" ? liveConfig?.twitchRewards : liveConfig?.kickRewards;
+    if (pref !== void 0 && pref !== null) return parseRewardKinds(pref, []);
+    return parseRewardKinds(liveConfig?.rewardType, ["xp"]);
+  };
+  var orderBuffsForRedeem = (kinds = [], bonusState = null, liveConfig = {}, now = Date.now(), _lastRedeemByKind = null) => {
     const list = Array.isArray(kinds) ? [...kinds] : [];
     if (list.length <= 1 || liveConfig?.smartBalance !== true) return list;
-    const criticalMin = Math.max(15, Number(liveConfig?.guardThresholdMin ?? 30) || 30);
     const indexMap = new Map(list.map((k, idx) => [k, idx]));
-    const lastAt = (k) => Number(lastRedeemByKind?.[k] || 0);
     return list.sort((a, b) => {
-      const minA = getBonusRemainingMin(bonusState, a, now);
-      const minB = getBonusRemainingMin(bonusState, b, now);
-      const critA = minA <= criticalMin ? 0 : 1;
-      const critB = minB <= criticalMin ? 0 : 1;
-      if (critA !== critB) return critA - critB;
-      if (Math.abs(minA - minB) > 0.5) return minA - minB;
-      const lruA = lastAt(a);
-      const lruB = lastAt(b);
-      if (lruA !== lruB) return lruA - lruB;
+      const needA = needsBuffRedeem(getBonusRemainingMin(bonusState, a, now), liveConfig) ? 0 : 1;
+      const needB = needsBuffRedeem(getBonusRemainingMin(bonusState, b, now), liveConfig) ? 0 : 1;
+      if (needA !== needB) return needA - needB;
       return (indexMap.get(a) ?? 0) - (indexMap.get(b) ?? 0);
     });
+  };
+  var resolveCrossPlatformBlocker = ({
+    platform = "twitch",
+    kind = "xp",
+    configuredKinds = null,
+    liveConfig = {},
+    otherBonusState = null,
+    otherKinds = null,
+    now = Date.now()
+  } = {}) => {
+    if (liveConfig?.smartBalance !== true || !otherBonusState) {
+      return { blocked: false, waitKind: null, waitPlatform: null, reason: null };
+    }
+    const otherPlatform = platform === "twitch" ? "kick" : "twitch";
+    const otherWatch = otherPlatform === "kick" ? liveConfig?.watchKick !== false : liveConfig?.watchTwitch !== false;
+    const hasOtherToken = Boolean(
+      otherPlatform === "kick" ? liveConfig?.kickToken || liveConfig?.hasKickToken : liveConfig?.twitchToken || liveConfig?.hasTwitchToken
+    );
+    if (!otherWatch || !hasOtherToken) {
+      return { blocked: false, waitKind: null, waitPlatform: null, reason: null };
+    }
+    const thisList = Array.isArray(configuredKinds) ? configuredKinds : resolvePlatformConfiguredKinds(liveConfig, platform);
+    const otherList = Array.isArray(otherKinds) ? otherKinds : resolvePlatformConfiguredKinds(liveConfig, otherPlatform);
+    const kindIdx = LIVE_REWARD_KINDS.indexOf(kind);
+    if (kindIdx <= 0) return { blocked: false, waitKind: null, waitPlatform: null, reason: null };
+    for (let i = 0; i < kindIdx; i++) {
+      const hi = LIVE_REWARD_KINDS[i];
+      if (!thisList.includes(hi) || !otherList.includes(hi)) continue;
+      const otherRem = getBonusRemainingMin(otherBonusState, hi, now);
+      if (needsBuffRedeem(otherRem, liveConfig)) {
+        const platLabel = otherPlatform === "kick" ? "Kick" : "Twitch";
+        return {
+          blocked: true,
+          waitKind: hi,
+          waitPlatform: otherPlatform,
+          reason: `aguardando ${hi.toUpperCase()} na ${platLabel}`
+        };
+      }
+    }
+    return { blocked: false, waitKind: null, waitPlatform: null, reason: null };
   };
   var shouldReservePointsForHigherPriority = ({
     kind,
     orderedKinds = [],
     candidateMeta = /* @__PURE__ */ new Map(),
-    balance = 0,
-    rewardCost = 0,
     smartBalance = false
   }) => {
     if (!smartBalance) return { allow: true, reason: null };
@@ -2742,16 +2786,11 @@
     for (let i = 0; i < idx; i++) {
       const higherKind = orderedKinds[i];
       const hi = candidateMeta.get(higherKind);
-      if (!hi || !hi.available || !hi.needsRedeem || hi.recentlyRedeemed) continue;
-      if (balance - rewardCost >= hi.minCost) continue;
-      const aheadInTime = cur.remainingMin > hi.remainingMin + 0.5;
-      const tiedWithPriority = Math.abs(cur.remainingMin - hi.remainingMin) <= 15 && hi.lastRedeemAt < cur.lastRedeemAt;
-      if (aheadInTime || tiedWithPriority) {
-        return {
-          allow: false,
-          reason: `guardando p/ ${higherKind.toUpperCase()} (${hi.minCost} pts)`
-        };
-      }
+      if (!hi || !hi.available || !hi.needsRedeem) continue;
+      return {
+        allow: false,
+        reason: hi.recentlyRedeemed ? `completando ${higherKind.toUpperCase()} at\xE9 a meta` : `guardando p/ ${higherKind.toUpperCase()} (${hi.minCost} pts)`
+      };
     }
     return { allow: true, reason: null };
   };
@@ -2872,10 +2911,11 @@
     }
     return { ...bonusState || {}, bonus: mergedBonus };
   };
-  var recordOptimisticRedeem = (rt, platform, kind, reward, serverNow) => {
+  var recordOptimisticRedeem = (rt, platform, kind, reward, serverNow, serverBonusState = null) => {
     const hours = Math.max(1, extractRewardHours(reward));
-    const cur = Number(rt.optimisticBonusUntil?.[platform]?.[kind]) || 0;
-    const base = Math.max(cur, serverNow);
+    const curOpt = Number(rt.optimisticBonusUntil?.[platform]?.[kind]) || 0;
+    const curSrv = Number(serverBonusState?.bonus?.[kind]) || 0;
+    const base = Math.max(curOpt, curSrv, serverNow);
     rt.optimisticBonusUntil[platform][kind] = base + hours * 36e5;
   };
   var recordChannelBalance = (state, platform, channel, points) => {
@@ -3318,6 +3358,7 @@
     if (!probeOnly && CONFIG.live?.autoRedeem && token && balance !== null && canRetryRedeem && activeKinds.length > 0) {
       const serverNow = Date.now() - (state.liveGameData?.skew || 0);
       const bonusState = buildEffectiveBonusState(rt, state.liveGameData?.twitch, "twitch");
+      const otherBonusState = buildEffectiveBonusState(rt, state.liveGameData?.kick, "kick");
       const thresholdMin = resolveEffectiveThresholdMin(CONFIG.live);
       const criticalMin = Math.max(15, Number(CONFIG.live?.guardThresholdMin ?? 30) || 30);
       const smartOn = CONFIG.live?.smartBalance === true;
@@ -3333,7 +3374,7 @@
         const unavail = minRew ? Boolean(minRew.isPaused || minRew.isInStock === false || minRew.cooldownExpiresAt) : true;
         candidateMeta.set(k, {
           remainingMin: rem,
-          needsRedeem: rem <= thresholdMin,
+          needsRedeem: needsBuffRedeem(rem, CONFIG.live),
           available: Boolean(minRew && !unavail),
           minCost: minRew ? minRew.cost : Infinity,
           minHours: minRew ? extractRewardHours(minRew) : 1,
@@ -3345,10 +3386,32 @@
         if (!canRedeemPlatform(rt, "twitch", kind, now, false)) continue;
         const meta = candidateMeta.get(kind);
         const remainingMin = meta?.remainingMin ?? getBonusRemainingMin(bonusState, kind, serverNow);
-        const needsRedeem = remainingMin <= thresholdMin;
+        const needsRedeem = meta ? meta.needsRedeem : needsBuffRedeem(remainingMin, CONFIG.live);
         if (!needsRedeem) continue;
+        const reserveCheck = shouldReservePointsForHigherPriority({
+          kind,
+          orderedKinds,
+          candidateMeta,
+          smartBalance: smartOn
+        });
+        if (!reserveCheck.allow) {
+          if (!status.smartNote && reserveCheck.reason) status.smartNote = reserveCheck.reason;
+          continue;
+        }
+        const crossCheck = resolveCrossPlatformBlocker({
+          platform: "twitch",
+          kind,
+          configuredKinds: activeKinds,
+          liveConfig: CONFIG.live,
+          otherBonusState,
+          now: serverNow
+        });
+        if (crossCheck.blocked) {
+          if (!status.smartNote && crossCheck.reason) status.smartNote = crossCheck.reason;
+          continue;
+        }
         const deficitMin = Math.max(0, thresholdMin - remainingMin);
-        const preferQuickTurnOn = smartOn && criticalPending.has(kind) && criticalPending.size > 1;
+        const preferQuickTurnOn = smartOn && thresholdMin <= 60 && criticalPending.has(kind) && criticalPending.size > 1;
         const reward = pickRewardForChannel(rewards, kind, "twitch", {
           tier,
           balance,
@@ -3362,18 +3425,6 @@
             const hrs = extractRewardHours(reward);
             status.smartNote = `pr\xF3x. ${kind.toUpperCase()} (${reward.cost} pts \xB7 ${hrs}h)`;
           }
-          continue;
-        }
-        const reserveCheck = shouldReservePointsForHigherPriority({
-          kind,
-          orderedKinds,
-          candidateMeta,
-          balance,
-          rewardCost: reward.cost,
-          smartBalance: smartOn
-        });
-        if (!reserveCheck.allow) {
-          if (!status.smartNote && reserveCheck.reason) status.smartNote = reserveCheck.reason;
           continue;
         }
         const txId = Array.from({ length: 32 }, () => Math.floor(Math.random() * 16).toString(16)).join("");
@@ -3394,9 +3445,15 @@
         if (p?.redemption?.id && !p.error && !redRes?.errors?.length) {
           balance -= reward.cost;
           criticalPending.delete(kind);
-          if (meta) meta.recentlyRedeemed = true;
           recordChannelBalance(state, "twitch", login, balance);
-          recordOptimisticRedeem(rt, "twitch", kind, reward, serverNow);
+          recordOptimisticRedeem(rt, "twitch", kind, reward, serverNow, state.liveGameData?.twitch);
+          if (meta) {
+            const updatedBonus = buildEffectiveBonusState(rt, state.liveGameData?.twitch, "twitch");
+            const nextRem = getBonusRemainingMin(updatedBonus, kind, serverNow);
+            meta.remainingMin = nextRem;
+            meta.needsRedeem = needsBuffRedeem(nextRem, CONFIG.live);
+            meta.recentlyRedeemed = true;
+          }
           status.lastRedeemAt = now;
           status.redeemedThisStep = true;
           status.smartNote = "";
@@ -3593,6 +3650,7 @@
         if (!probeOnly && CONFIG.live?.autoRedeem && canRetryRedeem && activeKinds.length > 0) {
           const serverNow = Date.now() - (state.liveGameData?.skew || 0);
           const bonusState = buildEffectiveBonusState(rt, state.liveGameData?.kick, "kick");
+          const otherBonusState = buildEffectiveBonusState(rt, state.liveGameData?.twitch, "twitch");
           const thresholdMin = resolveEffectiveThresholdMin(CONFIG.live);
           const criticalMin = Math.max(15, Number(CONFIG.live?.guardThresholdMin ?? 30) || 30);
           const smartOn = CONFIG.live?.smartBalance === true;
@@ -3607,7 +3665,7 @@
             const minRew = pickRewardForChannel(rewards, k, "kick", { tier: "cheapest", balance: points });
             candidateMeta.set(k, {
               remainingMin: rem,
-              needsRedeem: rem <= thresholdMin,
+              needsRedeem: needsBuffRedeem(rem, CONFIG.live),
               available: Boolean(minRew && !minRew.is_paused),
               minCost: minRew ? minRew.cost : Infinity,
               minHours: minRew ? extractRewardHours(minRew) : 1,
@@ -3619,10 +3677,32 @@
             if (!canRedeemPlatform(rt, "kick", kind, now, false)) continue;
             const meta = candidateMeta.get(kind);
             const remainingMin = meta?.remainingMin ?? getBonusRemainingMin(bonusState, kind, serverNow);
-            const needsRedeem = remainingMin <= thresholdMin;
+            const needsRedeem = meta ? meta.needsRedeem : needsBuffRedeem(remainingMin, CONFIG.live);
             if (!needsRedeem) continue;
+            const reserveCheck = shouldReservePointsForHigherPriority({
+              kind,
+              orderedKinds,
+              candidateMeta,
+              smartBalance: smartOn
+            });
+            if (!reserveCheck.allow) {
+              if (!status.smartNote && reserveCheck.reason) status.smartNote = reserveCheck.reason;
+              continue;
+            }
+            const crossCheck = resolveCrossPlatformBlocker({
+              platform: "kick",
+              kind,
+              configuredKinds: activeKinds,
+              liveConfig: CONFIG.live,
+              otherBonusState,
+              now: serverNow
+            });
+            if (crossCheck.blocked) {
+              if (!status.smartNote && crossCheck.reason) status.smartNote = crossCheck.reason;
+              continue;
+            }
             const deficitMin = Math.max(0, thresholdMin - remainingMin);
-            const preferQuickTurnOn = smartOn && criticalPending.has(kind) && criticalPending.size > 1;
+            const preferQuickTurnOn = smartOn && thresholdMin <= 60 && criticalPending.has(kind) && criticalPending.size > 1;
             const reward = pickRewardForChannel(rewards, kind, "kick", {
               tier,
               balance: points,
@@ -3637,18 +3717,6 @@
               }
               continue;
             }
-            const reserveCheck = shouldReservePointsForHigherPriority({
-              kind,
-              orderedKinds,
-              candidateMeta,
-              balance: points,
-              rewardCost: reward.cost,
-              smartBalance: smartOn
-            });
-            if (!reserveCheck.allow) {
-              if (!status.smartNote && reserveCheck.reason) status.smartNote = reserveCheck.reason;
-              continue;
-            }
             const redRes = await netFetch(ctx, `${KICK_API_URL}/api/v2/channels/${encodeURIComponent(slug)}/rewards/${reward.id}/redeem`, {
               method: "POST",
               headers: { ...headers, "Content-Type": "application/json" },
@@ -3657,10 +3725,16 @@
             if (redRes.ok) {
               points -= reward.cost;
               criticalPending.delete(kind);
-              if (meta) meta.recentlyRedeemed = true;
               status.balance = points;
               recordChannelBalance(state, "kick", slug, points);
-              recordOptimisticRedeem(rt, "kick", kind, reward, serverNow);
+              recordOptimisticRedeem(rt, "kick", kind, reward, serverNow, state.liveGameData?.kick);
+              if (meta) {
+                const updatedBonus = buildEffectiveBonusState(rt, state.liveGameData?.kick, "kick");
+                const nextRem = getBonusRemainingMin(updatedBonus, kind, serverNow);
+                meta.remainingMin = nextRem;
+                meta.needsRedeem = needsBuffRedeem(nextRem, CONFIG.live);
+                meta.recentlyRedeemed = true;
+              }
               status.lastRedeemAt = now;
               status.redeemedThisStep = true;
               status.smartNote = "";
@@ -3708,9 +3782,9 @@
       });
     }
     defaults.forEach((c) => addCandidate(c, false));
-    const thresholdMin = resolveEffectiveThresholdMin(CONFIG.live);
+    const otherPlatform = platform === "twitch" ? "kick" : "twitch";
     const eligibleKinds = LIVE_REWARD_KINDS.filter(
-      (kind) => canRedeemPlatform(rt, platform, kind, now, false) && shouldRedeemBonus(bonusState, kind, thresholdMin, serverNow) && candidates.some((ch) => resolveChannelRewardKinds(CONFIG.live, platform, ch).includes(kind))
+      (kind) => canRedeemPlatform(rt, platform, kind, now, false) && needsBuffRedeem(getBonusRemainingMin(bonusState, kind, serverNow), CONFIG.live) && candidates.some((ch) => resolveChannelRewardKinds(CONFIG.live, platform, ch).includes(kind))
     );
     const kindsToCheck = orderBuffsForRedeem(eligibleKinds, bonusState, CONFIG.live, serverNow, lastRedeemMap);
     if (kindsToCheck.length === 0) return false;
@@ -3750,34 +3824,44 @@
     let redeemedAny = false;
     for (const kind of kindsToCheck) {
       if (!state.running || !canRedeemPlatform(rt, platform, kind, Date.now(), false)) continue;
+      const curBonusState = buildEffectiveBonusState(rt, state.liveGameData?.[platform], platform);
+      const curOtherBonus = buildEffectiveBonusState(rt, state.liveGameData?.[otherPlatform], otherPlatform);
       const kindCandidates = candidates.filter((ch) => {
         const chKinds = resolveChannelRewardKinds(CONFIG.live, platform, ch);
         if (!chKinds.includes(kind)) return false;
         if (!smartOn) return true;
         const entry = readsMap.get(guardKey(ch, kind));
         if (!entry) return false;
-        const chOrdered = orderBuffsForRedeem(chKinds, bonusState, CONFIG.live, serverNow, getLastRedeemMapForPlatform(rt, platform));
+        const chOrdered = orderBuffsForRedeem(chKinds, curBonusState, CONFIG.live, serverNow, getLastRedeemMapForPlatform(rt, platform));
         const chMeta = /* @__PURE__ */ new Map();
         for (const k of chOrdered) {
           const r = readsMap.get(guardKey(ch, k));
-          const rem = getBonusRemainingMin(bonusState, k, serverNow);
+          const rem = getBonusRemainingMin(curBonusState, k, serverNow);
           chMeta.set(k, {
             remainingMin: rem,
-            needsRedeem: rem <= thresholdMin,
+            needsRedeem: needsBuffRedeem(rem, CONFIG.live),
             available: Boolean(r && !r.paused),
             minCost: r ? r.minCost ?? r.cost : Infinity,
             lastRedeemAt: Number(rt.lastPlatformRedeemAt[`${platform}:${k}`] || 0),
             recentlyRedeemed: !canRedeemPlatform(rt, platform, k, Date.now(), false)
           });
         }
-        return shouldReservePointsForHigherPriority({
+        if (!shouldReservePointsForHigherPriority({
           kind,
           orderedKinds: chOrdered,
           candidateMeta: chMeta,
-          balance: entry.points,
-          rewardCost: entry.cost,
           smartBalance: true
-        }).allow;
+        }).allow) {
+          return false;
+        }
+        return !resolveCrossPlatformBlocker({
+          platform,
+          kind,
+          configuredKinds: chKinds,
+          liveConfig: CONFIG.live,
+          otherBonusState: curOtherBonus,
+          now: serverNow
+        }).blocked;
       });
       const kindReads = /* @__PURE__ */ new Map();
       for (const ch of kindCandidates) {
@@ -3883,24 +3967,6 @@
           }
         }
       }
-      if (CONFIG.live?.watchTwitch || CONFIG.live?.autoClaimChest || CONFIG.live?.autoRedeem) {
-        for (const login of finalTw) {
-          if (!state.running) break;
-          await stepTwitchChannel(ctx, login, { token: twitchToken, deviceId: twitchDeviceId, force }).catch(() => {
-            const status = state.liveStatus?.twitch?.[login];
-            if (status) status.error || (status.error = "falha de comunica\xE7\xE3o com a Twitch");
-          });
-        }
-        await runBonusGuard(ctx, "twitch", {
-          token: twitchToken,
-          deviceId: twitchDeviceId,
-          watched: finalTw,
-          officials: state.liveGameData?.twitch?.oficiais,
-          customCsv: CONFIG.live?.customTwitchChannels
-        }).catch(() => {
-          state.lastActionNote = "Twitch: falha ao verificar b\xF4nus";
-        });
-      }
       if (CONFIG.live?.watchKick || CONFIG.live?.autoRedeem) {
         const activeKk = new Set(finalKk.map((s) => s.toLowerCase()));
         for (const [slug, conn] of rt.kickSockets.entries()) {
@@ -3924,6 +3990,26 @@
           watched: finalKk,
           officials: state.liveGameData?.kick?.oficiais,
           customCsv: CONFIG.live?.customKickChannels
+        }).catch(() => {
+          state.lastActionNote = "Kick: falha ao verificar b\xF4nus";
+        });
+      }
+      if (CONFIG.live?.watchTwitch || CONFIG.live?.autoClaimChest || CONFIG.live?.autoRedeem) {
+        for (const login of finalTw) {
+          if (!state.running) break;
+          await stepTwitchChannel(ctx, login, { token: twitchToken, deviceId: twitchDeviceId, force }).catch(() => {
+            const status = state.liveStatus?.twitch?.[login];
+            if (status) status.error || (status.error = "falha de comunica\xE7\xE3o com a Twitch");
+          });
+        }
+        await runBonusGuard(ctx, "twitch", {
+          token: twitchToken,
+          deviceId: twitchDeviceId,
+          watched: finalTw,
+          officials: state.liveGameData?.twitch?.oficiais,
+          customCsv: CONFIG.live?.customTwitchChannels
+        }).catch(() => {
+          state.lastActionNote = "Twitch: falha ao verificar b\xF4nus";
         });
       }
       if (!twitchToken && !kickToken && (finalTw.length > 0 || finalKk.length > 0)) {
@@ -3979,7 +4065,7 @@
         window.FarmAnalyzer.stop();
     }
 
-    const VERSION = '1.0.9'; // preenchido no build a partir do package.json
+    const VERSION = '1.0.10'; // preenchido no build a partir do package.json
     const HUD_ID = 'pokebot-hud';
     const STYLE_ID = 'pokebot-hud-style';
     // Mantém chaves v60 para preservar Pokédex importada, alertas e preferências

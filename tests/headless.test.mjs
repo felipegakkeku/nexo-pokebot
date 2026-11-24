@@ -3458,3 +3458,57 @@ test('sprites: resolvePokemonSpriteDex mapeia Hoenn (13xxx), Outland (2001..2058
         rmSync(dir, { recursive: true, force: true });
     }
 });
+
+test('gui: bridge embutido registra drop.raro (casa/bicicleta), recentRare sem filtro e shiny.captura proprio (ovo)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pokebot-alert-bridge-'));
+    try {
+        const controller = createHeadlessController({
+            cwd: dir,
+            autoStart: false,
+            autoLoginOnMissingSession: false,
+            disableBrowserProfileSync: true,
+            liveRunner: async () => {},
+            liveDisposer: () => {},
+            initialConfig: { dropHideCategories: ['stone', 'other'] },
+            sessionResolver: () => ({ nick: 'Gake', token: 'tok', provedor: 'google', source: 'cache' }),
+        });
+        const hooks = controller.attachExternalBridge({
+            isReady: () => true,
+            send: () => true,
+            close: () => {},
+        }, { waitForWelcome: true });
+        try {
+            hooks.onFrame(JSON.stringify({
+                t: 'welcome',
+                estado: { nick: 'Gake', huntSlug: 'nincada_hoenn' },
+            }));
+            // Drop raro de casa lendaria seguido imediatamente de pedra comum -> recentRare preserva id e nao e filtrado
+            hooks.onFrame(JSON.stringify({ t: 'drop.raro', nick: 'Gake', tipo: 'casa', raridade: 'lendaria', id: 42 }));
+            hooks.onFrame(JSON.stringify({
+                t: 'batalha',
+                ev: [{ k: 'morte', quem: 'selvagem', drops: [{ itemId: 100, nome: 'Fire Stone', qtd: 1 }] }],
+            }));
+            // Shiny chocado de ovo no jogo embutido (chega via shiny.captura sem batalha.capturado)
+            hooks.onFrame(JSON.stringify({
+                t: 'shiny.captura',
+                nick: 'Gake',
+                ovo: true,
+                pokemon: { nome: 'Snorunt', speciesId: 13361, level: 1 },
+            }));
+            const snap = controller.getSnapshot({ includeHunts: false });
+            assert.equal(snap.status, 'bridge');
+            assert.equal(snap.drops.recentRare.length, 1);
+            assert.equal(snap.drops.recentRare[0].name, 'Casa Lendária');
+            assert.ok(Number(snap.drops.recentRare[0].id) > 0);
+            assert.equal(snap.ownShinies.length, 1);
+            assert.equal(snap.ownShinies[0].name, 'Snorunt');
+            assert.equal(snap.ownShinies[0].spriteDex, 361);
+            assert.equal(snap.ownShinies[0].hunt, 'Ovo Shiny');
+        } finally {
+            hooks.onDetach();
+            controller.stop();
+        }
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});

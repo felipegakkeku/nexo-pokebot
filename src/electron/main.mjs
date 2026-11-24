@@ -26,6 +26,7 @@ app.setAppUserModelId('com.nexo.pokebot');
 app.setPath('userData', join(ROOT, '.pokebot-hub-data'));
 app.commandLine.appendSwitch('disk-cache-size', String(32 * 1024 * 1024));
 app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling,MediaRouter');
+app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
 const singleLock = app.requestSingleInstanceLock();
 if (!singleLock) {
@@ -536,6 +537,7 @@ function registerWebviewSecurity() {
                 webSecurity: true,
                 webviewTag: false,
                 backgroundThrottling: false,
+                autoplayPolicy: 'no-user-gesture-required',
                 preload: preloadPath,
             });
         });
@@ -1510,6 +1512,18 @@ function fireAlert(event, acc, title, body, info = {}) {
     notifyWindows(event, acc, title, body);
 }
 
+function broadcastSoundCfg(invalidateEvent = null) {
+    const payload = { cfg: publicSoundCfg(), invalidateEvent };
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('hub:sound-cfg-changed', payload);
+    }
+    for (const win of popoutWindows.values()) {
+        if (win && !win.isDestroyed()) {
+            win.webContents.send('hub:sound-cfg-changed', payload);
+        }
+    }
+}
+
 function alertTick() {
     const snaps = getAllSnapshots();
     for (const acc of ACCOUNT_IDS) {
@@ -1519,8 +1533,11 @@ function alertTick() {
         const missed = Array.isArray(snap.missedShinies) ? snap.missedShinies : [];
         const own = Array.isArray(snap.ownShinies) ? snap.ownShinies : [];
         const logs = Array.isArray(snap.logs) ? snap.logs : [];
-        const topDrop = snap.drops?.recent?.[0] || null;
-        const dropSig = topDrop ? `${topDrop.time}|${topDrop.name}|${topDrop.qty}` : '';
+        const rareList = Array.isArray(snap.drops?.recentRare)
+            ? snap.drops.recentRare
+            : (Array.isArray(snap.drops?.recent) ? snap.drops.recent.filter((d) => d?.rare) : []);
+        const dropKeyOf = (d) => (Number(d?.id) > 0 ? Number(d.id) : Number(d?.ts || 0));
+        const maxRareKey = rareList.reduce((m, d) => Math.max(m, dropKeyOf(d)), 0);
         const chests = new Set(Object.entries(snap.lives?.twitch || {}).filter(([, st]) => st?.manualChest).map(([ch]) => ch));
         const voteReady = Boolean(snap.vote?.available);
         const lastLogId = logs.length ? Number(logs[logs.length - 1].id || 0) : 0;
@@ -1530,7 +1547,10 @@ function alertTick() {
             alertBase.set(acc, {
                 missTs: Math.max(soundStartedAt, ...missed.map((e) => Number(e?.ts) || 0)),
                 ownTs: Math.max(0, ...own.map((e) => Number(e?.ts) || 0)),
-                dropSig, chests, voteReady, lastLogId,
+                lastRareKey: maxRareKey,
+                chests,
+                voteReady,
+                lastLogId,
             });
             continue;
         }
@@ -1546,10 +1566,12 @@ function alertTick() {
             const o = freshOwn[0];
             fireAlert('shinyCaught', acc, `Shiny capturado · Conta ${acc}`, `${nick} capturou ${o.name || 'um shiny'}${o.level ? ` (Nv ${o.level})` : ''}.`, { name: o.name || '' });
         }
-        if (topDrop?.rare && dropSig !== base.dropSig) {
-            fireAlert('rareDrop', acc, `Drop raro · Conta ${acc}`, `${nick}: ${topDrop.name} x${topDrop.qty || 1}`, { name: topDrop.name || '' });
+        const freshRare = rareList.filter((d) => dropKeyOf(d) > base.lastRareKey);
+        if (freshRare.length) {
+            base.lastRareKey = Math.max(base.lastRareKey, ...freshRare.map(dropKeyOf));
+            const topRare = freshRare[0];
+            fireAlert('rareDrop', acc, `Drop raro · Conta ${acc}`, `${nick}: ${topRare.name} x${topRare.qty || 1}`, { name: topRare.name || '', count: freshRare.length });
         }
-        base.dropSig = dropSig;
         const freshErr = logs.filter((l) => Number(l.id || 0) > base.lastLogId && l.kind === 'error');
         if (freshErr.length) {
             fireAlert('error', acc, `Erro · Conta ${acc}`, `${nick}: ${String(freshErr[freshErr.length - 1].text || '').slice(0, 180)}`);
@@ -1994,15 +2016,21 @@ function registerIpcHandlers() {
             soundCfg.events[patch.event] = { ...(soundCfg.events[patch.event] || {}), [patch.channel]: patch.value };
         }
         saveSoundCfg();
+        broadcastSoundCfg(null);
         return publicSoundCfg();
     });
-    ipcMain.handle('hub:sound-link', (_ev, { event, url } = {}) => setSoundFromLink(String(event || ''), String(url || '')));
+    ipcMain.handle('hub:sound-link', async (_ev, { event, url } = {}) => {
+        const res = await setSoundFromLink(String(event || ''), String(url || ''));
+        if (res?.ok) broadcastSoundCfg(String(event || ''));
+        return res;
+    });
     ipcMain.handle('hub:sound-reset', (_ev, { event } = {}) => {
         if (SOUND_EVENTS.includes(event)) {
             removeSoundFile(soundCfg.events[event]?.file);
             const prev = soundCfg.events[event] || {};
             soundCfg.events[event] = { ...defaultSoundCfg().events[event], enabled: prev.enabled !== false, toast: prev.toast !== false, os: prev.os !== false };
             saveSoundCfg();
+            broadcastSoundCfg(event);
         }
         return publicSoundCfg();
     });
@@ -2048,7 +2076,8 @@ async function createMainWindow() {
             preload: join(HERE, 'preload.cjs'),
             contextIsolation: true,
             nodeIntegration: false,
-            backgroundThrottling: true,
+            // Mantem o renderer ativo para tocar alertas sonoros mesmo minimizado na bandeja ou atras do jogo
+            backgroundThrottling: false,
             // o alerta sonoro precisa tocar com o Hub minimizado, sem clique antes
             autoplayPolicy: 'no-user-gesture-required',
         },

@@ -2294,8 +2294,41 @@ kbd {
 .top-icon[aria-expanded="true"] { border-color: var(--accent-hi); color: var(--text); }
 .top-icon .btn-label:empty { display: none; }
 .top-icon.update-btn.has-update { border-color: color-mix(in srgb, var(--green) 55%, transparent); background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--ok-text); }
-.top-icon.pix-btn { color: var(--sky-text); }
-.top-icon.pix-btn:hover { background: color-mix(in srgb, var(--sky) 18%, transparent); }
+.top-icon.pix-btn {
+  padding: 0 11px;
+  gap: 6px;
+  color: #ffe4e6;
+  border-color: color-mix(in srgb, #fb7185 58%, transparent);
+  background: linear-gradient(135deg, color-mix(in srgb, #f43f5e 26%, transparent), color-mix(in srgb, #ec4899 18%, transparent));
+  box-shadow: 0 0 0 1px color-mix(in srgb, #fb7185 20%, transparent), 0 4px 14px color-mix(in srgb, #f43f5e 22%, transparent);
+}
+.top-icon.pix-btn .ico {
+  width: 18px;
+  height: 18px;
+  color: #fb7185;
+  --ico-fill: color-mix(in srgb, #fb7185 45%, transparent);
+  fill: var(--ico-fill);
+  stroke-width: 2.15;
+  transition: transform var(--t-fast) ease, fill var(--t-fast) ease;
+}
+.top-icon.pix-btn .pix-label {
+  font-weight: 700;
+  letter-spacing: 0.1px;
+}
+.top-icon.pix-btn:hover {
+  color: #fff;
+  border-color: #fb7185;
+  background: linear-gradient(135deg, color-mix(in srgb, #f43f5e 40%, transparent), color-mix(in srgb, #ec4899 30%, transparent));
+  box-shadow: 0 0 0 1px color-mix(in srgb, #fb7185 40%, transparent), 0 6px 18px color-mix(in srgb, #f43f5e 34%, transparent);
+}
+.top-icon.pix-btn:hover .ico {
+  transform: scale(1.12);
+  --ico-fill: color-mix(in srgb, #fb7185 78%, transparent);
+}
+@media (max-width: 1220px) {
+  .top-icon.pix-btn { padding: 0 8px; }
+  .top-icon.pix-btn .pix-label { display: none; }
+}
 .bell-wrap, .more-wrap { position: relative; display: inline-flex; }
 .top-icon.has-alerts { color: var(--warn-text); border-color: color-mix(in srgb, var(--amber) 45%, transparent); }
 .top-icon.has-alerts.danger { color: var(--err-text); border-color: color-mix(in srgb, var(--red) 55%, transparent); }

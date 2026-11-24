@@ -1963,6 +1963,12 @@ export function createLiveRewardsBridge({
             smartBalance: cfg.liveSmartBalance ?? true,
             targetHours: Number(cfg.liveTargetHours ?? 24),
             guardThresholdMin: Number(cfg.liveGuardThresholdMin ?? 30),
+            watchTwitch: cfg.liveWatchTwitch ?? true,
+            watchKick: cfg.liveWatchKick ?? true,
+            hasTwitchToken: Boolean(cfg.liveTwitchToken),
+            hasKickToken: Boolean(cfg.liveKickToken),
+            twitchRewards,
+            kickRewards,
         };
         return {
             enabled: Boolean(cfg.liveEnabled ?? true),
@@ -1973,8 +1979,16 @@ export function createLiveRewardsBridge({
             smartBalance: Boolean(cfg.liveSmartBalance ?? true),
             targetHours: Number(cfg.liveTargetHours ?? 24),
             smartStatus: {
-                twitch: computeSmartBuffStatus(twitchRewards, effTwBonus, smartCfgView, serverNow, getLiveLastRedeemMap(liveCtx, 'twitch')),
-                kick: computeSmartBuffStatus(kickRewards, effKkBonus, smartCfgView, serverNow, getLiveLastRedeemMap(liveCtx, 'kick')),
+                twitch: computeSmartBuffStatus(twitchRewards, effTwBonus, smartCfgView, serverNow, getLiveLastRedeemMap(liveCtx, 'twitch'), {
+                    platform: 'twitch',
+                    otherKinds: kickRewards,
+                    otherBonusState: effKkBonus,
+                }),
+                kick: computeSmartBuffStatus(kickRewards, effKkBonus, smartCfgView, serverNow, getLiveLastRedeemMap(liveCtx, 'kick'), {
+                    platform: 'kick',
+                    otherKinds: twitchRewards,
+                    otherBonusState: effTwBonus,
+                }),
             },
             channelRewards,
             activeBonuses: {
@@ -2331,6 +2345,8 @@ export function createHeadlessController(options = {}) {
     let stats = createFreshStats(null);
     const dropCounts = new Map();
     const recentDrops = [];
+    const recentRareDrops = [];
+    let nextDropId = 1;
     const seenShinySlots = new Set();
     // Shiny visto e nao capturado: cada shiny vivo no campo fica pendente por slot.
     // Quando some do campo (fugiu, corpo expirou, bola falhou, troca de hunt) e nenhuma
@@ -2379,7 +2395,8 @@ export function createHeadlessController(options = {}) {
         if (isRare) stats.rareDropsCount += qty;
         const curSlug = merger.getState()?.huntSlug || tracker.lastHuntSlug || '';
         const huntLabel = curSlug ? (catalog.huntNames?.[curSlug] || curSlug) : '';
-        recentDrops.unshift({
+        const dropEntry = {
+            id: nextDropId++,
             ts,
             time: formatLogTime(ts),
             key,
@@ -2389,8 +2406,13 @@ export function createHeadlessController(options = {}) {
             category,
             hunt: huntLabel,
             rare: isRare,
-        });
+        };
+        recentDrops.unshift(dropEntry);
         if (recentDrops.length > MAX_RECENT_DROPS) recentDrops.length = MAX_RECENT_DROPS;
+        if (isRare) {
+            recentRareDrops.unshift(dropEntry);
+            if (recentRareDrops.length > MAX_RECENT_DROPS) recentRareDrops.length = MAX_RECENT_DROPS;
+        }
         const hiddenCats = Array.isArray(config.dropHideCategories) ? config.dropHideCategories : [];
         const hiddenItems = Array.isArray(config.dropHideItems) ? config.dropHideItems : [];
         if (isRare && !hiddenCats.includes(category) && !hiddenItems.includes(key)) {
@@ -2940,8 +2962,36 @@ export function createHeadlessController(options = {}) {
         if (m.t === 'shiny.captura' && typeof m.pokemon?.nome === 'string') {
             const spId = Number(m.pokemon.speciesId ?? m.pokemon.pokeId) || null;
             const spriteDex = resolvePokemonSpriteDex(spId, m.pokemon.nome, catalog.pokemonDexByName) || null;
-            recentShinies.unshift({ ts: lastMsgAt, name: m.pokemon.nome, speciesId: spId, spriteDex, trainer: m.nick || 'Desconhecido', egg: Boolean(m.ovo) });
+            const trainerNick = m.nick || 'Desconhecido';
+            recentShinies.unshift({ ts: lastMsgAt, name: m.pokemon.nome, speciesId: spId, spriteDex, trainer: trainerNick, egg: Boolean(m.ovo) });
             if (recentShinies.length > 30) recentShinies.pop();
+            const ownNick = String(merger.getState()?.nick || session?.nick || '').toLowerCase();
+            if (ownNick && String(m.nick || '').toLowerCase() === ownNick) {
+                const lastOwn = ownShinies[0];
+                const sameAsRecent = lastOwn && (lastMsgAt - Number(lastOwn.ts || 0) < 8_000) && (
+                    (spId != null && lastOwn.speciesId === spId) ||
+                    String(lastOwn.name || '').toLowerCase() === m.pokemon.nome.toLowerCase()
+                );
+                if (!sameAsRecent) {
+                    const level = m.pokemon.level ?? m.pokemon.nivel ?? '?';
+                    const curSlug = merger.getState()?.huntSlug || '';
+                    resolveShinyCapture(m.pokemon.nome, null);
+                    stats.shiniesCaptured += 1;
+                    if (stats.shiniesSeen < stats.shiniesCaptured) stats.shiniesSeen = stats.shiniesCaptured;
+                    pushLog('shiny', `${m.ovo ? 'Chocado SHINY' : 'Capturado SHINY'}: ${m.pokemon.nome} (Nv ${level})`);
+                    ownShinies.unshift({
+                        ts: lastMsgAt,
+                        speciesId: spId,
+                        spriteDex,
+                        name: m.pokemon.nome,
+                        level,
+                        hunt: m.ovo ? 'Ovo Shiny' : (curSlug ? (catalog.huntNames?.[curSlug] || curSlug) : ''),
+                        ballId: m.ovo ? null : lastBallThrown,
+                        details: extractPokemonDetails(m.pokemon),
+                    });
+                    if (ownShinies.length > 10) ownShinies.pop();
+                }
+            }
             return;
         }
 
@@ -2949,7 +2999,12 @@ export function createHeadlessController(options = {}) {
             const ownNick = String(merger.getState()?.nick || session?.nick || '').toLowerCase();
             const dropOwner = String(m.nick ?? m.jogador ?? '').toLowerCase();
             if (ownNick && dropOwner === ownNick) {
-                const name = String(m.item ?? m.nome ?? m.itemNome ?? '').trim();
+                let name = String(m.item ?? m.nome ?? m.itemNome ?? '').trim();
+                if (!name && (m.tipo === 'casa' || m.tipo === 'bicicleta')) {
+                    const kindLabel = m.tipo === 'casa' ? 'Casa' : 'Bicicleta';
+                    const rarLabel = m.raridade === 'mitica' ? 'Mítica' : (m.raridade === 'lendaria' ? 'Lendária' : String(m.raridade || 'Rara'));
+                    name = `${kindLabel} ${rarLabel}`.trim();
+                }
                 const itemId = m.itemId ?? null;
                 if (name || itemId != null) {
                     const last = recentDrops[0];
@@ -4167,6 +4222,7 @@ export function createHeadlessController(options = {}) {
             stats = createFreshStats(isOnlineNow ? nowFn() : null);
             dropCounts.clear();
             recentDrops.length = 0;
+            recentRareDrops.length = 0;
             seenShinySlots.clear();
             pendingShinies.clear();
             pushLog('info', 'Estatísticas e drops da sessão zerados.');
@@ -4375,6 +4431,7 @@ export function createHeadlessController(options = {}) {
                 hiddenItems: [...hiddenItems],
                 featured: featuredDrops,
                 recent: visibleRecent,
+                recentRare: recentRareDrops.slice(0, 15),
             },
             config: safeConfig,
             automation: {

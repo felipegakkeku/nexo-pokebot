@@ -87,7 +87,7 @@
         holder.setAttribute('aria-hidden', 'true');
         holder.style.cssText = 'position:absolute;width:0;height:0;overflow:hidden';
         holder.innerHTML = Object.entries(P).map(([name, body]) => (
-            `<symbol id="i-${name}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</symbol>`
+            `<symbol id="i-${name}" viewBox="0 0 24 24" fill="var(--ico-fill, none)" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</symbol>`
         )).join('');
         document.body.prepend(holder);
     }
@@ -101,6 +101,7 @@
     function hydrate(scope = document) {
         for (const el of scope.querySelectorAll('[data-icon]:not([data-icon-done])')) {
             el.setAttribute('data-icon-done', '');
+            if (el.querySelector('svg.ico')) continue;
             el.insertAdjacentHTML('afterbegin', icon(el.dataset.icon));
         }
     }

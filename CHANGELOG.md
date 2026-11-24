@@ -4,7 +4,14 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
-- **Novos sons padrão de alerta (`src/electron/main.mjs`, `src/electron/renderer.js`)**: os 4 alertas principais agora vêm pré-configurados com os sons do MyInstants (baixados e cacheados automaticamente em `.pokebot-sounds/` no primeiro uso, com fallback para bipe caso esteja sem internet): **Erro** (`Low HP Pokemon`), **Shiny capturado** (`Pokemon Item Received`), **Drop raro** (`Ex Pull`) e **Shiny fugiu** (`Pokemon Escape`).
+## 1.0.10
+
+Gestão inteligente coordenada entre Kick e Twitch, novos sons padrão de alerta, correção de áudio no jogo embutido e ajustes de interface:
+
+- **Gestão inteligente de buffs individual para Kick e Twitch (`src/modules/live-rewards.js`, `gui-server.mjs`, `renderer.js`, `hub-ui.js`)**: a meta (ex.: 24h ou 30 min para manter ligado) agora vale individualmente em cada plataforma porque os bônus se somam (+15% Kick + 15% Twitch). O bot prioriza a Kick e depois a Twitch em ordem fixa (`XP -> Captura -> Shiny`), acumula pontos sem vazar para o próximo buff durante o resgate otimista e só avança para o próximo buff quando a meta do buff atual estiver preenchida nas duas plataformas ativas. As barras dos cartões `Painéis` e o resumo da aba `Lives` também refletem o progresso combinado das duas plataformas e mostram quando uma plataforma está aguardando a outra.
+- **Novos sons padrão de alerta (`src/electron/main.mjs`, `src/electron/renderer.js`)**: os 4 alertas principais já vêm pré-configurados com os sons do MyInstants (baixados e cacheados automaticamente em `.pokebot-sounds/` no primeiro uso, com fallback para bipe offline): **Erro** (`Low HP Pokemon`), **Shiny capturado** (`Pokemon Item Received`), **Drop raro** (`Ex Pull`) e **Shiny fugiu** (`Pokemon Escape`).
+- **Áudio confiável no jogo embutido e em segundo plano (`src/electron/main.mjs`, `renderer.js`, `preload.cjs`, `gui-server.mjs`)**: habilitado `autoplay-policy=no-user-gesture-required` globalmente (inclusive nas webviews embutidas ao desmutar), removido `backgroundThrottling` da janela principal para alertas nunca travarem em 2º plano, adicionado fallback WebAudio (`AudioContext.decodeAudioData`), sincronização imediata de configuração entre janelas soltas, captura de `drop.raro` de Casa/Bicicleta Lendária ou Mítica via `recentRare` sem perda por filtro/sobreposição e registro de `shiny.captura` da própria conta (como Shiny chocado de ovo no jogo embutido).
+- **Correções visuais na Grade e no topo (`src/electron/renderer.html`, `icons.js`, `renderer.js`, `styles.css`)**: corrigido o ícone duplicado no botão **Maximizar tela** dos slots na Grade (e hidratação idempotente em `icons.js`) e destacado o botão **Apoiar** no topo com coração maior preenchido em rosa e rótulo legível.
 
 ## 1.0.9
 

@@ -25,6 +25,11 @@ contextBridge.exposeInMainWorld('pokeHub', {
         ipcRenderer.on('hub:play-sound', fn);
         return () => ipcRenderer.removeListener('hub:play-sound', fn);
     },
+    onSoundConfigChanged: (cb) => {
+        const fn = (_ev, data) => cb(data);
+        ipcRenderer.on('hub:sound-cfg-changed', fn);
+        return () => ipcRenderer.removeListener('hub:sound-cfg-changed', fn);
+    },
     popout: (panel, account) => ipcRenderer.invoke('hub:popout', { panel, account }),
     toggleMiniHud: (force) => ipcRenderer.invoke('hub:minihud-toggle', force),
     getMiniHudState: () => ipcRenderer.invoke('hub:minihud-state'),
