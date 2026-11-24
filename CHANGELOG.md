@@ -2,6 +2,16 @@
 
 Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova versão (o workflow usa o texto da seção como nota da Release).
 
+## 1.0.5
+
+Caixinha +50 da Twitch resgatada sozinha, sem abrir o chat, e notificações redesenhadas com a ficha do shiny capturado:
+
+- **Caixinha +50 sem abrir o chat (`src/electron/main.mjs`)**: o clique na caixinha acontece dentro do chat popout da Twitch numa janela oculta da própria conta (sem foco, fora da barra de tarefas e sem capturar o mouse), passando na checagem anti-robô que barra o resgate pela API. O botão **Resgatar +50** da HUD resolve em 1 clique, e o chat leve visível só abre como plano B.
+- **Resgate automático em segundo plano**: quando a Twitch marca a caixinha como manual, o Hub resgata sozinho, uma por vez entre as 4 contas, e espera 2 min (sem caixinha) ou 10 min (falha) antes de tentar de novo. Segue a opção de auto-resgate do baú.
+- **Contador e log (`src/headless/gui-server.mjs`)**: caixinha resgatada pela HUD ou no automático entra em **Baús +50** e no log de recompensas.
+- **Notificações novas (`src/electron/renderer.js`, `styles.css`)**: ícone e cor por tipo, barra de tempo que pausa com o mouse em cima, botão de fechar e rótulo de ação (**Resgatar agora**, **Abrir voto**).
+- **Ficha do shiny capturado**: cartão dourado com sprite shiny animado, nível, hunt, número da Pokédex e os campos que o jogo envia do Pokémon; **Shiny no servidor** também mostra o sprite.
+
 ## 1.0.4
 
 Captura garantida em todos os modos de economia, autorecuperação do feed de campo e avisos claros de limitações e capacidades na HUD:
