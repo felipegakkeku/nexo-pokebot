@@ -658,6 +658,213 @@ async function openEmbeddedTwitchChestPopup(acc, rawChannel) {
     return true;
 }
 
+// Resgate da caixinha +50 sem o usuario ver o chat: a API GQL barra o claim com
+// IntegrityCheckFailed, entao o clique acontece dentro do proprio chat popout da
+// Twitch (que gera o token de integridade sozinho), numa janela invisivel e
+// sem foco na particao da conta.
+const CHEST_PROBE_JS = `(() => {
+    const re = /claim bonus|resgatar b[oô]nus|obter b[oô]nus|reivindicar b[oô]nus/i;
+    const icon = document.querySelector('.claimable-bonus__icon');
+    let btn = icon ? icon.closest('button') : null;
+    if (!btn) {
+        btn = Array.from(document.querySelectorAll('button[aria-label]'))
+            .find((b) => re.test(b.getAttribute('aria-label') || '')) || null;
+    }
+    const points = Boolean(document.querySelector('[data-test-selector="community-points-summary"]'));
+    if (!btn) return { state: 'waiting', points };
+    btn.scrollIntoView({ block: 'center', inline: 'center' });
+    const r = btn.getBoundingClientRect();
+    return { state: 'claimable', points, x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+})()`;
+
+const CHEST_JS_CLICK = `(() => {
+    const re = /claim bonus|resgatar b[oô]nus|obter b[oô]nus|reivindicar b[oô]nus/i;
+    const icon = document.querySelector('.claimable-bonus__icon');
+    const btn = (icon && icon.closest('button')) ||
+        Array.from(document.querySelectorAll('button[aria-label]')).find((b) => re.test(b.getAttribute('aria-label') || ''));
+    if (!btn) return false;
+    btn.click();
+    return true;
+})()`;
+
+const chestClaimsInFlight = new Map(); // `${acc}:${channel}` -> Promise
+
+const waitMs = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function runHiddenTwitchChestClaim(acc, channel) {
+    const win = new BrowserWindow({
+        width: 420,
+        height: 640,
+        show: false,
+        frame: false,
+        focusable: false,
+        skipTaskbar: true,
+        opacity: 0,
+        backgroundColor: '#0e0e10',
+        webPreferences: {
+            partition: `persist:conta${acc}`,
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+            backgroundThrottling: false,
+        },
+    });
+    const probe = async () => {
+        if (win.isDestroyed()) return { state: 'closed' };
+        try {
+            return await win.webContents.executeJavaScript(CHEST_PROBE_JS, true);
+        } catch {
+            return { state: 'waiting', points: false };
+        }
+    };
+    try {
+        win.setIgnoreMouseEvents(true);
+        win.webContents.setAudioMuted(true);
+        win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+        const cleanUa = cleanBrowserUserAgent(win.webContents.getUserAgent());
+        if (cleanUa) win.webContents.setUserAgent(cleanUa);
+        // Janela "visivel" para o Chromium (opacidade 0, sem foco, ignora mouse)
+        // para o chat nao ficar congelado como aba em segundo plano.
+        win.once('ready-to-show', () => {
+            if (!win.isDestroyed()) win.showInactive();
+        });
+        await win.loadURL(
+            `https://www.twitch.tv/popout/${encodeURIComponent(channel)}/chat`,
+            cleanUa ? { userAgent: cleanUa } : undefined
+        ).catch(() => {});
+
+        const deadline = Date.now() + 25_000;
+        let pointsSince = 0;
+        let found = null;
+        while (Date.now() < deadline) {
+            const st = await probe();
+            if (st?.state === 'closed') return { ok: false, reason: 'closed' };
+            if (st?.state === 'claimable') {
+                found = st;
+                break;
+            }
+            if (st?.points && !pointsSince) pointsSince = Date.now();
+            // Pontos do canal carregaram e a caixinha nao apareceu: ja foi resgatada ou expirou
+            if (pointsSince && Date.now() - pointsSince > 8_000) {
+                return { ok: false, reason: 'no-chest' };
+            }
+            await waitMs(750);
+        }
+        if (!found) return { ok: false, reason: pointsSince ? 'no-chest' : 'not-loaded' };
+
+        // 1) clique "real" injetado no renderer; 2) se nao sumir, clique via DOM
+        for (const type of ['mouseMove', 'mouseDown', 'mouseUp']) {
+            win.webContents.sendInputEvent({ type, x: found.x, y: found.y, button: 'left', clickCount: 1 });
+        }
+        for (let attempt = 0; attempt < 2; attempt++) {
+            for (let i = 0; i < 8; i++) {
+                await waitMs(500);
+                const st = await probe();
+                if (st?.state !== 'claimable') return { ok: true };
+            }
+            if (attempt === 0) {
+                await win.webContents.executeJavaScript(CHEST_JS_CLICK, true).catch(() => false);
+            }
+        }
+        return { ok: false, reason: 'click-ignored' };
+    } finally {
+        if (!win.isDestroyed()) win.destroy();
+    }
+}
+
+async function claimTwitchChestFromHud(acc, rawChannel, { fallbackPopup = true } = {}) {
+    const entry = servers.get(acc);
+    if (!entry) return { ok: false, error: `Conta ${acc} nao inicializada.` };
+    const channel = String(rawChannel || '').trim().toLowerCase();
+    if (!/^[a-z0-9_]{1,40}$/.test(channel)) return { ok: false, error: 'Canal invalido.' };
+    const { controller } = entry.instance;
+    const creds = controller.getLiveCredentials?.() || {};
+    if (!creds.twitchToken) {
+        return { ok: false, error: 'Conecte a Twitch nesta conta para resgatar a caixinha pela HUD.' };
+    }
+
+    const key = `${acc}:${channel}`;
+    if (!chestClaimsInFlight.has(key)) {
+        const job = (async () => {
+            await seedTwitchCookiesInPartition(acc, creds);
+            try {
+                return await runHiddenTwitchChestClaim(acc, channel);
+            } catch (err) {
+                return { ok: false, reason: 'error', detail: String(err?.message || err) };
+            }
+        })().finally(() => chestClaimsInFlight.delete(key));
+        chestClaimsInFlight.set(key, job);
+    }
+    const res = await chestClaimsInFlight.get(key);
+    if (res.ok) controller.noteLiveChestClaimed?.(channel, fallbackPopup ? 'hud' : 'auto');
+    controller.triggerAction('run-lives');
+
+    if (res.ok) return { ok: true, message: `Caixinha +50 resgatada em ${channel}.` };
+    if (res.reason === 'no-chest') {
+        return { ok: false, error: `Nenhuma caixinha disponivel em ${channel} agora (ja resgatada ou expirou).` };
+    }
+    if (!fallbackPopup) return { ok: false, reason: res.reason, error: `Resgate automatico falhou em ${channel} (${res.reason}).` };
+    // Nao conseguiu sozinho: abre o chat leve visivel como plano B
+    await openEmbeddedTwitchChestPopup(acc, channel);
+    return {
+        ok: false,
+        fallback: true,
+        error: `Nao deu para resgatar sozinho em ${channel}; abri o chat leve para voce clicar.`,
+    };
+}
+
+// Resgate automatico: quando a Twitch marca a caixinha como manual (GQL barrado),
+// o Hub resgata pela janela oculta, uma por vez, sem o usuario clicar.
+const AUTO_CHEST_TICK_MS = 15_000;
+const autoChestNextTry = new Map(); // `${acc}:${channel}` -> timestamp
+let autoChestBusy = false;
+let autoChestTimer = null;
+
+function nextAutoChestCandidate() {
+    const now = Date.now();
+    for (const acc of ACCOUNT_IDS) {
+        const entry = servers.get(acc);
+        if (!entry) continue;
+        const snap = entry.instance.controller.getSnapshot({ includeHunts: false });
+        if (snap?.config?.liveAutoClaimChest === false) continue;
+        for (const [channel, st] of Object.entries(snap?.lives?.twitch || {})) {
+            if (!st?.manualChest) continue;
+            const key = `${acc}:${channel}`;
+            if (chestClaimsInFlight.has(key)) continue;
+            if ((autoChestNextTry.get(key) || 0) > now) continue;
+            return { acc, channel, key };
+        }
+    }
+    return null;
+}
+
+async function autoChestTick() {
+    if (autoChestBusy) return;
+    const cand = nextAutoChestCandidate();
+    if (!cand) return;
+    autoChestBusy = true;
+    try {
+        const res = await claimTwitchChestFromHud(cand.acc, cand.channel, { fallbackPopup: false });
+        if (res.ok) {
+            autoChestNextTry.delete(cand.key);
+        } else {
+            // sem caixinha: confere de novo em 2 min; falha de verdade: espera 10 min
+            const wait = res.reason === 'no-chest' ? 2 * 60_000 : 10 * 60_000;
+            autoChestNextTry.set(cand.key, Date.now() + wait);
+        }
+    } catch {
+        autoChestNextTry.set(cand.key, Date.now() + 10 * 60_000);
+    } finally {
+        autoChestBusy = false;
+    }
+}
+
+function startAutoChestWatcher() {
+    if (autoChestTimer) return;
+    autoChestTimer = setInterval(() => void autoChestTick(), AUTO_CHEST_TICK_MS);
+    autoChestTimer.unref?.();
+}
+
 function registerIpcHandlers() {
     ipcMain.handle('hub:get-all-snapshots', () => getAllSnapshots());
 
@@ -730,6 +937,10 @@ function registerIpcHandlers() {
             ok = await openEmbeddedVotePopup(acc);
         } else if (act === 'open-twitch-chest-embedded') {
             ok = await openEmbeddedTwitchChestPopup(acc, payload.channel);
+        } else if (act === 'claim-twitch-chest') {
+            const res = await claimTwitchChestFromHud(acc, payload.channel);
+            refreshTrayMenu();
+            return { ...res, snapshots: getAllSnapshots() };
         } else if (act === 'refresh-vote') {
             await controller.refreshVoteStatus({ force: true });
             ok = true;
@@ -974,6 +1185,7 @@ app.whenReady().then(async () => {
     await loadHuntExtensionIntoPartitions();
     await createMainWindow();
     setupTray();
+    startAutoChestWatcher();
     updateBootTimer = setTimeout(() => {
         updateBootTimer = null;
         void runUpdateCheck();

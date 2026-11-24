@@ -46,6 +46,29 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..', '..');
 const DEFAULT_DASHBOARD_PATH = resolve(HERE, 'gui-dashboard.html');
 const DEFAULT_ICON_PNG_PATH = resolve(REPO_ROOT, 'assets', 'nexo-pokebot-icon.png');
+
+// Campos do Pokemon que viram a "ficha" do shiny na HUD. O protocolo do jogo nao
+// e documentado, entao guarda os valores simples que vierem (e objetos rasos de
+// numeros, como IVs/stats) e ignora o que ja aparece no cabecalho do cartao.
+const POKEMON_DETAIL_SKIP = new Set(['nome', 'name', 'speciesId', 'level', 'nivel', 'shiny', 'id', 'uid', '_id']);
+export function extractPokemonDetails(pokemon) {
+    const out = [];
+    if (!pokemon || typeof pokemon !== 'object') return out;
+    for (const [key, val] of Object.entries(pokemon)) {
+        if (out.length >= 12) break;
+        if (POKEMON_DETAIL_SKIP.has(key) || val === null || val === undefined || val === '') continue;
+        if (typeof val === 'number' || typeof val === 'string' || typeof val === 'boolean') {
+            out.push([key, typeof val === 'boolean' ? (val ? 'sim' : 'não') : String(val).slice(0, 40)]);
+        } else if (Array.isArray(val)) {
+            const flat = val.filter((v) => typeof v === 'number' || typeof v === 'string').slice(0, 6);
+            if (flat.length) out.push([key, flat.join(' / ')]);
+        } else if (typeof val === 'object') {
+            const nums = Object.entries(val).filter(([, v]) => typeof v === 'number' || typeof v === 'string').slice(0, 6);
+            if (nums.length) out.push([key, nums.map(([k, v]) => `${k} ${v}`).join(' · ')]);
+        }
+    }
+    return out;
+}
 const DEFAULT_ICON_ICO_PATH = resolve(REPO_ROOT, 'assets', 'nexo-pokebot.ico');
 const DEFAULT_CONFIG_FILE = '.pokebot-headless-config.json';
 const DEFAULT_BROWSER_PROFILE_DIR = '.pokebot-browser-profile';
@@ -1947,9 +1970,22 @@ export function createLiveRewardsBridge({
         };
     };
 
+    // Caixinha +50 resgatada fora do GQL (clique no chat oculto do Hub Electron)
+    const noteChestClaimed = (channel, source = 'hud') => {
+        const low = String(channel || '').trim().toLowerCase();
+        liveState.stats.liveChestsClaimed = (liveState.stats.liveChestsClaimed || 0) + 1;
+        const st = liveState.liveStatus?.twitch?.[low];
+        if (st) {
+            st.manualChest = false;
+            st.error = null;
+        }
+        onLog?.('reward', `Lives: caixinha +50 resgatada em ${low}${source === 'auto' ? ' (automático)' : ''}.`);
+    };
+
     return {
         ingestWsMessage,
         runOnce,
+        noteChestClaimed,
         startTimer,
         stopTimer,
         setPaused,
@@ -2301,6 +2337,8 @@ export function createHeadlessController(options = {}) {
     let backoffMs = MIN_RECONNECT_MS;
 
     const recentShinies = [];
+    const ownShinies = []; // ficha dos shinies capturados por esta conta (para o cartao na HUD)
+    let lastBallThrown = null;
     const pushLog = (kind, text) => {
         const ts = nowFn();
         logs.push({
@@ -2632,6 +2670,7 @@ export function createHeadlessController(options = {}) {
             } else if (kind === 'bola') {
                 stats.ballsThrown += 1;
                 const bId = Number(e.ballId || 1);
+                lastBallThrown = bId;
                 stats.spentGold += Number(catalog.ballPrices?.[bId] ?? DEFAULT_BALL_PRICES[bId] ?? 0);
                 if (e.shiny) {
                     const slotKey = e.slot != null ? `slot:${e.slot}` : null;
@@ -2652,6 +2691,19 @@ export function createHeadlessController(options = {}) {
                 const name = e.pokemon?.nome || e.pokemon?.name || catalog.pokemonNames?.[e.pokemon?.speciesId] || `#${e.pokemon?.speciesId ?? '?'}`;
                 const level = e.pokemon?.level ?? e.pokemon?.nivel ?? '?';
                 pushLog(isShiny ? 'shiny' : 'catch', `Capturado${isShiny ? ' SHINY' : ''}: ${name} (Nv ${level})`);
+                if (isShiny) {
+                    const curSlug = merger.getState()?.huntSlug || '';
+                    ownShinies.unshift({
+                        ts,
+                        speciesId: Number(e.pokemon?.speciesId) || null,
+                        name,
+                        level,
+                        hunt: curSlug ? (catalog.huntNames?.[curSlug] || curSlug) : '',
+                        ballId: lastBallThrown,
+                        details: extractPokemonDetails(e.pokemon),
+                    });
+                    if (ownShinies.length > 10) ownShinies.pop();
+                }
             } else if (kind === 'votoCreditado') {
                 const qtd = Number(e.qtd || 1);
                 pushLog('reward', `+${qtd} diamante${qtd === 1 ? '' : 's'} creditado${qtd === 1 ? '' : 's'} pelo voto no IdleHub.io!`);
@@ -2708,7 +2760,7 @@ export function createHeadlessController(options = {}) {
         }
 
         if (m.t === 'shiny.captura' && typeof m.pokemon?.nome === 'string') {
-            recentShinies.unshift({ ts: lastMsgAt, name: m.pokemon.nome, trainer: m.nick || 'Desconhecido', egg: Boolean(m.ovo) });
+            recentShinies.unshift({ ts: lastMsgAt, name: m.pokemon.nome, speciesId: Number(m.pokemon.speciesId ?? m.pokemon.pokeId) || null, trainer: m.nick || 'Desconhecido', egg: Boolean(m.ovo) });
             if (recentShinies.length > 30) recentShinies.pop();
             return;
         }
@@ -4182,6 +4234,7 @@ export function createHeadlessController(options = {}) {
             huntsCount: catalog.huntsList.length,
             logs: [...logs],
             recentShinies: [...recentShinies],
+            ownShinies: [...ownShinies],
         };
     };
 
@@ -4291,6 +4344,7 @@ export function createHeadlessController(options = {}) {
         attachExternalBridge,
         getRawSession,
         getLiveCredentials,
+        noteLiveChestClaimed: (channel, source) => liveBridge.noteChestClaimed(channel, source),
         syncWebviewSession,
         openGame,
         openLives,

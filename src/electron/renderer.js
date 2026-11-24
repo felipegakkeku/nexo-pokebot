@@ -263,6 +263,39 @@ async function sendAction(action, payload = {}, acc = activeAccount) {
     return res;
 }
 
+const chestClaimsPending = new Set();
+
+async function claimTwitchChest(channel, acc = activeAccount, btn = null) {
+    const key = `${acc}:${channel}`;
+    if (chestClaimsPending.has(key)) return null;
+    chestClaimsPending.add(key);
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Resgatando…';
+    }
+    let res = null;
+    try {
+        res = await sendAction('claim-twitch-chest', { channel }, acc);
+    } finally {
+        chestClaimsPending.delete(key);
+        // A lista pode ter sido redesenhada; se o botao ainda existe, restaura
+        if (btn?.isConnected) {
+            btn.disabled = false;
+            btn.textContent = 'Resgatar +50';
+        }
+    }
+    // O sucesso ja chega como log 'reward' da conta (vira aviso pelo fluxo normal)
+    if (!res?.ok) {
+        showToast({
+            kind: res?.fallback ? 'warn' : 'error',
+            title: `Caixinha +50 · Conta ${acc}`,
+            text: res?.error || 'Falha ao resgatar a caixinha.',
+            account: acc,
+        });
+    }
+    return res;
+}
+
 function setConfigDirty(dirty) {
     dirtyByAcc[activeAccount] = dirty;
     $('btnSaveCfg').disabled = !dirty;
@@ -849,7 +882,7 @@ function renderLives(lv) {
     const channels = Array.isArray(lv.channels) ? lv.channels : [];
     const channelNotes = channels.map(ch => {
         const status = lv[ch.platform]?.[ch.channel];
-        return status?.manualChest ? 'Twitch exige o resgate do baú +50 no navegador' : status?.error;
+        return status?.manualChest ? 'Caixinha +50 disponível: clique em Resgatar +50' : status?.error;
     });
     const chanSig = JSON.stringify([activeAccount, lv.officialUrls, channels, channelNotes]);
     if (chanSig !== lastLiveChanSig && !chanListEl.querySelector('select:focus')) {
@@ -910,9 +943,11 @@ function renderLives(lv) {
             if (hasManualChest) {
                 const chestBtn = document.createElement('button');
                 chestBtn.className = 'btn sm chest-quick-btn';
-                chestBtn.textContent = 'Resgatar +50 aqui';
-                chestBtn.title = 'Abre apenas o chat leve (sem vídeo) já logado nesta conta para clicar na caixinha +50';
-                chestBtn.onclick = () => sendAction('open-twitch-chest-embedded', { channel: ch.channel });
+                const pending = chestClaimsPending.has(`${activeAccount}:${ch.channel}`);
+                chestBtn.textContent = pending ? 'Resgatando…' : 'Resgatar +50';
+                chestBtn.disabled = pending;
+                chestBtn.title = 'Resgata a caixinha +50 direto daqui, sem abrir o chat. Se a Twitch recusar, abre o chat leve como plano B.';
+                chestBtn.onclick = () => void claimTwitchChest(ch.channel, activeAccount, chestBtn);
                 row.append(chestBtn);
             }
             if (lv.officialUrls?.includes(url)) {
@@ -1018,12 +1053,96 @@ function refreshHuntAndCenterButtons() {
     }
 }
 
-function showToast({ kind = 'info', title = 'Nexo PokeBot', text = '', account = null, onClick = null } = {}) {
-    if (!toastsEnabled || !text) return;
+const TOAST_ICONS = {
+    info: 'i', ok: '✓', reward: '◆', warn: '!', error: '✕', shiny: '★',
+};
+const POKEMON_DETAIL_LABELS = {
+    natureza: 'Natureza', nature: 'Natureza', genero: 'Gênero', gender: 'Gênero', sexo: 'Gênero',
+    habilidade: 'Habilidade', ability: 'Habilidade', ivs: 'IVs', iv: 'IV', evs: 'EVs',
+    tier: 'Tier', raridade: 'Raridade', rarity: 'Raridade', potencial: 'Potencial',
+    hp: 'HP', maxHp: 'HP máx.', ataque: 'Ataque', defesa: 'Defesa', velocidade: 'Velocidade',
+    tipo: 'Tipo', tipos: 'Tipos', types: 'Tipos', xp: 'XP', exp: 'XP', item: 'Item',
+};
+
+function pokemonSpriteUrl(speciesId, shiny = true) {
+    const id = Number(speciesId);
+    if (!Number.isInteger(id) || id <= 0) return '';
+    return `https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/${shiny ? 'shiny/' : ''}${id}.png`;
+}
+
+function labelPokemonDetail(key) {
+    if (POKEMON_DETAIL_LABELS[key]) return POKEMON_DETAIL_LABELS[key];
+    const spaced = String(key).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ');
+    return spaced.charAt(0).toUpperCase() + spaced.slice(1);
+}
+
+function buildToastCard(card) {
+    const wrap = document.createElement('div');
+    wrap.className = 'toast-card';
+    const art = document.createElement('div');
+    art.className = 'toast-card-art';
+    if (card.sprite) {
+        const img = document.createElement('img');
+        img.src = card.sprite;
+        img.alt = '';
+        img.addEventListener('error', () => {
+            img.remove();
+            art.prepend('★');
+        });
+        art.append(img);
+    } else {
+        art.textContent = '★';
+    }
+    for (let i = 0; i < 3; i++) {
+        const sp = document.createElement('span');
+        sp.className = `sparkle s${i + 1}`;
+        sp.textContent = '✦';
+        art.append(sp);
+    }
+    const info = document.createElement('div');
+    info.className = 'toast-card-info';
+    const name = document.createElement('div');
+    name.className = 'toast-card-name';
+    name.textContent = card.name || '';
+    if (card.level !== undefined && card.level !== null && card.level !== '?') {
+        const lv = document.createElement('span');
+        lv.className = 'toast-card-level';
+        lv.textContent = `Nv ${card.level}`;
+        name.append(' ', lv);
+    }
+    info.append(name);
+    if (card.subtitle) {
+        const sub = document.createElement('div');
+        sub.className = 'toast-card-sub';
+        sub.textContent = card.subtitle;
+        info.append(sub);
+    }
+    const rows = Array.isArray(card.rows) ? card.rows.slice(0, 8) : [];
+    if (rows.length) {
+        const dl = document.createElement('dl');
+        dl.className = 'toast-card-rows';
+        for (const [k, v] of rows) {
+            const dt = document.createElement('dt');
+            dt.textContent = labelPokemonDetail(k);
+            const dd = document.createElement('dd');
+            dd.textContent = String(v);
+            dl.append(dt, dd);
+        }
+        info.append(dl);
+    }
+    wrap.append(art, info);
+    return wrap;
+}
+
+function showToast({
+    kind = 'info', title = 'Nexo PokeBot', text = '', account = null, onClick = null,
+    actionLabel = '', card = null, duration = 0,
+} = {}) {
+    if (!toastsEnabled || (!text && !card)) return;
     const stack = $('toastStack');
     if (!stack) return;
     const now = Date.now();
-    const dedupeKey = `${account || 0}|${kind}|${text}`;
+    const dedupeKey = `${account || 0}|${kind}|${text}|${card?.name || ''}`;
     const prevTs = recentToastMap.get(dedupeKey) || 0;
     if (now - prevTs < 8000) return;
     recentToastMap.set(dedupeKey, now);
@@ -1038,26 +1157,81 @@ function showToast({ kind = 'info', title = 'Nexo PokeBot', text = '', account =
     }
 
     const item = document.createElement('div');
-    item.className = `toast-item ${kind}`;
+    item.className = `toast-item ${kind}${card ? ' has-card' : ''}${onClick ? ' actionable' : ''}`;
+    item.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+
+    const icon = document.createElement('div');
+    icon.className = 'toast-icon';
+    icon.textContent = TOAST_ICONS[kind] || TOAST_ICONS.info;
+
+    const main = document.createElement('div');
+    main.className = 'toast-main';
     const head = document.createElement('div');
     head.className = 'toast-head';
     const titleSpan = document.createElement('span');
+    titleSpan.className = 'toast-title';
     titleSpan.textContent = title;
     const timeSpan = document.createElement('span');
-    timeSpan.textContent = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    timeSpan.className = 'toast-time';
+    timeSpan.textContent = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     head.append(titleSpan, timeSpan);
-    const body = document.createElement('div');
-    body.className = 'toast-body';
-    body.textContent = text;
-    item.append(head, body);
+    main.append(head);
+    if (card) main.append(buildToastCard(card));
+    if (text) {
+        const body = document.createElement('div');
+        body.className = 'toast-body';
+        body.textContent = text;
+        main.append(body);
+    }
+    if (onClick && actionLabel) {
+        const act = document.createElement('span');
+        act.className = 'toast-action';
+        act.textContent = actionLabel;
+        main.append(act);
+    }
+
+    const close = document.createElement('button');
+    close.type = 'button';
+    close.className = 'toast-close';
+    close.setAttribute('aria-label', 'Fechar notificação');
+    close.textContent = '×';
+
+    const life = duration || (card ? 15_000 : (kind === 'shiny' || onClick ? 8_000 : 5_000));
+    const bar = document.createElement('div');
+    bar.className = 'toast-progress';
+    bar.style.animationDuration = `${life}ms`;
+
+    item.append(icon, main, close, bar);
 
     let dismissed = false;
+    let timer = null;
+    let remaining = life;
+    let startedAt = Date.now();
     const dismiss = () => {
         if (dismissed) return;
         dismissed = true;
+        clearTimeout(timer);
         item.classList.add('out');
-        setTimeout(() => item.remove(), 220);
+        setTimeout(() => item.remove(), 240);
     };
+    const arm = () => {
+        startedAt = Date.now();
+        timer = setTimeout(dismiss, remaining);
+    };
+    // Pausa enquanto o mouse esta em cima, para dar tempo de ler a ficha
+    item.addEventListener('mouseenter', () => {
+        clearTimeout(timer);
+        remaining = Math.max(800, remaining - (Date.now() - startedAt));
+        item.classList.add('paused');
+    });
+    item.addEventListener('mouseleave', () => {
+        item.classList.remove('paused');
+        if (!dismissed) arm();
+    });
+    close.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        dismiss();
+    });
     item.addEventListener('click', () => {
         if (account && ACCOUNTS.includes(account)) {
             selectAccount(account);
@@ -1068,7 +1242,7 @@ function showToast({ kind = 'info', title = 'Nexo PokeBot', text = '', account =
         dismiss();
     });
     stack.appendChild(item);
-    setTimeout(dismiss, kind === 'shiny' || onClick ? 7800 : 4800);
+    arm();
 }
 
 function isToastWorthyLog(entry) {
@@ -1106,6 +1280,7 @@ function processActivityToasts(allSnaps) {
                 lastDropSig: snap.drops?.recent?.[0] ? `${snap.drops.recent[0].time}|${snap.drops.recent[0].name}|${snap.drops.recent[0].qty}` : '',
                 manualChests: initChests,
                 voteReady: Boolean(snap.vote?.available),
+                lastOwnShinyTs: Number(snap.ownShinies?.[0]?.ts || 0),
             };
         } else {
             if (logs.length > 0) {
@@ -1119,7 +1294,10 @@ function processActivityToasts(allSnaps) {
                     }
                 }
                 const fresh = startIdx >= 0 ? logs.slice(startIdx + 1) : logs.slice(-2);
+                const hasShinyCards = Array.isArray(snap.ownShinies);
                 for (const entry of fresh) {
+                    // A captura shiny ganha o cartao com a ficha logo abaixo; nao repete em texto
+                    if (hasShinyCards && entry.kind === 'shiny' && /^Capturado SHINY/i.test(entry.text || '')) continue;
                     if (isToastWorthyLog(entry)) {
                         showToast({ kind: entry.kind || 'info', title: accLabel, text: entry.text, account: acc });
                     }
@@ -1136,9 +1314,10 @@ function processActivityToasts(allSnaps) {
                     showToast({
                         kind: 'reward',
                         title: `Caixinha +50 · ${accLabel}`,
-                        text: `Clique para abrir o chat leve (${ch}) sem vídeo e resgatar`,
+                        text: `Disponível em ${ch}. O bot resgata sozinho em instantes.`,
                         account: acc,
-                        onClick: () => void sendAction('open-twitch-chest-embedded', { channel: ch }, acc),
+                        actionLabel: 'Resgatar agora',
+                        onClick: () => void claimTwitchChest(ch, acc),
                     });
                 }
             }
@@ -1149,8 +1328,9 @@ function processActivityToasts(allSnaps) {
                 showToast({
                     kind: 'reward',
                     title: `Vote & Ganhe · ${accLabel}`,
-                    text: 'Voto diário liberado! Clique para abrir direto na HUD.',
+                    text: 'Voto diário liberado no IdleHub.io.',
                     account: acc,
+                    actionLabel: 'Abrir voto',
                     onClick: () => void sendAction('open-vote-embedded', {}, acc),
                 });
             }
@@ -1161,12 +1341,33 @@ function processActivityToasts(allSnaps) {
                 if (dropSig !== base.lastDropSig) {
                     base.lastDropSig = dropSig;
                     showToast({
-                        kind: 'shiny',
+                        kind: 'reward',
                         title: `Drop raro · ${accLabel}`,
                         text: `${topDrop.name} x${topDrop.qty || 1}`,
                         account: acc,
                     });
                 }
+            }
+        }
+
+        if (base) {
+            const fresh = (Array.isArray(snap.ownShinies) ? snap.ownShinies : [])
+                .filter((sh) => Number(sh?.ts || 0) > base.lastOwnShinyTs)
+                .reverse();
+            for (const sh of fresh) {
+                showToast({
+                    kind: 'shiny',
+                    title: `Shiny capturado · ${accLabel}`,
+                    account: acc,
+                    card: {
+                        sprite: pokemonSpriteUrl(sh.speciesId, true),
+                        name: sh.name,
+                        level: sh.level,
+                        subtitle: [sh.hunt ? `Hunt ${sh.hunt}` : '', sh.speciesId ? `#${sh.speciesId}` : ''].filter(Boolean).join(' · '),
+                        rows: sh.details,
+                    },
+                });
+                base.lastOwnShinyTs = Math.max(base.lastOwnShinyTs, Number(sh.ts || 0));
             }
         }
 
@@ -1185,8 +1386,13 @@ function processActivityToasts(allSnaps) {
             lastServerShinyToastKey = shinyKey;
             showToast({
                 kind: 'shiny',
-                title: '✨ Shiny no servidor',
-                text: `${newestShiny.name} (${newestShiny.egg ? 'Ovo' : 'Captura'}) por ${newestShiny.trainer}`,
+                title: 'Shiny no servidor',
+                duration: 9_000,
+                card: {
+                    sprite: pokemonSpriteUrl(newestShiny.speciesId, true),
+                    name: newestShiny.name,
+                    subtitle: `${newestShiny.egg ? 'Chocado de ovo' : 'Capturado'} por ${newestShiny.trainer}`,
+                },
             });
         }
     } else if (!serverShinyToastBaselineDone) {
