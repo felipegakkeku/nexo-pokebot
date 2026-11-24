@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Nexo PokeBot (PokeIdle)
 // @namespace    https://github.com/felipegakkeku/nexo-pokebot
-// @version      1.0.10
+// @version      1.0.11
 // @description  Automação desenvolvida especificamente para o PokeIdle (pokeidle.io): captura, restock, equipe, auto-evoluir, bosses, mapa/hunt, lives e HUD flutuante
 // @match        https://pokeidle.io/app*
 // @run-at       document-idle
@@ -2741,7 +2741,7 @@
     otherKinds = null,
     now = Date.now()
   } = {}) => {
-    if (liveConfig?.smartBalance !== true || !otherBonusState) {
+    if (liveConfig?.smartBalance !== true || liveConfig?.syncPlatforms !== true || !otherBonusState) {
       return { blocked: false, waitKind: null, waitPlatform: null, reason: null };
     }
     const otherPlatform = platform === "twitch" ? "kick" : "twitch";
@@ -4065,7 +4065,7 @@
         window.FarmAnalyzer.stop();
     }
 
-    const VERSION = '1.0.10'; // preenchido no build a partir do package.json
+    const VERSION = '1.0.11'; // preenchido no build a partir do package.json
     const HUD_ID = 'pokebot-hud';
     const STYLE_ID = 'pokebot-hud-style';
     // Mantém chaves v60 para preservar Pokédex importada, alertas e preferências

@@ -1163,6 +1163,7 @@ function readConfigForm() {
         liveStreakWatch: $('cLiveStreak').checked,
         liveAutoFollow: $('cLiveFollow').checked,
         liveSmartBalance: $('cLiveSmart').checked,
+        liveSyncPlatforms: Boolean($('cLiveSyncPlatforms')?.checked),
         liveTargetHours: Number($('cLiveTargetHours').value) || 24,
         economyMode: $('cEconomy').checked ? 'on' : 'auto',
         economyPingOnly: $('cEconomyPingOnly').checked,
@@ -1623,6 +1624,7 @@ function renderActiveAccountPanel() {
         $('cLiveStreak').checked = cfg.liveStreakWatch !== false;
         $('cLiveFollow').checked = cfg.liveAutoFollow !== false;
         $('cLiveSmart').checked = cfg.liveSmartBalance !== false;
+        if ($('cLiveSyncPlatforms')) $('cLiveSyncPlatforms').checked = Boolean(cfg.liveSyncPlatforms);
         $('cLiveTargetHours').value = String(cfg.liveTargetHours ?? 24);
         $('cEconomy').checked = cfg.economyMode === 'on';
         $('cEconomyPingOnly').checked = Boolean(cfg.economyPingOnly);
@@ -1748,8 +1750,11 @@ function renderBuffManager(lv) {
         ['twitch', 'Twitch', 'tw', lv.twitchRewards],
     ];
     const html = [];
+    const syncOn = Boolean(lv.syncPlatforms);
     html.push(`<div class="bm-head"><div class="bm-title"><b>Gestor inteligente de buffs</b><span>${smartOn
-        ? `Meta individual de <b>${targetH}h</b> na Kick e <b>${targetH}h</b> na Twitch (os bônus somam): completa cada buff nas duas plataformas antes de avançar para o próximo.`
+        ? (syncOn
+            ? `Meta de <b>${targetH}h</b> na Kick e <b>${targetH}h</b> na Twitch (sincronizadas): completa cada buff nas duas plataformas antes de avançar para o próximo.`
+            : `Meta independente de <b>${targetH}h</b> por buff na Kick e <b>${targetH}h</b> na Twitch: cada plataforma completa os próprios buffs na ordem (XP, Captura, Shiny) sem travar a outra.`)
         : `Desligado: só resgata um buff quando faltam ${guardMin} min ou menos.`}</span></div>`
         + `<span class="bm-state ${smartOn ? 'on' : 'off'}">${smartOn ? 'Ligado' : 'Desligado'}</span></div>`);
     for (const [plat, label, cls, kindsRaw] of platforms) {
@@ -2620,7 +2625,7 @@ function renderUpdateUi(st) {
     const btnCheck = $('btnUpdateCheck');
     const brandVer = document.querySelector('.brand-ver');
 
-    const curVer = st.currentVersion || '1.0.10';
+    const curVer = st.currentVersion || '1.0.11';
     const shortCur = curVer.replace(/\.0$/, '');
     if (brandVer) brandVer.textContent = `v${shortCur}`;
     document.title = `Nexo PokeBot v${shortCur}`;

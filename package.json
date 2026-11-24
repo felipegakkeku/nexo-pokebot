@@ -1,6 +1,6 @@
 {
   "name": "nexo-pokebot",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "license": "MIT",
   "private": true,
   "description": "Nexo PokeBot: Hub multi-contas, modo Eco headless e automação desenvolvidos especificamente para o PokeIdle (pokeidle.io)",

@@ -998,12 +998,32 @@ test('live: gestor inteligente nao vaza pontos para o proximo buff antes de bate
         assert.equal(st1.balance, 700);
         assert.match(st1.smartNote, /XP/i);
 
-        // 2) Coordenacao Kick + Twitch: Twitch ja tem 24h de XP, mas Kick so tem 12h de XP -> Twitch aguarda Kick completar 24h de XP antes de pegar Captura!
+        // 2) Por padrao (syncPlatforms = false): cada plataforma e independente!
+        // Mesmo com Kick em 12h (< 24h) de XP, a Twitch que ja bateu 24h de XP avanca livremente para Captura!
         ctx.state.liveGameData.twitch.bonus.xp = h(24.5);
         balance = 1000;
-        const st2 = await stepTwitchChannel(ctx, 'guaxilol1', { token: 'tw-tok', force: false });
-        assert.deepEqual(redeemed, ['xp3'], 'nao avanca para Captura na Twitch enquanto Kick ainda nao bateu 24h de XP');
-        assert.match(st2.smartNote, /aguardando XP na Kick/i);
+        const stIndep = await stepTwitchChannel(ctx, 'guaxilol1', { token: 'tw-tok', force: false });
+        assert.deepEqual(redeemed, ['xp3', 'cap1'], 'sem syncPlatforms, Twitch nao fica travada pela Kick e resgata Captura');
+        assert.equal(stIndep.balance, 500);
+
+        const indepStatus = computeSmartBuffStatus(
+            ['xp', 'captura', 'shiny'],
+            ctx.state.liveGameData.twitch,
+            ctx.CONFIG.live,
+            now,
+            null,
+            { platform: 'twitch', otherKinds: ['xp', 'captura', 'shiny'], otherBonusState: ctx.state.liveGameData.kick }
+        );
+        assert.equal(indepStatus.waitingPlatform, null);
+        assert.equal(indepStatus.waitingKind, null);
+
+        // 3) Com syncPlatforms = true (opcional): aguarda a outra plataforma bater a meta do buff anterior antes de avancar
+        ctx.CONFIG.live.syncPlatforms = true;
+        ctx.state.liveGameData.twitch.bonus.captura = h(24.5);
+        balance = 1200;
+        const stSynced = await stepTwitchChannel(ctx, 'guaxilol1', { token: 'tw-tok', force: false });
+        assert.deepEqual(redeemed, ['xp3', 'cap1'], 'com syncPlatforms ativo, aguarda Kick bater 24h de XP antes de pegar Shiny');
+        assert.match(stSynced.smartNote, /aguardando XP na Kick/i);
 
         const crossStatus = computeSmartBuffStatus(
             ['xp', 'captura', 'shiny'],
@@ -1013,15 +1033,16 @@ test('live: gestor inteligente nao vaza pontos para o proximo buff antes de bate
             null,
             { platform: 'twitch', otherKinds: ['xp', 'captura', 'shiny'], otherBonusState: ctx.state.liveGameData.kick }
         );
-        assert.equal(crossStatus.nextKind, 'captura');
+        assert.equal(crossStatus.nextKind, 'shiny');
         assert.equal(crossStatus.waitingPlatform, 'kick');
         assert.equal(crossStatus.waitingKind, 'xp');
 
-        // 3) Assim que a Kick tambem completa 24h de XP, a Twitch libera Captura imediatamente!
+        // 4) Assim que a Kick completa 24h de XP e Captura, a Twitch libera Shiny mesmo com syncPlatforms = true
         ctx.state.liveGameData.kick.bonus.xp = h(24);
+        ctx.state.liveGameData.kick.bonus.captura = h(24);
         const blockerCleared = resolveCrossPlatformBlocker({
             platform: 'twitch',
-            kind: 'captura',
+            kind: 'shiny',
             configuredKinds: ['xp', 'captura', 'shiny'],
             liveConfig: ctx.CONFIG.live,
             otherBonusState: ctx.state.liveGameData.kick,
@@ -1029,8 +1050,8 @@ test('live: gestor inteligente nao vaza pontos para o proximo buff antes de bate
         });
         assert.equal(blockerCleared.blocked, false);
         const st3 = await stepTwitchChannel(ctx, 'guaxilol1', { token: 'tw-tok', force: false });
-        assert.deepEqual(redeemed, ['xp3', 'cap1'], 'com 24h de XP na Kick e 24h na Twitch, libera Captura');
-        assert.equal(st3.balance, 500);
+        assert.deepEqual(redeemed, ['xp3', 'cap1', 'sh1'], 'com 24h de XP e Captura na Kick e Twitch, libera Shiny');
+        assert.equal(st3.balance, 200);
     } finally {
         liveRewards.dispose(ctx);
     }

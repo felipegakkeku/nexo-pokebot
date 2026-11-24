@@ -4,6 +4,13 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+## 1.0.11
+
+Gestores de buffs da Kick e da Twitch desvinculados por padrão (com sincronização opcional):
+
+- **Kick e Twitch independentes por padrão (`src/modules/live-rewards.js`, `gui-server.mjs`, `renderer.html`, `renderer.js`, `hub-ui.js`, `gui-dashboard.html`)**: cada plataforma agora gerencia exclusivamente a própria meta (`XP -> Captura -> Shiny`), sem travar resgates da Twitch quando falta tempo na Kick (nem vice-versa).
+- **Sincronização opcional (`Sincronizar ordem dos buffs entre Kick e Twitch`)**: adicionada opção desligada por padrão em **Automação** (`liveSyncPlatforms`) para quem desejar fazer uma plataforma aguardar a outra concluir o buff atual antes de avançar para o próximo.
+
 ## 1.0.10
 
 Gestão inteligente coordenada entre Kick e Twitch, novos sons padrão de alerta, correção de áudio no jogo embutido e ajustes de interface:

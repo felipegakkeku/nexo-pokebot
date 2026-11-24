@@ -14,7 +14,7 @@
       <div class="brand">
         <img src="../../assets/nexo-pokebot-icon.png" width="28" height="28" alt="Nexo PokeBot" class="brand-icon" />
         <span class="brand-title">Nexo PokeBot</span>
-        <span class="brand-ver">v1.0.10</span>
+        <span class="brand-ver">v1.0.11</span>
       </div>
 
       <nav class="account-tabs" id="accountTabs" aria-label="Contas">
@@ -77,7 +77,7 @@
           <div class="update-popover hidden" id="updatePopover" role="dialog" aria-label="Atualização do Nexo PokeBot">
             <div class="update-pop-head">
               <span class="update-pop-title" id="updatePopTitle">Atualizações</span>
-              <span class="update-ver-tag" id="updatePopVer">v1.0.10</span>
+              <span class="update-ver-tag" id="updatePopVer">v1.0.11</span>
             </div>
             <div class="update-pop-desc" id="updatePopDesc">Verificando Releases do GitHub...</div>
             <div class="update-progress hidden" id="updateProgWrap">
@@ -322,6 +322,7 @@
                 <label class="toggle-item with-sub"><input type="checkbox" id="cLiveStreak" /><span class="toggle-copy"><span>Contar a sequência de lives (Twitch)</span><span class="toggle-sub">Assiste os primeiros 15 min de cada live no player real da Twitch, invisível, em 160p e sem som</span></span></label>
                 <label class="toggle-item"><input type="checkbox" id="cLiveFollow" /> Seguir automaticamente os canais das lives</label>
                 <label class="toggle-item"><input type="checkbox" id="cLiveSmart" /> Balancear buffs das lives até a meta</label>
+                <label class="toggle-item"><input type="checkbox" id="cLiveSyncPlatforms" /> Sincronizar ordem dos buffs entre Kick e Twitch</label>
                 <label class="toggle-item with-sub" title="Corta o feed de campo no servidor no modo Headless (economiza banda, mas impede detectar Shiny antes de jogar a bola; no jogo embutido o Modo Economia visual já preserva a captura com 0% GPU)"><input type="checkbox" id="cEconomy" /><span class="toggle-copy"><span>Ativar economia do servidor</span><span class="toggle-sub warn">Limita: corta o feed de campo no Headless e desativa detecção prévia de Shiny (usa fallback de batalha)</span></span></label>
                 <label class="toggle-item with-sub"><input type="checkbox" id="cEconomyPingOnly" /><span class="toggle-copy"><span>Só enviar ping no modo economia</span><span class="toggle-sub warn">Limita: pausa captura, Shiny, restock, passe, prey e /hunt (mantém só keepalive e lives)</span></span></label>
                 <label class="toggle-item"><input type="checkbox" id="cStandby" /> Entrar em espera no erro 4001</label>

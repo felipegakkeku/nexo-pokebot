@@ -263,8 +263,9 @@ export const orderBuffsForRedeem = (
 };
 
 /**
- * Com smartBalance ligado e as duas plataformas ativas (Kick + Twitch), so libera o proximo buff
+ * Quando syncPlatforms esta ligado explicitamente junto com smartBalance, so libera o proximo buff
  * (ex: Captura) depois que os buffs de prioridade maior (ex: XP) baterem a meta nas duas plataformas.
+ * Por padrao (syncPlatforms = false), Kick e Twitch funcionam de forma independente.
  */
 export const resolveCrossPlatformBlocker = ({
     platform = 'twitch',
@@ -275,7 +276,7 @@ export const resolveCrossPlatformBlocker = ({
     otherKinds = null,
     now = Date.now(),
 } = {}) => {
-    if (liveConfig?.smartBalance !== true || !otherBonusState) {
+    if (liveConfig?.smartBalance !== true || liveConfig?.syncPlatforms !== true || !otherBonusState) {
         return { blocked: false, waitKind: null, waitPlatform: null, reason: null };
     }
     const otherPlatform = platform === 'twitch' ? 'kick' : 'twitch';

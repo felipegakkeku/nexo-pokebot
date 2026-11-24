@@ -138,6 +138,7 @@ const EDITABLE_CONFIG_KEYS = new Set([
     'liveKickRewards',
     'liveRewardTier',
     'liveSmartBalance',
+    'liveSyncPlatforms',
     'liveTargetHours',
     'liveChannelRewards',
     'liveGuardThresholdMin',
@@ -276,6 +277,7 @@ function buildConfig(prefs = {}, saved = {}, overrides = {}, isolatedAccount = f
         liveKickRewards: Array.isArray(p.liveKickRewards) ? parseRewardKinds(p.liveKickRewards, []) : null,
         liveRewardTier: LIVE_REWARD_TIERS.includes(p.liveRewardTier) ? p.liveRewardTier : 'smart',
         liveSmartBalance: p.liveSmartBalance ?? true,
+        liveSyncPlatforms: Boolean(p.liveSyncPlatforms ?? false),
         liveTargetHours: typeof p.liveTargetHours === 'number' ? p.liveTargetHours : 24,
         liveChannelRewards: p.liveChannelRewards && typeof p.liveChannelRewards === 'object' ? { ...p.liveChannelRewards } : {},
         liveGuardThresholdMin: typeof p.liveGuardThresholdMin === 'number' ? p.liveGuardThresholdMin : 30,
@@ -409,6 +411,9 @@ function normalizeConfigPatch(current, patch = {}) {
     }
     if (patch.liveSmartBalance !== undefined) {
         next.liveSmartBalance = Boolean(patch.liveSmartBalance);
+    }
+    if (patch.liveSyncPlatforms !== undefined) {
+        next.liveSyncPlatforms = Boolean(patch.liveSyncPlatforms);
     }
     if (patch.liveTargetHours !== undefined) {
         const h = Number(patch.liveTargetHours);
@@ -1768,6 +1773,7 @@ export function createLiveRewardsBridge({
                     kickRewards: Array.isArray(c.liveKickRewards) ? c.liveKickRewards : null,
                     rewardTier: c.liveRewardTier || 'smart',
                     smartBalance: c.liveSmartBalance ?? true,
+                    syncPlatforms: Boolean(c.liveSyncPlatforms ?? false),
                     targetHours: Number(c.liveTargetHours ?? 24),
                     channelRewards: c.liveChannelRewards && typeof c.liveChannelRewards === 'object' ? c.liveChannelRewards : {},
                     guardThresholdMin: c.liveGuardThresholdMin ?? 30,
@@ -1961,6 +1967,7 @@ export function createLiveRewardsBridge({
 
         const smartCfgView = {
             smartBalance: cfg.liveSmartBalance ?? true,
+            syncPlatforms: Boolean(cfg.liveSyncPlatforms ?? false),
             targetHours: Number(cfg.liveTargetHours ?? 24),
             guardThresholdMin: Number(cfg.liveGuardThresholdMin ?? 30),
             watchTwitch: cfg.liveWatchTwitch ?? true,
@@ -1977,6 +1984,7 @@ export function createLiveRewardsBridge({
             kickRewards,
             rewardTier: cfg.liveRewardTier || 'smart',
             smartBalance: Boolean(cfg.liveSmartBalance ?? true),
+            syncPlatforms: Boolean(cfg.liveSyncPlatforms ?? false),
             targetHours: Number(cfg.liveTargetHours ?? 24),
             smartStatus: {
                 twitch: computeSmartBuffStatus(twitchRewards, effTwBonus, smartCfgView, serverNow, getLiveLastRedeemMap(liveCtx, 'twitch'), {
