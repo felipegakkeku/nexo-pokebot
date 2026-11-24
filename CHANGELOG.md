@@ -20,7 +20,9 @@ Primeiro lançamento oficial do **Nexo PokeBot** (versão 1.0), desenvolvido esp
 - **Modo Ultra-Eco em 1 Processo (`src/headless/multi-daemon.mjs`, `Abrir Nexo PokeBot Eco (1 Processo).bat`, `Nexo PokeBot.exe --eco`, `npm run eco`)**: roda as 4 contas em um único processo Node sem Electron/Chromium, com painel de drops e eficiência clicáveis.
 - **Motor Headless WebSocket Standalone e Dashboard Web (`headless-farm.mjs`, `src/headless/`, `src/desktop/`)**:
   - Extrator de sessão/preferências, automação via WebSocket nativo (captura em caídos, restock, passe diário, prey, reconexão/`--standby` no `4001`), dashboard web em `http://127.0.0.1:17890` e ponte 1-click **Copiar Sessão Headless** no userscript (`window.PokeBot.exportarSessaoHeadless()`).
-- **Referências da comunidade PokeIdle**: documentação e metadados atualizados com palavras-chave de PokeIdle e referências a `soufoka/PokeGrid`, `soufoka/PokeGrid-source`, `darlanhms/pokeidleDeck` e `/hunt for PokeIdle`.
+- **Alta eficiência de memória**: roda até **4 contas + cerca de 40 lives simultâneas (Twitch e Kick) com média de ~400 MB de RAM** no Hub (vs. ~2 GB+ em apps similares com múltiplas abas/WebView2) e **~60 MB de RAM total** no Modo Ultra-Eco em 1 processo.
+- **Importador / Recuperador de Sessões (`Recuperar Sessoes Nexo PokeBot.bat`)**: importa em 1 clique as 4 contas já logadas (**PokeIdle + Twitch + Kick**) de **PokeIdleMulti**, **IdleDeck**, **PokeGrid**, pastas antigas do PokeBot ou Lixeira do Windows, usando DPAPI local e o runtime embutido (`ELECTRON_RUN_AS_NODE=1` + `node:sqlite`) sem exigir Node.js instalado.
+- **Referências da comunidade PokeIdle**: documentação e metadados atualizados com palavras-chave de PokeIdle e referências a `soufoka/PokeGrid`, `soufoka/PokeGrid-source`, `darlanhms/pokeidleDeck`, `artbruno35/PokeIdleMulti` e `/hunt for PokeIdle`.
 
 ## 6.8.1
 

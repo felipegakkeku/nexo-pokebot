@@ -46,7 +46,11 @@ function buildFriendReadme(shortVersion) {
         '   para entrar em cada uma das suas contas (Contas 1 a 4, todas isoladas).',
         '   Depois de logar uma vez, pode clicar em "Modo Eco" para farmar em 2o plano sem peso.',
         '',
-        '4. (Opcional) Para usar /hunt automatico sem abas abertas, instale a extensao',
+        '4. (Opcional) Ja tem contas logadas no PokeIdleMulti, IdleDeck, PokeGrid ou em uma',
+        '   pasta antiga do PokeBot? Rode "Recuperar Sessoes Nexo PokeBot.bat" para importar',
+        '   as 4 contas direto com 1 clique (sem precisar instalar Node.js).',
+        '',
+        '5. (Opcional) Para usar /hunt automatico sem abas abertas, instale a extensao',
         '   "/hunt for PokeIdle" no seu Google Chrome (ou Edge/Brave).',
         '',
         'Dica: todas as suas sessoes e configuracoes ficam salvas localmente na propria pasta.',
@@ -80,6 +84,7 @@ export function buildFriendPackage(options = {}) {
         const copyFiles = [
             'Abrir Nexo PokeBot.bat',
             'Abrir Nexo PokeBot Eco (1 Processo).bat',
+            'Recuperar Sessoes Nexo PokeBot.bat',
             'package.json',
             'README.md',
         ];
