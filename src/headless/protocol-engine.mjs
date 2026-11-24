@@ -410,7 +410,7 @@ export function computeModeWarnings({
             code: 'economy-ping-only',
             severity: 'danger',
             title: 'Modo Somente Ping ativo: automações pausadas',
-            detail: 'Captura automática, detecção de Shiny, Restock, Passe, Prey e /hunt estão pausados neste modo (mantém apenas keepalive e lives).',
+            detail: 'Captura automática, Restock, Passe, Prey e /hunt estão pausados neste modo (mantém só a conexão viva e as lives).',
             fixLabel: 'Restaurar captura + Shiny',
             fixConfig: { economyPingOnly: false, economyMode: 'auto', caidosEnabled: true },
         });
@@ -437,17 +437,17 @@ export function computeModeWarnings({
         warnings.push({
             code: 'server-economy-no-shiny',
             severity: 'warn',
-            title: 'Economia do servidor ativa: sem detecção de Shiny',
-            detail: 'O servidor corta o feed de campo neste modo. O bot tenta capturar pelo fallback de batalha, mas não detecta Shiny antes de jogar a Pokébola (nem escolhe a Bola Shiny) e pode perder caídos se o servidor omitir o slot. No Modo Eco padrão (desmarcado), o bot já roda com 0% GPU e mantém 100% da captura + Shiny.',
-            fixLabel: 'Ativar captura + Shiny',
+            title: 'Economia do servidor ativa: captura pelo fallback de batalha',
+            detail: 'O servidor corta o feed de campo neste modo. O bot tenta capturar pelo fallback de batalha e pode perder caídos se o servidor omitir o slot; cada caído perdido é uma chance de shiny a menos. No Modo Eco padrão (desmarcado), o bot já roda com 0% GPU e mantém 100% da captura.',
+            fixLabel: 'Restaurar captura completa',
             fixConfig: { economyMode: 'auto', caidosEnabled: true },
         });
     } else if (isOnline && cfg.caidosEnabled !== false && (campoFeedDegraded || (economyActive && mode !== 'browser-bridge'))) {
         warnings.push({
             code: 'campo-feed-missing',
             severity: 'warn',
-            title: 'Feed de campo indisponível: detecção de Shiny limitada',
-            detail: 'O servidor não está enviando o feed de campo nesta hunt. O bot continua tentando lançar Pokébolas pelo fallback de batalha, mas não consegue identificar Shiny antes do arremesso.',
+            title: 'Feed de campo indisponível: captura limitada',
+            detail: 'O servidor não está enviando o feed de campo nesta hunt. O bot continua tentando lançar Pokébolas pelo fallback de batalha, mas pode perder caídos.',
             fixLabel: 'Restaurar feed de campo',
             fixConfig: { economyMode: 'auto', economyPingOnly: false, caidosEnabled: true },
         });
@@ -483,6 +483,10 @@ const NORMAL_BALL_ORDERS = {
  */
 export function pickHeadlessBallForCorpse(corpse, balls = {}, config = {}, playerGold = 0) {
     let order;
+    // O PokeIdle sorteia o shiny no proprio arremesso (o brilho so aparece quando a bola sai e,
+    // se ela nao fecha, o shiny vai embora com o corpo). Por isso um caido nunca chega aqui marcado
+    // como shiny pelo feed de campo: a bola que pega o shiny e a bola comum, escolhida abaixo.
+    // O ramo shiny fica so como defesa caso o servidor um dia passe a marcar antes.
     if (corpse?.shiny) {
         const shinyBall = config?.shinyBall || 'best';
         order = SHINY_BALL_ORDERS[shinyBall] || SHINY_BALL_ORDERS.best;

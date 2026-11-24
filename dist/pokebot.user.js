@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Nexo PokeBot (PokeIdle)
 // @namespace    https://github.com/felipegakkeku/nexo-pokebot
-// @version      1.0.12
+// @version      1.0.13
 // @description  Automação desenvolvida especificamente para o PokeIdle (pokeidle.io): captura, restock, equipe, auto-evoluir, bosses, mapa/hunt, lives e HUD flutuante
 // @match        https://pokeidle.io/app*
 // @run-at       document-idle
@@ -4343,7 +4343,7 @@
         window.FarmAnalyzer.stop();
     }
 
-    const VERSION = '1.0.12'; // preenchido no build a partir do package.json
+    const VERSION = '1.0.13'; // preenchido no build a partir do package.json
     const HUD_ID = 'pokebot-hud';
     const STYLE_ID = 'pokebot-hud-style';
     // Mantém chaves v60 para preservar Pokédex importada, alertas e preferências
@@ -5478,7 +5478,7 @@
                     <div class="pb-sec">Configurações (Bola &amp; Restock)</div>
                     <div class="pb-grid-cfg">
                         <label class="pb-cfg-field">
-                            <span class="pb-lbl">Bola Normal</span>
+                            <span class="pb-lbl">Bola</span>
                             <select data-pb-cfg="preferredBall">
                                 <option value="auto">Auto Intelig.</option>
                                 <option value="poke">Poke Ball</option>
@@ -5486,17 +5486,6 @@
                                 <option value="super">Super Ball</option>
                                 <option value="ultra">Ultra Ball</option>
                                 <option value="beast">Beast Ball</option>
-                            </select>
-                        </label>
-                        <label class="pb-cfg-field">
-                            <span class="pb-lbl">Bola Shiny</span>
-                            <select data-pb-cfg="shinyBall">
-                                <option value="best">Melhor disp.</option>
-                                <option value="beast">Beast Ball</option>
-                                <option value="ultra">Ultra Ball</option>
-                                <option value="super">Super Ball</option>
-                                <option value="great">Great Ball</option>
-                                <option value="poke">Poke Ball</option>
                             </select>
                         </label>
                         <label class="pb-cfg-field">

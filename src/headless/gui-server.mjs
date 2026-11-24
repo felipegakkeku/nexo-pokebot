@@ -107,6 +107,7 @@ const LIVE_CYCLE_INTERVAL_MS = 55_000;
 const MIN_RECONNECT_MS = 2_000;
 const MAX_RECONNECT_MS = 30_000;
 const MAX_LOGS = 120;
+const BALL_LABELS = Object.freeze({ 1: 'Poke Ball', 2: 'Great Ball', 3: 'Super Ball', 4: 'Ultra Ball', 5: 'Beast Ball' });
 
 const EDITABLE_CONFIG_KEYS = new Set([
     'caidosEnabled',
@@ -2520,9 +2521,11 @@ export function createHeadlessController(options = {}) {
             name,
             level: pending.level ?? null,
             hunt: curSlug ? (catalog.huntNames?.[curSlug] || curSlug) : '',
+            ballId: pending.ballId ?? null,
         });
         if (missedShinies.length > 10) missedShinies.pop();
-        pushLog('shiny-miss', `Shiny visto e não capturado: ${name}${pending.level ? ` (Nv ${pending.level})` : ''}`);
+        const ballTxt = pending.ballId ? `, escapou da ${BALL_LABELS[pending.ballId] || `bola #${pending.ballId}`}` : '';
+        pushLog('shiny-miss', `Shiny visto e não capturado: ${name}${pending.level ? ` (Nv ${pending.level})` : ''}${ballTxt}`);
     };
 
     const isNonWildScene = (state, msg = null) => {
@@ -3038,8 +3041,7 @@ export function createHeadlessController(options = {}) {
 
     const describeShopBuy = (action) => {
         if (action.kind === 'ball') {
-            const ballNames = { 1: 'Poke Ball', 2: 'Great Ball', 3: 'Super Ball', 4: 'Ultra Ball', 5: 'Beast Ball' };
-            return catalog.itemNames?.[action.id] || ballNames[action.id] || `ball #${action.id}`;
+            return catalog.itemNames?.[action.id] || BALL_LABELS[action.id] || `ball #${action.id}`;
         }
         const itemNames = {
             [ITEM_IDS.SMALL_POTION]: 'Small Potion',
@@ -3076,7 +3078,7 @@ export function createHeadlessController(options = {}) {
         if (config.economyPingOnly || config.economyMode === 'on') return true;
         if (config.economyMode === 'off') return false;
         // Em modo auto, so ativa cliente.economia no servidor se a captura de caidos estiver desligada;
-        // mesmo em contas VIP, o feed de campo e obrigatorio para detectar Shinies (b.sh) antes do arremesso.
+        // mesmo em contas VIP, o feed de campo e o que mostra os caidos para o bot jogar a bola.
         if (config.caidosEnabled !== false) return false;
         return Boolean(state?.loja?.vip && (state?.automation?.autoBallSemParar || state?.automation?.autoBallAteCapturar));
     };
@@ -3112,8 +3114,8 @@ export function createHeadlessController(options = {}) {
             pushLog(
                 'warn',
                 report.currentGold <= report.reserveGold
-                    ? `Restock bloqueado pela reserva de gold (${goldFmt} / reserva ${reserveFmt}). Ajuste "Reserva minima de gold" em Automacao.`
-                    : `Restock sem gold disponivel apos a reserva (${goldFmt} / reserva ${reserveFmt}).`
+                    ? `Restock bloqueado pela reserva de gold (${goldFmt} / reserva ${reserveFmt}). Ajuste "Reserva mínima gold" em Automação.`
+                    : `Restock sem gold disponível após a reserva (${goldFmt} / reserva ${reserveFmt}).`
             );
         }
         return actions;
@@ -3199,6 +3201,7 @@ export function createHeadlessController(options = {}) {
                         const p = pendingShinies.get(e.slot)
                             || { seenAt: ts, name: e.nome || '', level: e.level ?? e.nivel ?? null, goneAt: 0 };
                         p.touchAt = ts;
+                        p.ballId = bId;
                         pendingShinies.set(e.slot, p);
                     }
                     const slotKey = e.slot != null ? `slot:${e.slot}` : null;
@@ -3327,7 +3330,7 @@ export function createHeadlessController(options = {}) {
                     lastCampoHealAt = ts;
                     if (sendFrame({ t: 'cliente.economia', ativo: false })) {
                         economyActive = false;
-                        pushLog('warn', 'Feed de campo ausente em combate: reativando feed leve para garantir captura e detecção de Shiny.');
+                        pushLog('warn', 'Feed de campo ausente em combate: reativando o feed leve para não perder caídos.');
                     }
                 }
                 if (battleKillsWithoutCampo >= 3) {
@@ -4582,7 +4585,7 @@ export function createHeadlessController(options = {}) {
         if (config.economyPingOnly && !prevPingOnly) {
             pushLog('warn', 'Aviso de limitação: Modo Somente Ping pausa captura, Shiny, restock, passe, prey e /hunt.');
         } else if (config.economyMode === 'on' && prevEcoMode !== 'on' && !config.economyPingOnly) {
-            pushLog('warn', 'Aviso de limitação: Economia do servidor corta o feed de campo e desativa detecção prévia de Shiny antes da Pokébola.');
+            pushLog('warn', 'Aviso de limitação: Economia do servidor corta o feed de campo e o bot passa a achar os caídos pelos eventos de batalha.');
         }
         if (config.caidosEnabled === false && prevCaidosEnabled !== false) {
             pushLog('warn', 'Aviso de limitação: Captura automática desligada (o bot não vai jogar Pokébolas em caídos nem em Shinies).');
@@ -4624,7 +4627,7 @@ export function createHeadlessController(options = {}) {
                     const reserveFmt = Number(report.reserveGold || 0).toLocaleString('pt-BR');
                     pushLog(
                         'warn',
-                        `Restock manual sem gold disponivel (${goldFmt} / reserva ${reserveFmt}). Reduza "Reserva minima de gold" em Automacao.`
+                        `Restock manual sem gold disponível (${goldFmt} / reserva ${reserveFmt}). Reduza "Reserva mínima gold" em Automação.`
                     );
                 } else {
                     pushLog('info', 'Restock manual: estoque ja atingiu o alvo configurado.');

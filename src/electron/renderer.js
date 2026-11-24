@@ -123,6 +123,27 @@ function buildSeedJs(seed) {
     })()`;
 }
 
+const wvZoomObservers = new Map();
+function wvAutoZoomOn() {
+    try { return localStorage.getItem('nexo.wvAutoZoom') !== '0'; } catch { return true; }
+}
+// Em telas baixas da grade o jogo some com o mapa; afasta o zoom para caber (altura de referência ~700px).
+function applyWebviewZoom(acc) {
+    const wv = webviews.get(acc);
+    const body = $(`wv-body-${acc}`);
+    if (!wv || !body || !wv.__ready) return;
+    let z = 1;
+    if (wvAutoZoomOn() && body.clientHeight > 0) z = Math.max(0.6, Math.min(1, body.clientHeight / 700));
+    z = Math.round(z * 20) / 20;
+    if (wv.__zoom === z) return;
+    try { wv.setZoomFactor(z); wv.__zoom = z; } catch { /* ainda carregando */ }
+}
+function setWebviewAutoZoom(on) {
+    try { localStorage.setItem('nexo.wvAutoZoom', on ? '1' : '0'); } catch { /* ignore */ }
+    for (const acc of webviews.keys()) applyWebviewZoom(acc);
+}
+window.nexoWvZoom = { isOn: wvAutoZoomOn, set: setWebviewAutoZoom };
+
 async function openEmbeddedForAccount(acc) {
     if (webviews.has(acc)) return;
     const body = $(`wv-body-${acc}`);
@@ -152,6 +173,9 @@ async function openEmbeddedForAccount(acc) {
     });
     wv.addEventListener('dom-ready', async () => {
         try { wv.setAudioMuted(isAccountMuted(acc)); } catch { /* ignore */ }
+        wv.__ready = true;
+        wv.__zoom = null;
+        applyWebviewZoom(acc);
         const needCampo = snapshots[acc]?.config?.caidosEnabled !== false;
         wv.executeJavaScript(`window.__pbSetNeedCampoFeed && window.__pbSetNeedCampoFeed(${JSON.stringify(needCampo)})`).catch(() => {});
         if (!seedDone && res.seedSession) {
@@ -179,7 +203,7 @@ async function openEmbeddedForAccount(acc) {
             showToast({
                 kind: 'ok',
                 title: `Modo Economia do jogo · Conta ${acc}`,
-                text: 'Canvas em 0% GPU com captura automática e detecção de Shiny 100% preservadas.',
+                text: 'Canvas em 0% GPU com a captura automática 100% preservada.',
                 account: acc,
             });
         }
@@ -189,12 +213,19 @@ async function openEmbeddedForAccount(acc) {
     webviews.set(acc, wv);
     if (ph) ph.hidden = true;
     body.appendChild(wv);
+    if (typeof ResizeObserver === 'function') {
+        const ro = new ResizeObserver(() => applyWebviewZoom(acc));
+        ro.observe(body);
+        wvZoomObservers.set(acc, ro);
+    }
     updateAudioIndicators(acc);
     await pollSnapshots();
 }
 
 async function closeEmbeddedForAccount(acc, { startHeadless = false } = {}) {
     const wv = webviews.get(acc);
+    wvZoomObservers.get(acc)?.disconnect();
+    wvZoomObservers.delete(acc);
     if (wv) {
         webviews.delete(acc);
         try { wv.src = 'about:blank'; } catch { /* ignore */ }
@@ -225,7 +256,7 @@ async function closeAllEmbeddedToHeadless(targetMode = 'panel-only') {
         showToast({
             kind: 'ok',
             title: 'Modo Eco (Headless)',
-            text: 'Navegador fechado (~90% menos RAM e 0% GPU). Captura, detecção de Shiny, lives e /hunt continuam 100% ativos.',
+            text: 'Navegador fechado (~90% menos RAM e 0% GPU). Captura, lives e /hunt continuam 100% ativos.',
         });
     }
 }
@@ -662,17 +693,18 @@ function renderPanelsGrid() {
         fill.style.background = pct > 55 ? '#10b981' : pct > 25 ? '#f59e0b' : '#ef4444';
         card.querySelector('.pcard-hp-txt').textContent = pk ? `${fmtNum(pk.hp)} / ${fmtNum(pk.maxHp)} HP (${pct}%)` : '';
 
+        const profitH = Number(st.netGoldPerHour ?? st.goldPerHour ?? 0);
         const tiles = [
-            ['XP/h', fmtNum(st.xpPerHour)],
-            ['Líq./h', fmtNum(st.netGoldPerHour ?? st.goldPerHour)],
-            ['Kills', fmtNum(st.kills)],
-            ['Capturas', fmtNum(st.captures)],
-            ['Shinies', fmtNum(st.shiniesCaptured)],
-            ['Kill médio', st.avgKillSec > 0 ? `${String(st.avgKillSec).replace('.', ',')}s` : '-'],
-            ['Cap./kill', st.kills > 0 ? `${String(st.capturePerKillPct || 0).replace('.', ',')}%` : '-'],
-            ['Tempo', fmtUptime(st.uptimeSec)],
+            ['XP/h', fmtShortNum(st.xpPerHour), ''],
+            ['Lucro/h', `${profitH < 0 ? '-' : '+'}${fmtShortNum(Math.abs(profitH))}`, profitH < 0 ? 'neg' : ''],
+            ['Abates', fmtNum(st.kills), ''],
+            ['Capturas', fmtNum(st.captures), ''],
+            ['Shinies', fmtNum(st.shiniesCaptured), ''],
+            ['Tempo/abate', st.avgKillSec > 0 ? `${String(st.avgKillSec).replace('.', ',')}s` : '-', ''],
+            ['Captura/abate', st.kills > 0 ? `${String(st.capturePerKillPct || 0).replace('.', ',')}%` : '-', ''],
+            ['Tempo ativo', fmtUptime(st.uptimeSec), ''],
         ];
-        const statsHtml = tiles.map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd></div>`).join('');
+        const statsHtml = tiles.map(([k, v, cls]) => `<div${cls ? ` class="${cls}"` : ''}><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd></div>`).join('');
         const statsEl = card.querySelector('.pcard-stats');
         if (statsEl.dataset.sig !== statsHtml) {
             statsEl.dataset.sig = statsHtml;
@@ -681,14 +713,24 @@ function renderPanelsGrid() {
         const dr = s.drops || {};
         const hitDrops = (dr.featured || []).filter((d) => d.qty > 0).slice(0, 4);
         card.querySelector('.pcard-drops').textContent = hitDrops.length
-            ? `Drops: ${hitDrops.map((d) => `${d.name} x${d.qty}`).join(' · ')}`
-            : `Drops: ${dr.focusLabel ? `${dr.focusLabel} · ` : ''}nenhum ainda`;
+            ? `Drops da sessão: ${hitDrops.map((d) => `${d.name} x${d.qty}`).join(' · ')}`
+            : 'Drops da sessão: nenhum ainda';
 
         const running = RUNNING_STATUSES.includes(status);
         const runBtn = card.querySelector('[data-pc-act="run"]');
-        runBtn.textContent = running ? 'Pausar' : 'Iniciar Headless';
+        runBtn.textContent = running ? 'Pausar' : status === 'paused' ? 'Retomar Headless' : 'Iniciar Headless';
         runBtn.className = running ? 'btn sm' : 'btn sm primary';
     }
+}
+
+function fmtShortNum(n) {
+    const v = Number(n || 0);
+    const a = Math.abs(v);
+    const one = (x) => String(Math.round(x * 10) / 10).replace('.', ',');
+    if (a >= 1e9) return `${one(v / 1e9)} bi`;
+    if (a >= 1e6) return `${one(v / 1e6)} mi`;
+    if (a >= 1e4) return `${one(v / 1e3)} mil`;
+    return fmtNum(v);
 }
 
 async function handlePanelCardAction(acc, act) {
@@ -1169,7 +1211,6 @@ function readConfigForm() {
         economyPingOnly: $('cEconomyPingOnly').checked,
         standbyOn4001: $('cStandby').checked,
         preferredBall: $('cBall').value,
-        shinyBall: $('cShinyBall').value,
         targetBalls: Number($('cTargetBalls').value) || 50,
         targetPotions: Math.max(0, Number($('cTargetPotions').value) || 0),
         preferredPotionIds: readCheckedPotions(),
@@ -1255,7 +1296,7 @@ function renderModeWarningsBanner(data) {
                 showToast({
                     kind: 'ok',
                     title: `Conta ${activeAccount}`,
-                    text: 'Captura automática e detecção de Shiny restauradas.',
+                    text: 'Captura automática restaurada.',
                     account: activeAccount,
                 });
             });
@@ -1282,7 +1323,7 @@ function renderConfigModePreview() {
         items.push({
             cls: 'danger',
             title: 'Limitação ativa: Modo Somente Ping',
-            detail: 'Pausa captura automática, detecção de Shiny, restock, passe diário, prey e /hunt (mantém só keepalive e lives).',
+            detail: 'Pausa captura automática, restock, passe diário, prey e /hunt (mantém só a conexão viva e as lives).',
         });
     } else {
         if (!caidosOn) {
@@ -1298,8 +1339,8 @@ function renderConfigModePreview() {
         if (serverEco) {
             items.push({
                 cls: 'warn',
-                title: 'Limitação ativa: Economia do servidor (sem detecção prévia de Shiny)',
-                detail: 'No Headless, o servidor corta o feed de campo. O bot tenta capturar pelo fallback de batalha, mas não identifica Shiny antes de jogar a bola. Deixe desmarcado para manter 0% GPU + captura 100% garantida + Shiny.',
+                title: 'Limitação ativa: Economia do servidor (caídos pelo fallback de batalha)',
+                detail: 'No Headless, o servidor corta o feed de campo. O bot tenta capturar pelo fallback de batalha e pode perder caídos (cada caído perdido é uma chance de shiny a menos). Deixe desmarcado para manter 0% GPU + captura 100% garantida.',
             });
         }
     }
@@ -1307,8 +1348,8 @@ function renderConfigModePreview() {
     if (items.length === 0) {
         items.push({
             cls: 'ok',
-            title: 'Modo completo: captura e detecção de Shiny garantidas',
-            detail: `Captura em caídos ativa com detecção de Shiny antes da Pokébola (inclusive no Modo Eco Headless e no Modo Economia visual do jogo com 0% GPU)${livesOn ? (smartOn ? ' · Gestor Inteligente de Buffs ligado.' : ' · Lives ligadas.') : '.'}`,
+            title: 'Modo completo: captura garantida',
+            detail: `Captura em caídos ativa: toda bola jogada é uma chance de shiny (inclusive no Modo Eco Headless e no Modo Economia visual do jogo com 0% GPU)${livesOn ? (smartOn ? ' · Gestor Inteligente de Buffs ligado.' : ' · Lives ligadas.') : '.'}`,
         });
     }
 
@@ -1433,10 +1474,16 @@ function renderActiveAccountPanel() {
         ? ` · ${data.lastError}`
         : '';
     $('hdrTrainerLine').textContent =
-        `Nv ${t.level || 0} · ${fmtNum(t.gold)} gold · ${fmtUptime(st.uptimeSec)} · ${st.pongs || 0} pings${errText}`;
+        `Nv ${t.level || 0} · ${fmtNum(t.gold)} gold · ativo há ${fmtUptime(st.uptimeSec)}${errText}`;
 
     const btnEmb = $('btnToggleEmbedded');
-    btnEmb.textContent = isEmbedded ? 'Fechar Embutido (Ir Headless)' : 'Abrir no Embutido';
+    btnEmb.textContent = isEmbedded ? 'Voltar para Headless' : 'Abrir no Embutido';
+    btnEmb.title = isEmbedded ? 'Fecha o jogo embutido e segue farmando em segundo plano' : 'Abre o jogo desta conta aqui dentro';
+    const runningNow = RUNNING_STATUSES.includes(status);
+    const btnStart = $('btnStartHeadless');
+    btnStart.style.display = runningNow || isEmbedded ? 'none' : '';
+    btnStart.textContent = status === 'paused' ? 'Retomar Headless' : 'Iniciar Headless';
+    $('btnPause').style.display = runningNow || isEmbedded ? '' : 'none';
 
     renderModeWarningsBanner(data);
 
@@ -1466,7 +1513,7 @@ function renderActiveAccountPanel() {
         }
     }
 
-    $('huntLine').textContent = `Hunt atual: ${t.huntName || '-'}${t.noCentro ? ' (Centro)' : ''} · Economia ${t.economyActive ? 'ativa' : 'inativa'}`;
+    $('huntLine').textContent = `Hunt atual: ${t.huntName || '-'}${t.noCentro ? ' (Centro)' : ''}${t.economyActive ? ' · Economia do servidor ligada' : ''}`;
     const guideMode = data.config?.huntGuideMode || 'off';
     $('huntGuideLine').textContent = guideMode !== 'off' && data.huntGuide?.note
         ? `/hunt: ${data.huntGuide.note}`
@@ -1509,13 +1556,13 @@ function renderActiveAccountPanel() {
     $('kKills').textContent = fmtNum(st.kills);
     $('kKillsSub').textContent = `${st.killsPerMin || 0}/min`;
     $('kXp').textContent = fmtNum(st.xpGained);
-    $('kXpSub').textContent = `${fmtNum(st.xpPerHour)}/h · Tr ${fmtNum(st.xpTrainerPerHour)}/h`;
+    $('kXpSub').textContent = `${fmtNum(st.xpPerHour)}/h · treinador ${fmtNum(st.xpTrainerPerHour)}/h`;
     const netGold = st.netGold ?? st.goldGained ?? 0;
     const netPerH = st.netGoldPerHour ?? st.goldPerHour ?? 0;
     $('kGold').textContent = `${netGold >= 0 ? '' : '-'}${fmtNum(Math.abs(netGold))}`;
     $('kGoldSub').textContent = `${netPerH >= 0 ? '+' : '-'}${fmtNum(Math.abs(netPerH))}/h líq.`;
     $('kCaps').textContent = fmtNum(st.captures);
-    $('kCapsSub').textContent = `${st.shiniesCaptured || 0} shinies · ${fmtNum(st.ballsThrown)} bolas`;
+    $('kCapsSub').textContent = `${Number(st.shiniesCaptured || 0) === 1 ? '1 shiny' : `${st.shiniesCaptured || 0} shinies`} · ${fmtNum(st.ballsThrown)} bolas`;
 
     const fmtDec = (n) => String(Number(n || 0)).replace('.', ',');
     $('eAvgKill').textContent = st.avgKillSec > 0 ? `${fmtDec(st.avgKillSec)}s` : '-';
@@ -1528,7 +1575,7 @@ function renderActiveAccountPanel() {
     $('eBrutoSub').textContent = `bruto: +${fmtNum(st.goldGained || 0)}`;
     $('eShinies').textContent = `${fmtNum(st.shiniesCaptured || 0)} / ${fmtNum(st.shiniesSeen || 0)}`;
     $('eShiniesSub').textContent = 'cap / vistos';
-    $('eSurv').textContent = `${fmtNum(st.heals || 0)} poç · ${fmtNum(st.revivesUsed || 0)} rev`;
+    $('eSurv').textContent = `${fmtNum(st.heals || 0)} poções · ${fmtNum(st.revivesUsed || 0)} revives`;
     $('eSurvSub').textContent = `${fmtNum(st.playerDeaths || 0)} mortes · ${fmtDec(st.potionsPerHour || 0)} poç/h`;
 
     // Drops da sessão & foco do mapa (memoizado por assinatura)
@@ -1637,7 +1684,6 @@ function renderActiveAccountPanel() {
         $('cEconomyPingOnly').checked = Boolean(cfg.economyPingOnly);
         $('cStandby').checked = Boolean(cfg.standbyOn4001);
         $('cBall').value = cfg.preferredBall || 'auto';
-        $('cShinyBall').value = cfg.shinyBall || 'best';
         $('cTargetBalls').value = cfg.targetBalls ?? 50;
         $('cTargetPotions').value = cfg.targetPotions ?? 40;
         $('cRestockPotion').value = String(cfg.restockPotionId || 0);
@@ -2769,7 +2815,7 @@ function renderUpdateUi(st) {
     const btnCheck = $('btnUpdateCheck');
     const brandVer = document.querySelector('.brand-ver');
 
-    const curVer = st.currentVersion || '1.0.12';
+    const curVer = st.currentVersion || '1.0.13';
     const shortCur = curVer.replace(/\.0$/, '');
     if (brandVer) brandVer.textContent = `v${shortCur}`;
     document.title = `Nexo PokeBot v${shortCur}`;
@@ -3103,14 +3149,14 @@ function wireEvents() {
             showToast({
                 kind: 'warn',
                 title: 'Atenção: Economia do servidor',
-                text: 'Este modo corta o feed de campo no Headless e impede detectar Shiny antes de jogar a Pokébola (já aplicado; use Desfazer para voltar).',
+                text: 'Este modo corta o feed de campo no Headless e o bot passa a achar os caídos pelos eventos de batalha, podendo perder alguns (já aplicado; use Desfazer para voltar).',
                 account: activeAccount,
             });
         } else if (target.id === 'cEconomyPingOnly' && target.checked) {
             showToast({
                 kind: 'error',
                 title: 'Atenção: Modo Somente Ping',
-                text: 'Pausa captura, Shiny, restock, passe, prey e /hunt, mantendo apenas keepalive e lives (já aplicado; use Desfazer para voltar).',
+                text: 'Pausa captura, restock, passe, prey e /hunt, mantendo só a conexão viva e as lives (já aplicado; use Desfazer para voltar).',
                 account: activeAccount,
             });
         } else if (target.id === 'cCaidos' && !target.checked) {

@@ -301,13 +301,13 @@
           </div>
           <div class="cfg-inputs">
             <div class="field"><label>Economia do Servidor</label>
-              <select id="cEco" title="Auto mantém o feed de campo ativo para captura 100% garantida + detecção de Shiny">
+              <select id="cEco" title="Auto mantém o feed de campo ativo para a captura 100% garantida">
                 <option value="auto">Auto (captura + Shiny)</option>
                 <option value="on">Sempre ON (sem Shiny previo)</option>
                 <option value="off">Sempre OFF</option>
               </select>
             </div>
-            <div class="field"><label>Bola Normal</label>
+            <div class="field"><label>Bola dos arremessos</label>
               <select id="cBall">
                 <option value="auto">Auto Inteligente</option>
                 <option value="poke">Poke Ball</option>
@@ -315,16 +315,6 @@
                 <option value="super">Super Ball</option>
                 <option value="ultra">Ultra Ball</option>
                 <option value="beast">Beast Ball</option>
-              </select>
-            </div>
-            <div class="field"><label>Bola Shiny</label>
-              <select id="cShinyBall">
-                <option value="best">Melhor disponivel</option>
-                <option value="beast">Beast Ball</option>
-                <option value="ultra">Ultra Ball</option>
-                <option value="super">Super Ball</option>
-                <option value="great">Great Ball</option>
-                <option value="poke">Poke Ball</option>
               </select>
             </div>
             <div class="field"><label>Alvo Bolas</label><input type="number" id="cTargetBalls" min="10" max="5000" /></div>
@@ -503,7 +493,7 @@
 
     document.getElementById('cfgPanel').addEventListener('change', () => { cfgDirty = true; });
     document.getElementById('cfgChips').addEventListener('change', () => { cfgDirty = true; });
-    for (const id of ['cEco', 'cBall', 'cShinyBall', 'cTargetBalls', 'cTargetPotions', 'cRestockPotion', 'cTargetRevives', 'cReserve', 'cLiveTargetHours', 'cLiveTier', 'cLiveMaxTw', 'cLiveMaxKk', 'cLiveCustomTw', 'cLiveCustomKk', 'cGuideMode', 'cGuideMetric', 'cFarmObjective', 'cFarmObjectiveFocus']) {
+    for (const id of ['cEco', 'cBall', 'cTargetBalls', 'cTargetPotions', 'cRestockPotion', 'cTargetRevives', 'cReserve', 'cLiveTargetHours', 'cLiveTier', 'cLiveMaxTw', 'cLiveMaxKk', 'cLiveCustomTw', 'cLiveCustomKk', 'cGuideMode', 'cGuideMetric', 'cFarmObjective', 'cFarmObjectiveFocus']) {
       document.getElementById(id).addEventListener('change', () => { cfgDirty = true; });
       document.getElementById(id).addEventListener('input', () => { cfgDirty = true; });
     }
@@ -699,7 +689,6 @@
         liveTargetHours: Number(document.getElementById('cLiveTargetHours').value) || 24,
         economyMode: document.getElementById('cEco').value,
         preferredBall: document.getElementById('cBall').value,
-        shinyBall: document.getElementById('cShinyBall').value,
         preferredPotionIds,
         restockPotionId: Number(document.getElementById('cRestockPotion').value) || 0,
         liveRewardType: liveTwitchRewards[0] || liveKickRewards[0] || 'xp',
@@ -1093,7 +1082,6 @@
         document.getElementById('cLiveTargetHours').value = String(c.liveTargetHours ?? 24);
         document.getElementById('cEco').value = c.economyMode || 'auto';
         document.getElementById('cBall').value = c.preferredBall || 'auto';
-        document.getElementById('cShinyBall').value = c.shinyBall || 'best';
         document.getElementById('cRestockPotion').value = String(c.restockPotionId || 0);
         document.getElementById('cLiveTier').value = c.liveRewardTier || 'smart';
         document.getElementById('cGuideMode').value = c.huntGuideMode || 'off';

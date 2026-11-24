@@ -225,6 +225,7 @@
         <div class="sl-col"><h4>${IC('package')}Drops da sessão</h4><div class="sl-drops"></div></div>
       </div>`;
     const IMPORTANT_KINDS = new Set(['shiny', 'shiny-miss', 'reward', 'error', 'warn', 'ok']);
+    const MISS_BALL_LABELS = { 1: 'Poke Ball', 2: 'Great Ball', 3: 'Super Ball', 4: 'Ultra Ball', 5: 'Beast Ball' };
     function recentEvents(acc, n) {
         const logs = snapshots[acc]?.logs || [];
         const out = [];
@@ -241,6 +242,12 @@
         const status = statusOf(acc);
         const live = Boolean(s.session) && ['connected', 'paused', 'connecting', 'standby', 'error'].includes(status) && !isEmbedded(acc);
         ph.classList.toggle('has-live', live);
+        const hlBtn = ph.querySelector('[data-slot-act="headless"]');
+        if (hlBtn) {
+            const farming = live && (status === 'connected' || status === 'connecting');
+            hlBtn.style.display = farming ? 'none' : '';
+            hlBtn.textContent = live && status === 'paused' ? 'Retomar Headless' : 'Iniciar Headless';
+        }
         if (!live) return;
         if (!host.dataset.built) {
             host.dataset.built = '1';
@@ -272,7 +279,7 @@
         set('killsSub', `${String(st.killsPerMin || 0).replace('.', ',')}/min · ${st.avgKillSec ? `${String(st.avgKillSec).replace('.', ',')}s cada` : '-'}`);
         set('shiny', `${Number(st.shiniesCaptured || 0)}<small> / ${Number(st.shiniesSeen || 0)}</small>`);
         set('shinySub', Number(st.shiniesMissed || 0) ? `${st.shiniesMissed} escaparam` : `${fmtCompact(st.captures)} capturas`);
-        const evs = recentEvents(acc, 5);
+        const evs = recentEvents(acc, 10);
         const evSig = evs.map((e) => e.id).join(',') + Math.floor(Date.now() / 30_000);
         const ul = q('.sl-events');
         if (ul.dataset.sig !== evSig) {
@@ -288,7 +295,7 @@
             dbox.dataset.sig = dropSig || '-';
             dbox.innerHTML = drops.length
                 ? drops.map((d) => `<span class="sl-drop${d.rare ? ' rare' : ''}" title="${esc(d.name)}: ${d.qty} na sessão (${String(d.perHour).replace('.', ',')}/h)">${IC(d.rare ? 'gift' : 'package')}<span>${escapeHtml(d.name)}</span><b>${fmtNum(d.qty)}</b></span>`).join('')
-                : `<span class="hint-text">${escapeHtml(s.drops?.focusLabel ? `Foco: ${s.drops.focusLabel}. Nenhum drop ainda.` : 'Nenhum drop ainda.')}</span>`;
+                : `<span class="hint-text">${escapeHtml(s.drops?.focusLabel ? 'Nenhum drop ainda nesta sessão.' : 'Nenhum drop ainda nesta sessão.')}</span>`;
         }
     }
 
@@ -306,7 +313,7 @@
         if (!hud) {
             hud = document.createElement('div');
             hud.className = 'wv-hud';
-            hud.innerHTML = `<span class="acc-dot"></span><img class="hud-sprite" alt="" hidden /><span class="hud-poke"><b></b><span class="hud-hp"><i></i></span></span>
+            hud.innerHTML = `<span class="hud-grip" title="Arraste para mover a barra (duplo clique volta para cima)" aria-hidden="true"></span><span class="acc-dot"></span><img class="hud-sprite" alt="" hidden /><span class="hud-poke"><b></b><span class="hud-hp"><i></i></span></span>
               <span class="hud-stat" data-h="xp" title="XP por hora">${IC('zap')}<b></b></span>
               <span class="hud-stat" data-h="gold" title="Lucro por hora">${IC('coins')}<b></b></span>
               <span class="hud-stat" data-h="kills" title="Abates na sessão">${IC('swords')}<b></b></span>
@@ -323,10 +330,13 @@
                     setSubtab('overview');
                 }
             });
+            hud.querySelector('.hud-grip').addEventListener('pointerdown', (ev) => startHudDrag(ev, hud, body));
+            hud.querySelector('.hud-grip').addEventListener('dblclick', () => setHudPos('top'));
             body.append(hud);
         }
         hud.hidden = false;
         hud.classList.toggle('bottom', hudPos === 'bottom');
+        placeFreeHud(hud, body);
         const s = snapshots[acc] || {};
         const st = s.stats || {};
         const poke = s.activePokemon;
@@ -345,8 +355,57 @@
         hud.querySelector('[data-h="kills"] b').textContent = fmtCompact(st.kills);
         hud.querySelector('[data-h="shiny"] b').textContent = `${Number(st.shiniesCaptured || 0)}/${Number(st.shiniesSeen || 0)}`;
     }
+    let hudXY = LS.get('nexo.hudXY', { x: 0.5, y: 0 });
+    function placeFreeHud(hud, body) {
+        const free = hudPos === 'free';
+        hud.classList.toggle('free', free);
+        if (!free) { hud.style.left = ''; hud.style.top = ''; return; }
+        const maxX = Math.max(0, body.clientWidth - hud.offsetWidth);
+        const maxY = Math.max(0, body.clientHeight - hud.offsetHeight);
+        hud.style.left = `${Math.round(Math.min(1, Math.max(0, Number(hudXY.x) || 0)) * maxX)}px`;
+        hud.style.top = `${Math.round(Math.min(1, Math.max(0, Number(hudXY.y) || 0)) * maxY)}px`;
+    }
+    function startHudDrag(ev, hud, body) {
+        if (ev.button !== 0) return;
+        ev.preventDefault();
+        const r0 = hud.getBoundingClientRect();
+        const offX = ev.clientX - r0.left;
+        const offY = ev.clientY - r0.top;
+        if (hudPos !== 'free') {
+            const b = body.getBoundingClientRect();
+            const maxX = Math.max(1, b.width - r0.width);
+            const maxY = Math.max(1, b.height - r0.height);
+            hudXY = { x: (r0.left - b.left) / maxX, y: (r0.top - b.top) / maxY };
+            hudPos = 'free';
+            LS.set('nexo.hudPos', hudPos);
+            syncMenuState();
+            for (const acc of ACCOUNTS) renderHud(acc);
+        }
+        document.body.classList.add('hud-dragging');
+        hud.classList.add('dragging');
+        const move = (e) => {
+            const b = body.getBoundingClientRect();
+            const maxX = Math.max(1, b.width - hud.offsetWidth);
+            const maxY = Math.max(1, b.height - hud.offsetHeight);
+            const x = Math.min(maxX, Math.max(0, e.clientX - b.left - offX));
+            const y = Math.min(maxY, Math.max(0, e.clientY - b.top - offY));
+            hudXY = { x: x / maxX, y: y / maxY };
+            hud.style.left = `${Math.round(x)}px`;
+            hud.style.top = `${Math.round(y)}px`;
+        };
+        const up = () => {
+            window.removeEventListener('pointermove', move);
+            window.removeEventListener('pointerup', up);
+            document.body.classList.remove('hud-dragging');
+            hud.classList.remove('dragging');
+            LS.set('nexo.hudXY', hudXY);
+            for (const acc of ACCOUNTS) renderHud(acc);
+        };
+        window.addEventListener('pointermove', move);
+        window.addEventListener('pointerup', up);
+    }
     function setHudPos(pos) {
-        hudPos = ['top', 'bottom', 'off'].includes(pos) ? pos : 'top';
+        hudPos = ['top', 'bottom', 'free', 'off'].includes(pos) ? pos : 'top';
         LS.set('nexo.hudPos', hudPos);
         syncMenuState();
         for (const acc of ACCOUNTS) renderHud(acc);
@@ -443,7 +502,7 @@
                 if (now - Number(m.ts || 0) > 30 * 60_000) continue;
                 items.push({
                     key: `miss:${acc}:${m.id}:${m.ts}`, sev: 'shiny', icon: 'sparkles', acc, ts: m.ts,
-                    title: `Shiny escapou: ${m.name || '?'}`, text: `${who}${m.level ? `, Nv ${m.level}` : ''}${m.hunt ? `, hunt ${m.hunt}` : ''}. ${relTime(m.ts)}.`,
+                    title: `Shiny escapou: ${m.name || '?'}`, text: `${who}${m.level ? `, Nv ${m.level}` : ''}${m.hunt ? `, hunt ${m.hunt}` : ''}${MISS_BALL_LABELS[m.ballId] ? `, escapou da ${MISS_BALL_LABELS[m.ballId]}` : ''}. ${relTime(m.ts)}.`,
                     actions: [['Ver registro', () => goAccount(acc, 'activity')]],
                 });
             }
@@ -969,7 +1028,7 @@
 
     // ===== S21: dicas ⓘ no lugar do guia longo =====
     const TIPS = {
-        cCaidos: 'Joga a Pokébola em Pokémon caídos. Lê a marca de Shiny no feed do campo antes do arremesso, põe o Shiny na frente de qualquer outro e usa só a Bola shiny configurada. Funciona também no Modo Economia do jogo, com 0% de GPU.',
+        cCaidos: 'Joga a Pokébola em Pokémon caídos. O jogo só sorteia o shiny na hora do arremesso, então não dá para saber antes: toda bola jogada é uma chance, e um shiny que escapa vai embora com o corpo. Funciona também no Modo Economia do jogo, com 0% de GPU.',
         cNativeHeal: 'Liga a cura automática e o Revive do próprio jogo, com as poções marcadas mais abaixo.',
         cRestock: 'Compra bolas, poções e revives no mercado quando ficam abaixo dos alvos, sem passar da reserva mínima de gold.',
         cPass: 'Resgata a recompensa diária do passe assim que libera.',
@@ -979,11 +1038,10 @@
         cLiveFollow: 'Segue os canais das lives para liberar as recompensas que pedem follow.',
         cLiveSmart: 'Aplica a meta de forma independente na Kick e na Twitch: cada plataforma completa os próprios buffs na ordem (XP, depois Captura, depois Shiny) sem travar a outra.',
         cLiveSyncPlatforms: 'Opcional: quando marcado junto com o gestor inteligente, faz uma plataforma aguardar a outra bater a meta do buff atual antes de avançar para o próximo.',
-        cEconomy: 'Corta o feed de campo no servidor no modo Headless. Economiza banda, mas impede detectar Shiny antes de jogar a bola (o bot usa os eventos de batalha). No jogo embutido, prefira o Modo Economia visual do jogo.',
-        cEconomyPingOnly: 'Com a economia ligada, só mantém a conexão viva e as lives. Pausa captura, Shiny, restock, passe, prey e /hunt.',
+        cEconomy: 'Corta o feed de campo no servidor no modo Headless. Economiza banda, mas o bot passa a achar os caídos pelos eventos de batalha e pode perder alguns. No jogo embutido, prefira o Modo Economia visual do jogo.',
+        cEconomyPingOnly: 'Com a economia ligada, só mantém a conexão viva e as lives. Pausa captura, restock, passe, prey e /hunt.',
         cStandby: 'Quando o servidor devolve o erro 4001 (sessão em outro lugar), espera em vez de reconectar sem parar.',
-        cBall: 'Bola usada nos Pokémon comuns. "auto" escolhe pela chance de captura.',
-        cShinyBall: 'Bola usada só em Shiny, mesmo em conta VIP. "best" usa a melhor que tiver.',
+        cBall: 'Bola de todo arremesso. Como o shiny é sorteado no próprio arremesso, é esta bola que tenta segurar o shiny: bola melhor segura mais shinies e custa mais. "auto" escolhe pelo gold que você tem.',
         cTargetBalls: 'Quantas bolas manter na mochila. O restock completa até esse número.',
         cTargetPotions: 'Quantas poções manter. 0 desliga a compra de poções.',
         cRestockPotion: 'Qual poção comprar no restock. Automático usa a primeira marcada no Auto-Heal.',
@@ -1161,6 +1219,7 @@
         $('btnPinActivity')?.setAttribute('aria-pressed', activityPinned ? 'true' : 'false');
         $('btnPinActivity')?.classList.toggle('active-toggle', activityPinned);
         $('btnMiniHud')?.setAttribute('aria-checked', miniHudOpen ? 'true' : 'false');
+        $('btnWvAutoZoom')?.setAttribute('aria-checked', window.nexoWvZoom?.isOn() ? 'true' : 'false');
         $('btnAwake')?.setAttribute('aria-checked', $('btnAwake')?.classList.contains('active-toggle') ? 'true' : 'false');
     }
     async function toggleMiniHud() {
@@ -1251,7 +1310,7 @@
             if (!extra) {
                 extra = document.createElement('div');
                 extra.className = 'pcard-extra';
-                extra.innerHTML = '<div class="pcard-spark"></div><div class="pcard-buffs"></div><ul class="pcard-events"></ul>';
+                extra.innerHTML = '<div class="pcard-spark"></div><div class="pcard-sec-title" title="Quanto de cada buff das lives já foi assistido, perto da meta">Buffs das lives</div><div class="pcard-buffs"></div><div class="pcard-sec-title">Eventos recentes</div><ul class="pcard-events"></ul>';
                 card.querySelector('.pcard-drops')?.after(extra);
                 const panelBtn = card.querySelector('[data-pc-act="panel"]');
                 if (panelBtn && !panelBtn.dataset.icon) { panelBtn.dataset.icon = 'panel'; window.nexoIcons?.hydrate(card); }
@@ -1292,7 +1351,7 @@
             }).join('');
             const bbox = extra.querySelector('.pcard-buffs');
             if (bbox.innerHTML !== buffs) bbox.innerHTML = buffs;
-            const evs = recentEvents(acc, 3);
+            const evs = recentEvents(acc, 6);
             const ul = extra.querySelector('.pcard-events');
             const sig = evs.map((e) => e.id).join(',') + Math.floor(Date.now() / 30_000);
             if (ul.dataset.sig !== sig) {
@@ -1421,6 +1480,7 @@
         $('btnPinActivityMenu')?.addEventListener('click', () => setActivityPinned(!activityPinned));
         $('btnPinActivity')?.addEventListener('click', () => setActivityPinned(!activityPinned));
         $('btnMiniHud')?.addEventListener('click', () => void toggleMiniHud());
+        $('btnWvAutoZoom')?.addEventListener('click', () => { window.nexoWvZoom?.set(!window.nexoWvZoom.isOn()); syncMenuState(); });
         $('btnShortcuts')?.addEventListener('click', showShortcuts);
         $('btnAwake')?.addEventListener('click', () => setTimeout(syncMenuState, 400));
         $('btnPopoutTab')?.addEventListener('click', () => {

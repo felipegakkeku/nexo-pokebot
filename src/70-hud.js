@@ -224,7 +224,7 @@
                     <div class="pb-sec">Configurações (Bola &amp; Restock)</div>
                     <div class="pb-grid-cfg">
                         <label class="pb-cfg-field">
-                            <span class="pb-lbl">Bola Normal</span>
+                            <span class="pb-lbl">Bola</span>
                             <select data-pb-cfg="preferredBall">
                                 <option value="auto">Auto Intelig.</option>
                                 <option value="poke">Poke Ball</option>
@@ -232,17 +232,6 @@
                                 <option value="super">Super Ball</option>
                                 <option value="ultra">Ultra Ball</option>
                                 <option value="beast">Beast Ball</option>
-                            </select>
-                        </label>
-                        <label class="pb-cfg-field">
-                            <span class="pb-lbl">Bola Shiny</span>
-                            <select data-pb-cfg="shinyBall">
-                                <option value="best">Melhor disp.</option>
-                                <option value="beast">Beast Ball</option>
-                                <option value="ultra">Ultra Ball</option>
-                                <option value="super">Super Ball</option>
-                                <option value="great">Great Ball</option>
-                                <option value="poke">Poke Ball</option>
                             </select>
                         </label>
                         <label class="pb-cfg-field">

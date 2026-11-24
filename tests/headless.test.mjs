@@ -3049,7 +3049,8 @@ test('garantia de captura e avisos: AoE multi-kill, VIP preserva campo, watchdog
     const wEco = computeModeWarnings({ config: { caidosEnabled: true, economyMode: 'on', economyPingOnly: false }, status: 'connected', mode: 'headless' });
     assert.equal(wEco.length, 1);
     assert.equal(wEco[0].code, 'server-economy-no-shiny');
-    assert.match(wEco[0].title, /Shiny/i);
+    assert.match(wEco[0].title, /fallback de batalha/i);
+    assert.doesNotMatch(wEco[0].detail, /antes de jogar|antes do arremesso/i);
     assert.deepEqual(wEco[0].fixConfig, { economyMode: 'auto', caidosEnabled: true });
 
     const wPing = computeModeWarnings({ config: { caidosEnabled: true, economyMode: 'auto', economyPingOnly: true }, status: 'connected', mode: 'headless' });
@@ -3175,7 +3176,7 @@ test('garantia de captura e avisos: AoE multi-kill, VIP preserva campo, watchdog
             controller.updateConfig({ economyMode: 'on' });
             const snapWarn = controller.getSnapshot({ includeHunts: false });
             assert.ok(snapWarn.modeWarnings.some((w) => w.code === 'server-economy-no-shiny'));
-            assert.ok(snapWarn.logs.some((l) => l.kind === 'warn' && /Shiny/i.test(l.text)));
+            assert.ok(snapWarn.logs.some((l) => l.kind === 'warn' && /eventos de batalha/i.test(l.text)));
         } finally {
             controller.stop();
         }
@@ -3391,6 +3392,25 @@ test('shiny-miss e shiniesSeen: ignora pets de jogadores (dn), treino na casa (t
             assert.equal(snapReal.stats.shiniesMissed, 1);
             assert.equal(snapReal.missedShinies[0]?.name, 'Shedinja');
             assert.ok(snapReal.logs.some((l) => l.kind === 'shiny-miss' && /Shedinja \(Nv 100\)/.test(l.text)));
+
+            // O PokeIdle sorteia o shiny no arremesso: o caido chega comum e o brilho so vem no evento
+            // da bola. Se a bola nao fecha, o shiny vai embora com o corpo e o alerta diz qual bola foi.
+            fakeNow += 1_000;
+            sock.onmessage?.({
+                data: JSON.stringify({ t: 'campo', ts: fakeNow, mobs: [{ s: 4, n: 'Shedinja', nv: 100, sh: false, x: true, xr: 20_000 }] }),
+            });
+            sock.onmessage?.({
+                data: JSON.stringify({ t: 'batalha', ev: [{ k: 'bola', slot: 4, ballId: 2, shiny: true, nome: 'Shedinja', level: 100 }] }),
+            });
+            fakeNow += 1_000;
+            sock.onmessage?.({ data: JSON.stringify({ t: 'campo', ts: fakeNow, fora: [4], mobs: [] }) });
+            fakeNow += 13_000;
+            sock.onmessage?.({ data: JSON.stringify({ t: 'campo', ts: fakeNow, mobs: [] }) });
+
+            const snapThrow = controller.getSnapshot({ includeHunts: false });
+            assert.equal(snapThrow.stats.shiniesMissed, 2);
+            assert.equal(snapThrow.missedShinies[0]?.ballId, 2);
+            assert.ok(snapThrow.logs.some((l) => l.kind === 'shiny-miss' && /escapou da Great Ball/.test(l.text)));
         } finally {
             controller.stop();
         }

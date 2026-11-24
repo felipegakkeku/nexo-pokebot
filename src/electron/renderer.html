@@ -14,7 +14,7 @@
       <div class="brand">
         <img src="../../assets/nexo-pokebot-icon.png" width="28" height="28" alt="Nexo PokeBot" class="brand-icon" />
         <span class="brand-title">Nexo PokeBot</span>
-        <span class="brand-ver">v1.0.12</span>
+        <span class="brand-ver">v1.0.13</span>
       </div>
 
       <nav class="account-tabs" id="accountTabs" aria-label="Contas">
@@ -77,7 +77,7 @@
           <div class="update-popover hidden" id="updatePopover" role="dialog" aria-label="Atualização do Nexo PokeBot">
             <div class="update-pop-head">
               <span class="update-pop-title" id="updatePopTitle">Atualizações</span>
-              <span class="update-ver-tag" id="updatePopVer">v1.0.12</span>
+              <span class="update-ver-tag" id="updatePopVer">v1.0.13</span>
             </div>
             <div class="update-pop-desc" id="updatePopDesc">Verificando Releases do GitHub...</div>
             <div class="update-progress hidden" id="updateProgWrap">
@@ -135,8 +135,11 @@
               <div class="mini-seg" id="hudPosSeg" role="radiogroup" aria-label="Posição da barra sobre o jogo">
                 <button type="button" data-hud-pos="top" role="radio">Em cima</button>
                 <button type="button" data-hud-pos="bottom" role="radio">Embaixo</button>
+                <button type="button" data-hud-pos="free" role="radio" title="Arraste a barra pela alça para qualquer ponto do jogo">Solta</button>
                 <button type="button" data-hud-pos="off" role="radio">Desligada</button>
               </div>
+              <div class="menu-hint">Arraste pela alça ⠿ para soltar a barra onde quiser. Duplo clique na alça volta para cima.</div>
+              <button type="button" class="menu-item" id="btnWvAutoZoom" role="menuitemcheckbox" aria-checked="true" data-icon="layout" title="Em telas baixas da grade, afasta o zoom do jogo para o mapa continuar visível">Ajustar zoom do jogo à tela</button>
             </div>
             <div class="menu-sec">
               <div class="menu-label" data-icon="layout">Layouts salvos</div>
@@ -297,7 +300,7 @@
                 <div class="eff-chip"><span>Bolas / captura</span><b id="eBallCap">-</b><small id="eBallCapSub">0% acerto</small></div>
                 <div class="eff-chip"><span>Gasto vs Bruto</span><b id="eSpent">0</b><small id="eBrutoSub">bruto: 0</small></div>
                 <div class="eff-chip"><span>Shinies sessão</span><b id="eShinies">0 / 0</b><small id="eShiniesSub">cap / vistos</small></div>
-                <div class="eff-chip"><span>Sobrevivência</span><b id="eSurv">0 poç · 0 rev</b><small id="eSurvSub">0 mortes</small></div>
+                <div class="eff-chip"><span>Sobrevivência</span><b id="eSurv">0 poções · 0 revives</b><small id="eSurvSub">0 mortes</small></div>
               </div>
             </div>
 
@@ -358,18 +361,21 @@
             <div class="card">
               <h3>Rotinas automáticas</h3>
               <div class="toggle-list" id="cfgToggles">
-                <label class="toggle-item with-sub"><input type="checkbox" id="cCaidos" /><span class="toggle-copy"><span>Capturar Pokémon caídos</span><span class="toggle-sub">Detecta Shiny antes do arremesso e prioriza a Bola Shiny (funciona também no Modo Economia do jogo com 0% GPU)</span></span></label>
+                <div class="cfg-group-title">Farm</div>
+                <label class="toggle-item with-sub"><input type="checkbox" id="cCaidos" /><span class="toggle-copy"><span>Capturar Pokémon caídos</span><span class="toggle-sub">O shiny é sorteado no arremesso: toda bola jogada é uma chance (funciona também no Modo Economia do jogo com 0% GPU)</span></span></label>
                 <label class="toggle-item"><input type="checkbox" id="cNativeHeal" /> Usar cura e Revive do jogo</label>
                 <label class="toggle-item"><input type="checkbox" id="cRestock" /> Repor itens no mercado</label>
                 <label class="toggle-item"><input type="checkbox" id="cPass" /> Resgatar o passe diário</label>
                 <label class="toggle-item"><input type="checkbox" id="cPrey" /> Rolar o Prey diário</label>
+                <div class="cfg-group-title">Lives</div>
                 <label class="toggle-item"><input type="checkbox" id="cLives" /> Coletar recompensas de lives</label>
                 <label class="toggle-item with-sub"><input type="checkbox" id="cLiveStreak" /><span class="toggle-copy"><span>Contar a sequência de lives (Twitch)</span><span class="toggle-sub">Assiste os primeiros 15 min de cada live no player real da Twitch, invisível, em 160p e sem som</span></span></label>
                 <label class="toggle-item"><input type="checkbox" id="cLiveFollow" /> Seguir automaticamente os canais das lives</label>
                 <label class="toggle-item"><input type="checkbox" id="cLiveSmart" /> Balancear buffs das lives até a meta</label>
                 <label class="toggle-item"><input type="checkbox" id="cLiveSyncPlatforms" /> Sincronizar ordem dos buffs entre Kick e Twitch</label>
-                <label class="toggle-item with-sub" title="Corta o feed de campo no servidor no modo Headless (economiza banda, mas impede detectar Shiny antes de jogar a bola; no jogo embutido o Modo Economia visual já preserva a captura com 0% GPU)"><input type="checkbox" id="cEconomy" /><span class="toggle-copy"><span>Ativar economia do servidor</span><span class="toggle-sub warn">Limita: corta o feed de campo no Headless e desativa detecção prévia de Shiny (usa fallback de batalha)</span></span></label>
-                <label class="toggle-item with-sub"><input type="checkbox" id="cEconomyPingOnly" /><span class="toggle-copy"><span>Só enviar ping no modo economia</span><span class="toggle-sub warn">Limita: pausa captura, Shiny, restock, passe, prey e /hunt (mantém só keepalive e lives)</span></span></label>
+                <div class="cfg-group-title">Conexão</div>
+                <label class="toggle-item with-sub" title="Corta o feed de campo no servidor no modo Headless (economiza banda, mas o bot passa a achar os caídos pelos eventos de batalha e pode perder alguns; no jogo embutido o Modo Economia visual já preserva a captura com 0% GPU)"><input type="checkbox" id="cEconomy" /><span class="toggle-copy"><span>Ativar economia do servidor</span><span class="toggle-sub warn">Limita: corta o feed de campo no Headless e acha os caídos pelo fallback de batalha (pode perder alguns)</span></span></label>
+                <label class="toggle-item with-sub"><input type="checkbox" id="cEconomyPingOnly" /><span class="toggle-copy"><span>Só enviar ping no modo economia</span><span class="toggle-sub warn">Limita: pausa captura, restock, passe, prey e /hunt (mantém só a conexão viva e as lives)</span></span></label>
                 <label class="toggle-item"><input type="checkbox" id="cStandby" /> Entrar em espera no erro 4001</label>
               </div>
               <div class="mode-warn-box" id="cfgModeWarnBox"></div>
@@ -378,24 +384,15 @@
             <div class="card">
               <h3>Preferências e limites</h3>
               <div class="form-grid" id="cfgFields">
-                <div class="field"><label for="cBall">Bola comum</label>
+                <div class="cfg-group-title">Captura e mercado</div>
+                <div class="field"><label for="cBall">Bola dos arremessos</label>
                   <select id="cBall">
-                    <option value="auto">auto</option>
-                    <option value="poke">poke</option>
-                    <option value="great">great</option>
-                    <option value="super">super</option>
-                    <option value="ultra">ultra</option>
-                    <option value="beast">beast</option>
-                  </select>
-                </div>
-                <div class="field"><label for="cShinyBall">Bola shiny</label>
-                  <select id="cShinyBall">
-                    <option value="best">best</option>
-                    <option value="beast">beast</option>
-                    <option value="ultra">ultra</option>
-                    <option value="super">super</option>
-                    <option value="great">great</option>
-                    <option value="poke">poke</option>
+                    <option value="auto">Automática (pelo gold)</option>
+                    <option value="poke">Poké Ball</option>
+                    <option value="great">Great Ball</option>
+                    <option value="super">Super Ball</option>
+                    <option value="ultra">Ultra Ball</option>
+                    <option value="beast">Beast Ball</option>
                   </select>
                 </div>
                 <div class="field"><label for="cTargetBalls">Alvo bolas</label><input type="number" id="cTargetBalls" min="10" max="5000" step="10" /></div>
@@ -412,6 +409,7 @@
                 </div>
                 <div class="field"><label for="cReserve">Reserva mínima gold</label><input type="number" id="cReserve" min="0" max="100000000" step="5000" /></div>
                 <div class="field"><label for="cTargetRevives">Alvo revives</label><input type="number" id="cTargetRevives" min="0" max="5000" step="5" /></div>
+                <div class="cfg-group-title">Hunt e coleção</div>
                 <div class="field"><label for="cGuideMode">Acompanhamento /hunt</label>
                   <select id="cGuideMode">
                     <option value="off">Desligado</option>
@@ -441,6 +439,7 @@
                     <option value="fast">Mais rápido (menor nível)</option>
                   </select>
                 </div>
+                <div class="cfg-group-title">Lives</div>
                 <div class="field"><label for="cLiveTargetHours">Meta por buff (lives)</label>
                   <select id="cLiveTargetHours">
                     <option value="0.5">30 min (só manter ligado)</option>
@@ -539,7 +538,7 @@
                     <label class="ch-chk" title="Aviso do Windows quando o Hub não está em foco"><input type="checkbox" data-alert-ch="os" data-alert-ev="shinyMiss" /> Windows</label>
                   </span>
                 </div>
-                <div class="sound-event-sub">Um shiny apareceu no campo e sumiu sem captura (fugiu, o corpo expirou ou a bola falhou).</div>
+                <div class="sound-event-sub">Uma bola revelou um shiny, mas não fechou a captura e ele saiu do campo com o corpo.</div>
                 <div class="sound-event-vol" data-snd-vol-row="shinyMiss">
                   <span class="sound-event-vol-lbl">Volume</span>
                   <input type="range" min="0" max="100" step="5" value="100" data-snd-vol="shinyMiss" aria-label="Volume do alerta: Shiny visto e não capturado" />

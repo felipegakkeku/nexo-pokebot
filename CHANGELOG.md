@@ -4,6 +4,18 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+## 1.0.13
+
+- **Bola do shiny revista**: o PokeIdle sorteia o shiny na hora do arremesso (o brilho só aparece quando a bola sai e, se ela não fecha, o shiny vai embora com o corpo). Não existe marca de shiny no caído antes da bola, então a opção **Bola shiny** saiu do Hub, do painel web e do HUD do userscript. A bola que tenta segurar o shiny é a **Bola dos arremessos** (antes "Bola comum"): bola melhor segura mais shinies e custa mais. Os textos de versões anteriores que falavam em "detecção de Shiny antes do arremesso" e "Bola Shiny" não valem mais.
+- **Shiny que escapou** agora mostra de qual bola ele escapou, no registro e no sino do Hub.
+- Avisos de **Economia do servidor** e **Feed de campo indisponível** reescritos: o que esses modos limitam é achar os caídos (o bot passa a usar os eventos de batalha e pode perder alguns), não a detecção de shiny.
+- **Barra sobre o jogo solta**: arraste pela alça ⠿ para colocar a barra em qualquer ponto do jogo embutido (a posição fica salva; duplo clique na alça volta para cima). No menu ⋯ ela aparece como **Solta**, ao lado de Em cima, Embaixo e Desligada.
+- **Zoom do jogo ajustado à tela**: em telas baixas da Grade (Linhas, Destaque 1+3, 2x2) o jogo embutido afasta o zoom sozinho para o mapa continuar visível. Dá para desligar em ⋯ > **Ajustar zoom do jogo à tela**.
+- **Botões do topo conforme o estado**: farmando, some o **Iniciar Headless**; pausado, ele vira **Retomar Headless**; com o jogo aberto, o botão vira **Voltar para Headless**. O mesmo vale para o botão da tela Headless na Grade.
+- **Tela Headless da Grade** ocupa a altura toda e mostra até 10 eventos recentes. Os cartões de **Painéis** ganharam títulos (Buffs das lives, Eventos recentes), números curtos (360 mil, 1,2 mi), **Lucro/h** em vermelho quando negativo e rótulos em português (Abates, Tempo/abate, Captura/abate, Tempo ativo).
+- **Automação organizada por grupos**: Farm, Lives e Conexão nas rotinas; Captura e mercado, Hunt e coleção e Lives nas preferências. A **Bola dos arremessos** mostra nomes legíveis (Automática pelo gold, Poké Ball, Great Ball...).
+- Textos mais claros: topo sem o contador de pings, "Economia do servidor ligada" só aparece quando está ligada, KPIs sem abreviações ("treinador", "poções · revives", "1 shiny") e logs de restock com acentos e o mesmo nome do campo da tela.
+
 ## 1.0.12
 
 - **Completar Pokédex** captura espécies ainda sem registro e busca outra hunt quando termina as pendências do mapa.
