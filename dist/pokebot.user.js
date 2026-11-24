@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         Nexo PokeBot (PokeIdle)
-// @namespace    https://github.com/felipegakkeku/pokebotfarm
+// @namespace    https://github.com/felipegakkeku/nexo-pokebot
 // @version      1.0
 // @description  Automação desenvolvida especificamente para o PokeIdle (pokeidle.io): captura, restock, equipe, auto-evoluir, bosses, mapa/hunt, lives e HUD flutuante
 // @match        https://pokeidle.io/app*
@@ -15,8 +15,8 @@
 // @connect      kick.com
 // @connect      websockets.kick.com
 // @connect      *
-// @updateURL    https://raw.githubusercontent.com/felipegakkeku/pokebotfarm/main/dist/pokebot.user.js
-// @downloadURL  https://raw.githubusercontent.com/felipegakkeku/pokebotfarm/main/dist/pokebot.user.js
+// @updateURL    https://raw.githubusercontent.com/felipegakkeku/nexo-pokebot/main/dist/pokebot.user.js
+// @downloadURL  https://raw.githubusercontent.com/felipegakkeku/nexo-pokebot/main/dist/pokebot.user.js
 // ==/UserScript==
 
 (() => {

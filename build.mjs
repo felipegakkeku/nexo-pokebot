@@ -11,7 +11,7 @@ const root = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const version = pkg.version.replace(/\.0$/, ''); // 6.5.0 -> 6.5
 
-const REPO = 'felipegakkeku/pokebotfarm';
+const REPO = 'felipegakkeku/nexo-pokebot';
 
 // Uso: `node build.mjs --check-tag [vX.Y.Z]` só confere se a tag bate com o package.json (sem buildar).
 // Sem argumento, lê GITHUB_REF_NAME (é o que o workflow de release usa). Falha com exit 1 se não bater.
