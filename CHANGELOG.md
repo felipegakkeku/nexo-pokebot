@@ -2,6 +2,20 @@
 
 Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova versão (o workflow usa o texto da seção como nota da Release).
 
+## 1.0.6
+
+Atualização que aplica de verdade, aviso proativo de versão nova, grade livre das 4 contas, sequência de lives contada pela Twitch e gestor de buffs redesenhado:
+
+- **Atualização que aplica (`src/desktop/updater.mjs`, `src/electron/main.mjs`)**: o script que troca os arquivos morria junto com o Hub ao fechar, e o app reabria na versão antiga. Agora ele roda fora da árvore de processos do Hub, e na abertura seguinte o Hub confere se a versão nova entrou (avisa com o caminho do log se não entrou). **Quem está na 1.0.4 ou 1.0.5 precisa baixar este ZIP e extrair por cima da pasta uma vez**; depois disso as atualizações aplicam sozinhas.
+- **Launcher proativo**: o Hub confere versão nova a cada 30 min, mostra uma faixa no topo com **Atualizar agora**, **Novidades** e **Depois**, e manda notificação do Windows. Depois de atualizar, a faixa confirma a versão nova.
+- **Grade livre (`src/electron/renderer.*`, `styles.css`)**: layouts 2x2, Destaque 1+3, Colunas e Linhas; divisórias que redimensionam (duplo clique centraliza); arrastar uma tela pela barra para trocar de lugar; maximizar e ocultar telas. Tudo fica salvo.
+- **Som por conta**: ícone de alto-falante em cada aba e em cada tela (vermelho mudo, verde com som, pulsando quando toca), com clique para alternar e **Mutar todas** na grade.
+- **Painéis 2x2**: as 4 contas em cartões lado a lado, sem abrir o jogo, com Pokémon ativo, HP, XP/h, lucro/h, kills, capturas, shinies, drops e botões de Iniciar/Pausar, Painel completo e Abrir jogo.
+- **Sequência de lives na Twitch (`src/electron/main.mjs`)**: os pings simulados contavam minutos e pontos, mas não a sequência. Agora o Hub assiste os primeiros 15 min de cada transmissão no player real da Twitch, numa janela invisível da conta, em 160p e sem som (no máximo 2 ao mesmo tempo). A linha do canal mostra o andamento.
+- **Seguir automático**: na mesma visita o Hub segue o canal se a conta ainda não segue. As duas opções ficam em Automação.
+- **Pontos das lives sempre atualizados (`src/modules/live-rewards.js`, `src/headless/gui-server.mjs`)**: com a aba Lives aberta, os pontos de todos os canais são lidos a cada 20 s numa consulta leve, mesmo com o bot pausado.
+- **Gestor inteligente de buffs**: barras por buff (XP, Captura, Shiny) na Twitch e no Kick mostrando o tempo guardado em relação à meta, qual buff é o próximo resgate e se o gestor está ligado.
+
 ## 1.0.5
 
 Caixinha +50 da Twitch resgatada sozinha, sem abrir o chat, e notificações redesenhadas com a ficha do shiny capturado:

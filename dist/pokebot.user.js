@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Nexo PokeBot (PokeIdle)
 // @namespace    https://github.com/felipegakkeku/nexo-pokebot
-// @version      1.0.5
+// @version      1.0.6
 // @description  Automação desenvolvida especificamente para o PokeIdle (pokeidle.io): captura, restock, equipe, auto-evoluir, bosses, mapa/hunt, lives e HUD flutuante
 // @match        https://pokeidle.io/app*
 // @run-at       document-idle
@@ -3239,6 +3239,7 @@
     const cp = user.channel?.self?.communityPoints;
     const rewards = user.channel?.communityPointsSettings?.customRewards || [];
     status.live = Boolean(broadcastId);
+    status.broadcastId = broadcastId;
     status.error = token && !userId ? "sess\xE3o Twitch n\xE3o reconhecida" : null;
     let balance = typeof cp?.balance === "number" ? cp.balance : null;
     const now = Date.now();
@@ -3249,6 +3250,7 @@
     status.rewardKinds = configuredKinds;
     if (balance !== null) {
       recordChannelBalance(state, "twitch", login, balance);
+      status.balanceAt = now;
       for (const k of LIVE_REWARD_KINDS) {
         if (!configuredKinds.includes(k)) {
           rt.guardReads.twitch.delete(guardKey(channelKey, k));
@@ -3977,7 +3979,7 @@
         window.FarmAnalyzer.stop();
     }
 
-    const VERSION = '1.0.5'; // preenchido no build a partir do package.json
+    const VERSION = '1.0.6'; // preenchido no build a partir do package.json
     const HUD_ID = 'pokebot-hud';
     const STYLE_ID = 'pokebot-hud-style';
     // Mantém chaves v60 para preservar Pokédex importada, alertas e preferências
