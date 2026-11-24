@@ -1,6 +1,7 @@
 // Processo principal Electron do Nexo PokeBot: 1 janela, 1 bandeja, 4 contas isoladas + navegador embutido por conta.
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, powerSaveBlocker, session, shell, Tray } from 'electron';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, Notification, powerSaveBlocker, session, shell, Tray } from 'electron';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startGuiServer } from '../headless/gui-server.mjs';
@@ -8,6 +9,7 @@ import { createHeadlessHuntGuideEvaluator, findHuntExtensionDir } from '../headl
 import { loadAppIconBuffer } from '../desktop/build-exe.mjs';
 import {
     checkForUpdate,
+    compareSemver,
     downloadAndStageUpdate,
     launchApplyUpdateScript,
     readInstalledVersion,
@@ -59,13 +61,67 @@ let updateState = {
     totalBytes: 0,
     checkedAt: 0,
     error: null,
+    justUpdatedFrom: '', // preenchido no boot quando a atualizacao anterior foi aplicada
+    failedTarget: '', // versao que o ultimo update tentou aplicar e nao conseguiu
+    logPath: join(tmpdir(), 'nexo-pokebot-last-update.log'),
 };
+
+// Marcador gravado antes de fechar para atualizar; no boot seguinte confirma se a
+// versao mudou de verdade (antes o update podia "terminar" sem trocar nada).
+const UPDATE_MARKER_PATH = join(ROOT, '.pokebot-update-pending.json');
+const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
+let lastNativeUpdateNotice = '';
+
+function verifyPendingUpdateMarker() {
+    if (!existsSync(UPDATE_MARKER_PATH)) return;
+    let marker = null;
+    try {
+        marker = JSON.parse(readFileSync(UPDATE_MARKER_PATH, 'utf8'));
+    } catch {
+        marker = null;
+    }
+    try { rmSync(UPDATE_MARKER_PATH, { force: true }); } catch { /* ignore */ }
+    const target = String(marker?.to || '').trim();
+    if (!target) return;
+    // Marcador velho (mais de 1 dia) nao diz nada sobre este boot
+    if (Date.now() - Number(marker?.at || 0) > 24 * 3600 * 1000) return;
+    if (compareSemver(installedVersion, target) >= 0) {
+        updateState.justUpdatedFrom = String(marker?.from || '');
+    } else {
+        updateState.failedTarget = target;
+        updateState.status = 'error';
+        updateState.error = `A atualização para v${target} não foi aplicada. Tente de novo; se repetir, baixe o ZIP da Release e extraia por cima da pasta.`;
+    }
+}
+verifyPendingUpdateMarker();
 
 function broadcastUpdateState() {
     if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.webContents.send('hub:update-state', updateState);
     }
     refreshTrayMenu();
+}
+
+// Aviso nativo do Windows (aparece mesmo com o Hub minimizado na bandeja)
+function notifyUpdateAvailable(version) {
+    if (!version || version === lastNativeUpdateNotice) return;
+    lastNativeUpdateNotice = version;
+    try {
+        if (!Notification.isSupported()) return;
+        const icon = getAppIcon();
+        const n = new Notification({
+            title: `Nexo PokeBot v${version} disponível`,
+            body: 'Clique para abrir e atualizar. Suas contas e sessões ficam preservadas.',
+            ...(icon ? { icon } : {}),
+        });
+        n.on('click', () => {
+            showMainWindow();
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('hub:update-open');
+        });
+        n.show();
+    } catch {
+        // notificacao e opcional
+    }
 }
 
 function patchUpdateState(patch) {
@@ -88,6 +144,7 @@ async function runUpdateCheck() {
             });
         }
         latestReleaseInfo = res;
+        if (res.hasUpdate && !res.isGitRepo) notifyUpdateAvailable(res.latestVersion);
         return patchUpdateState({
             status: res.hasUpdate ? 'available' : 'up-to-date',
             currentVersion: res.currentVersion,
@@ -149,7 +206,15 @@ async function runUpdateInstall() {
             },
         });
         patchUpdateState({ status: 'applying', percent: 100 });
-        launchApplyUpdateScript(staged.scriptPath);
+        try {
+            writeFileSync(UPDATE_MARKER_PATH, JSON.stringify({
+                from: installedVersion,
+                to: staged.version,
+                at: Date.now(),
+            }), 'utf8');
+        } catch { /* sem marcador o update segue igual */ }
+        // Espera o processo do instalador existir (fora da arvore do app) antes de fechar
+        await launchApplyUpdateScript(staged.scriptPath);
         setTimeout(() => {
             isQuitting = true;
             app.quit();
@@ -865,6 +930,297 @@ function startAutoChestWatcher() {
     autoChestTimer.unref?.();
 }
 
+// ===== Sequencia de lives e seguir automatico =====
+// Os pings simulados do bot contam minutos e pontos, mas a sequencia de lives
+// (watch streak) so aparece quando a Twitch ve um player de verdade tocando.
+// O Hub abre a pagina do canal numa janela invisivel da particao da conta
+// (160p, sem som), assiste os primeiros minutos de cada transmissao e fecha.
+// Na mesma visita, clica em Seguir se a conta ainda nao segue o canal.
+const LIVE_WATCH_TICK_MS = 30_000;
+const LIVE_WATCH_MINUTES = 15;
+const LIVE_WATCH_MAX_PARALLEL = 2;
+const LIVE_WATCH_STATE_PATH = join(ROOT, '.pokebot-live-streaks.json');
+const LIVE_WATCH_REASONS = {
+    'not-logged': 'a Twitch não está logada nesta conta, reconecte a Twitch',
+    'no-video': 'o player não carregou o vídeo',
+    short: 'a live caiu antes de completar o tempo',
+    closed: 'janela fechada',
+    error: 'erro inesperado',
+    'follow-failed': 'não encontrei o botão Seguir',
+};
+const liveWatchJobs = new Map(); // `${acc}:${channel}` -> { win }
+const liveWatchRetryAt = new Map();
+let liveWatchTimer = null;
+let liveWatchState = loadLiveWatchState();
+
+function loadLiveWatchState() {
+    try {
+        const raw = JSON.parse(readFileSync(LIVE_WATCH_STATE_PATH, 'utf8'));
+        const cutoff = Date.now() - 7 * 86_400_000;
+        const watched = {};
+        for (const [k, v] of Object.entries(raw?.watched || {})) {
+            if (v && Number(v.at) > cutoff) watched[k] = v;
+        }
+        const followed = raw?.followed && typeof raw.followed === 'object' ? raw.followed : {};
+        return { watched, followed };
+    } catch {
+        return { watched: {}, followed: {} };
+    }
+}
+
+function saveLiveWatchState() {
+    try { writeFileSync(LIVE_WATCH_STATE_PATH, JSON.stringify(liveWatchState)); } catch { /* ignore */ }
+}
+
+const WATCH_QUALITY_JS = `(() => {
+    try {
+        const want = '{"default":"160p30"}';
+        if (localStorage.getItem('video-quality') === want) return false;
+        localStorage.setItem('video-quality', want);
+        return true;
+    } catch { return false; }
+})()`;
+
+const WATCH_PROBE_JS = `(() => {
+    const q = (s) => document.querySelector(s);
+    const gate = q('[data-a-target="content-classification-gate-overlay-start-watching-button"], [data-a-target="player-overlay-mature-accept"]');
+    if (gate) gate.click();
+    const v = q('video');
+    if (v && v.paused) { try { v.play().catch(() => {}); } catch { /* ignore */ } }
+    const fb = q('[data-a-target="follow-button"]');
+    let follow = null;
+    if (fb) {
+        fb.scrollIntoView({ block: 'center', inline: 'center' });
+        const r = fb.getBoundingClientRect();
+        if (r.width > 0 && r.height > 0) follow = { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    }
+    // Deslogado a Twitch tambem mostra o menu de usuario: so o botao "Entrar" e confiavel
+    const loggedOut = Boolean(q('[data-a-target="login-button"]'));
+    return {
+        loggedIn: !loggedOut && Boolean(q('[data-a-target="user-menu-toggle"]')),
+        loggedOut,
+        following: Boolean(q('[data-a-target="unfollow-button"]')),
+        follow,
+        playing: Boolean(v && !v.paused && v.readyState >= 2),
+        t: v ? Number(v.currentTime) || 0 : -1,
+    };
+})()`;
+
+const WATCH_FOLLOW_DOM_CLICK = `(() => {
+    const fb = document.querySelector('[data-a-target="follow-button"]');
+    if (!fb) return false;
+    fb.click();
+    return true;
+})()`;
+
+async function runHiddenTwitchWatch(acc, channel, job, { watchMs, follow, onProgress }) {
+    const win = new BrowserWindow({
+        width: 1100,
+        height: 720,
+        show: false,
+        frame: false,
+        focusable: false,
+        skipTaskbar: true,
+        opacity: 0,
+        backgroundColor: '#0e0e10',
+        webPreferences: {
+            partition: `persist:conta${acc}`,
+            contextIsolation: true,
+            nodeIntegration: false,
+            sandbox: true,
+            backgroundThrottling: false,
+            autoplayPolicy: 'no-user-gesture-required',
+        },
+    });
+    job.win = win;
+    const result = { ok: false, watchedSec: 0, following: false, followedNow: false, reason: '' };
+    const probe = async () => {
+        if (win.isDestroyed()) return null;
+        try {
+            return await win.webContents.executeJavaScript(WATCH_PROBE_JS, true);
+        } catch {
+            return {};
+        }
+    };
+    try {
+        win.setIgnoreMouseEvents(true);
+        win.webContents.setAudioMuted(true);
+        win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+        const cleanUa = cleanBrowserUserAgent(win.webContents.getUserAgent());
+        if (cleanUa) win.webContents.setUserAgent(cleanUa);
+        // "Visivel" para o Chromium (opacidade 0, sem foco), senao o player pausa
+        win.once('ready-to-show', () => {
+            if (!win.isDestroyed()) win.showInactive();
+        });
+        const url = `https://www.twitch.tv/${encodeURIComponent(channel)}`;
+        const load = () => win.loadURL(url, cleanUa ? { userAgent: cleanUa } : undefined).catch(() => {});
+        await load();
+        if (win.isDestroyed()) return { ...result, reason: 'closed' };
+        const changedQuality = await win.webContents.executeJavaScript(WATCH_QUALITY_JS, true).catch(() => false);
+        if (changedQuality) await load();
+
+        const started = Date.now();
+        const hardDeadline = started + (watchMs > 0 ? watchMs + 4 * 60_000 : 60_000);
+        let lastT = -1;
+        let followClicks = 0;
+        let lastProgressMin = -1;
+        while (Date.now() < hardDeadline) {
+            await waitMs(5_000);
+            const st = await probe();
+            if (!st) {
+                result.reason = 'closed';
+                break;
+            }
+            if (st.loggedOut && !st.loggedIn && Date.now() - started > 15_000) {
+                result.reason = 'not-logged';
+                break;
+            }
+            if (st.following) result.following = true;
+            if (follow && !result.following && st.loggedIn && st.follow && followClicks < 3) {
+                followClicks += 1;
+                if (followClicks < 3) {
+                    for (const type of ['mouseMove', 'mouseDown', 'mouseUp']) {
+                        win.webContents.sendInputEvent({ type, x: st.follow.x, y: st.follow.y, button: 'left', clickCount: 1 });
+                    }
+                } else {
+                    await win.webContents.executeJavaScript(WATCH_FOLLOW_DOM_CLICK, true).catch(() => false);
+                }
+            }
+            if (watchMs > 0 && st.playing && st.t > lastT) {
+                if (lastT >= 0) result.watchedSec += 5;
+                lastT = st.t;
+            }
+            const min = Math.floor(result.watchedSec / 60);
+            if (watchMs > 0 && min !== lastProgressMin) {
+                lastProgressMin = min;
+                onProgress?.(min);
+            }
+            const elapsed = Date.now() - started;
+            const watchDone = watchMs <= 0 || result.watchedSec * 1000 >= watchMs;
+            const followDone = !follow || result.following || followClicks >= 3 || elapsed > 60_000;
+            if (watchDone && followDone) break;
+            if (watchMs > 0 && result.watchedSec === 0 && elapsed > 120_000) {
+                result.reason = 'no-video';
+                break;
+            }
+        }
+        result.followedNow = follow && result.following && followClicks > 0;
+        result.ok = watchMs > 0 ? result.watchedSec * 1000 >= watchMs : result.following;
+        if (!result.ok && !result.reason) result.reason = watchMs > 0 ? 'short' : 'follow-failed';
+        return result;
+    } finally {
+        if (!win.isDestroyed()) win.destroy();
+    }
+}
+
+function liveWatchCandidates() {
+    const now = Date.now();
+    const out = [];
+    for (const acc of ACCOUNT_IDS) {
+        const entry = servers.get(acc);
+        if (!entry) continue;
+        const ctrl = entry.instance.controller;
+        const creds = ctrl.getLiveCredentials?.() || {};
+        if (!creds.twitchToken) continue;
+        const snap = ctrl.getSnapshot({ includeHunts: false });
+        const cfg = snap?.config || {};
+        if (cfg.liveEnabled === false) continue;
+        const wantWatch = cfg.liveStreakWatch !== false && cfg.liveWatchTwitch !== false;
+        const wantFollow = cfg.liveAutoFollow !== false;
+        if (!wantWatch && !wantFollow) continue;
+        for (const [rawCh, st] of Object.entries(snap?.lives?.twitch || {})) {
+            const channel = String(rawCh || '').toLowerCase();
+            if (!/^[a-z0-9_]{1,40}$/.test(channel)) continue;
+            const key = `${acc}:${channel}`;
+            if (liveWatchJobs.has(key) || (liveWatchRetryAt.get(key) || 0) > now) continue;
+            const watch = Boolean(wantWatch && st?.live && st.broadcastId &&
+                liveWatchState.watched[key]?.broadcastId !== st.broadcastId);
+            const follow = Boolean(wantFollow && !liveWatchState.followed[key]);
+            if (watch || follow) {
+                out.push({ acc, channel, key, ctrl, creds, watch, follow, broadcastId: st?.broadcastId || null });
+            }
+        }
+    }
+    return out.sort((a, b) => Number(b.watch) - Number(a.watch));
+}
+
+function startLiveWatchJob(cand) {
+    const { acc, channel, key, ctrl, creds } = cand;
+    const watchMs = cand.watch ? LIVE_WATCH_MINUTES * 60_000 : 0;
+    const job = { win: null };
+    liveWatchJobs.set(key, job);
+    const progress = (minutes) => {
+        if (!cand.watch) return;
+        ctrl.noteLiveWatchSession?.(channel, {
+            kind: 'watch', watching: true, ok: null, minutes, targetMinutes: LIVE_WATCH_MINUTES, reasonText: '',
+        });
+    };
+    progress(0);
+    void (async () => {
+        let res;
+        try {
+            await seedTwitchCookiesInPartition(acc, creds);
+            res = await runHiddenTwitchWatch(acc, channel, job, { watchMs, follow: cand.follow, onProgress: progress });
+        } catch {
+            res = { ok: false, watchedSec: 0, following: false, followedNow: false, reason: 'error' };
+        } finally {
+            liveWatchJobs.delete(key);
+        }
+        if (res.following) liveWatchState.followed[key] = Date.now();
+        if (cand.watch && res.ok) {
+            liveWatchState.watched[key] = {
+                broadcastId: cand.broadcastId,
+                at: Date.now(),
+                minutes: Math.round(res.watchedSec / 60),
+            };
+        }
+        saveLiveWatchState();
+        if (!res.ok) {
+            const waitMin = res.reason === 'follow-failed' ? 6 * 60 : res.reason === 'not-logged' ? 30 : 5;
+            liveWatchRetryAt.set(key, Date.now() + waitMin * 60_000);
+        }
+        ctrl.noteLiveWatchSession?.(channel, {
+            kind: cand.watch ? 'watch' : 'follow',
+            watching: false,
+            ok: res.ok,
+            minutes: Math.round(res.watchedSec / 60),
+            targetMinutes: LIVE_WATCH_MINUTES,
+            following: res.following,
+            followedNow: res.followedNow,
+            reason: res.ok ? '' : res.reason,
+            reasonText: res.ok ? '' : (LIVE_WATCH_REASONS[res.reason] || res.reason),
+            broadcastId: cand.broadcastId,
+        });
+    })();
+}
+
+function liveWatchTick() {
+    if (liveWatchJobs.size >= LIVE_WATCH_MAX_PARALLEL) return;
+    for (const cand of liveWatchCandidates()) {
+        if (liveWatchJobs.size >= LIVE_WATCH_MAX_PARALLEL) break;
+        if (liveWatchJobs.has(cand.key)) continue;
+        startLiveWatchJob(cand);
+    }
+}
+
+function startLiveWatchManager() {
+    if (liveWatchTimer) return;
+    liveWatchTimer = setInterval(() => {
+        try { liveWatchTick(); } catch { /* ignore */ }
+    }, LIVE_WATCH_TICK_MS);
+    liveWatchTimer.unref?.();
+}
+
+function stopLiveWatchJobs() {
+    if (liveWatchTimer) {
+        clearInterval(liveWatchTimer);
+        liveWatchTimer = null;
+    }
+    for (const job of liveWatchJobs.values()) {
+        try { if (job.win && !job.win.isDestroyed()) job.win.destroy(); } catch { /* ignore */ }
+    }
+}
+
 function registerIpcHandlers() {
     ipcMain.handle('hub:get-all-snapshots', () => getAllSnapshots());
 
@@ -919,6 +1275,8 @@ function registerIpcHandlers() {
             ok = controller.triggerAction('cancel-login');
         } else if (act === 'run-lives') {
             ok = controller.triggerAction('run-lives');
+        } else if (act === 'refresh-lives') {
+            ok = controller.triggerAction('refresh-lives');
         } else if (act === 'reset-stats') {
             ok = controller.triggerAction('reset-stats');
         } else if (act === 'login-twitch') {
@@ -1161,6 +1519,7 @@ app.on('before-quit', (ev) => {
         try { powerSaveBlocker.stop(awakeId); } catch { /* ignore */ }
         awakeId = null;
     }
+    stopLiveWatchJobs();
     const closing = [...servers.values()].map((entry) => entry.instance.close().catch(() => {}));
     servers.clear();
     for (const popup of actionPopups.values()) {
@@ -1186,6 +1545,7 @@ app.whenReady().then(async () => {
     await createMainWindow();
     setupTray();
     startAutoChestWatcher();
+    startLiveWatchManager();
     updateBootTimer = setTimeout(() => {
         updateBootTimer = null;
         void runUpdateCheck();
@@ -1193,7 +1553,7 @@ app.whenReady().then(async () => {
     updateBootTimer.unref?.();
     updateCheckTimer = setInterval(() => {
         void runUpdateCheck();
-    }, 4 * 60 * 60 * 1000);
+    }, UPDATE_CHECK_INTERVAL_MS);
     updateCheckTimer.unref?.();
 }).catch((err) => {
     console.error('[Nexo PokeBot] Falha ao iniciar:', err);

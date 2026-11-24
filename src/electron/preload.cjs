@@ -23,6 +23,11 @@ contextBridge.exposeInMainWorld('pokeHub', {
         ipcRenderer.on('hub:update-state', fn);
         return () => ipcRenderer.removeListener('hub:update-state', fn);
     },
+    onUpdateOpen: (cb) => {
+        const fn = () => cb();
+        ipcRenderer.on('hub:update-open', fn);
+        return () => ipcRenderer.removeListener('hub:update-open', fn);
+    },
     onWebviewSend: (cb) => {
         const fn = (_ev, data) => cb(data);
         ipcRenderer.on('hub:webview-send', fn);

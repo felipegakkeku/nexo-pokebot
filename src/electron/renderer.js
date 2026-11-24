@@ -13,7 +13,7 @@ const STATUS_LABELS = {
 };
 
 let activeAccount = 1;
-let viewMode = 'split'; // 'split' | 'grid' | 'panel-only'
+let viewMode = 'split'; // 'split' | 'grid' | 'panel-only' | 'panels-grid'
 let snapshots = {};
 let webviewPreloadUrl = '';
 let awakeEnabled = false;
@@ -135,8 +135,17 @@ async function openEmbeddedForAccount(acc) {
     }
 
     let seedDone = false;
+    audioState.set(acc, { muted: true, playing: false });
+    wv.addEventListener('media-started-playing', () => {
+        const st = audioState.get(acc);
+        if (st) { st.playing = true; updateAudioIndicators(acc); }
+    });
+    wv.addEventListener('media-paused', () => {
+        const st = audioState.get(acc);
+        if (st) { st.playing = false; updateAudioIndicators(acc); }
+    });
     wv.addEventListener('dom-ready', async () => {
-        try { wv.setAudioMuted(true); } catch { /* ignore */ }
+        try { wv.setAudioMuted(isAccountMuted(acc)); } catch { /* ignore */ }
         const needCampo = snapshots[acc]?.config?.caidosEnabled !== false;
         wv.executeJavaScript(`window.__pbSetNeedCampoFeed && window.__pbSetNeedCampoFeed(${JSON.stringify(needCampo)})`).catch(() => {});
         if (!seedDone && res.seedSession) {
@@ -174,6 +183,7 @@ async function openEmbeddedForAccount(acc) {
     webviews.set(acc, wv);
     if (ph) ph.hidden = true;
     body.appendChild(wv);
+    updateAudioIndicators(acc);
     await pollSnapshots();
 }
 
@@ -184,6 +194,8 @@ async function closeEmbeddedForAccount(acc, { startHeadless = false } = {}) {
         try { wv.src = 'about:blank'; } catch { /* ignore */ }
         try { wv.remove(); } catch { /* ignore */ }
     }
+    audioState.delete(acc);
+    updateAudioIndicators(acc);
     const ph = $(`wv-ph-${acc}`);
     if (ph) ph.hidden = false;
     const res = await window.pokeHub.detachWebview(acc, { startHeadless });
@@ -195,14 +207,14 @@ async function closeEmbeddedForAccount(acc, { startHeadless = false } = {}) {
     }
 }
 
-async function closeAllEmbeddedToHeadless() {
+async function closeAllEmbeddedToHeadless(targetMode = 'panel-only') {
     const openAccs = [...webviews.keys()];
     for (const acc of openAccs) {
         const snap = snapshots[acc];
         const hasSession = Boolean(snap?.session?.nick || (snap?.trainer?.nick && snap.trainer.nick !== '-'));
         await closeEmbeddedForAccount(acc, { startHeadless: hasSession });
     }
-    setViewMode('panel-only', { skipAutoClose: true });
+    setViewMode(targetMode, { skipAutoClose: true });
     if (openAccs.length > 0) {
         showToast({
             kind: 'ok',
@@ -229,23 +241,529 @@ function selectAccount(acc) {
     renderAll();
 }
 
+// ===== Grade livre, som por conta e Paineis 2x2 =====
+const GRID_STATE_KEY = 'nexo.gridLayout';
+const GRID_LAYOUTS = ['2x2', 'focus', 'cols', 'rows'];
+const RUNNING_STATUSES = ['connected', 'bridge', 'connecting'];
+const ICON_SOUND_ON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+const ICON_SOUND_OFF = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16.5 9.5l5 5M21.5 9.5l-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+const audioState = new Map(); // conta -> { muted, playing } enquanto o jogo esta embutido
+let gridState = loadGridState();
+let gridGutters = { v: false, h: false };
+
+function clampSplit(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? Math.min(0.8, Math.max(0.2, n)) : 0.5;
+}
+
+function loadGridState() {
+    const st = { layout: '2x2', order: [...ACCOUNTS], hidden: [], max: 0, colSplit: 0.5, rowSplit: 0.5 };
+    let raw = null;
+    try { raw = JSON.parse(localStorage.getItem(GRID_STATE_KEY) || 'null'); } catch { raw = null; }
+    if (!raw || typeof raw !== 'object') return st;
+    if (GRID_LAYOUTS.includes(raw.layout)) st.layout = raw.layout;
+    if (Array.isArray(raw.order)) {
+        const ord = raw.order.map(Number).filter((n) => ACCOUNTS.includes(n));
+        if (new Set(ord).size === ACCOUNTS.length) st.order = ord;
+    }
+    if (Array.isArray(raw.hidden)) st.hidden = [...new Set(raw.hidden.map(Number).filter((n) => ACCOUNTS.includes(n)))];
+    if (ACCOUNTS.includes(Number(raw.max))) st.max = Number(raw.max);
+    st.colSplit = clampSplit(raw.colSplit);
+    st.rowSplit = clampSplit(raw.rowSplit);
+    return st;
+}
+
+function saveGridState() {
+    try { localStorage.setItem(GRID_STATE_KEY, JSON.stringify(gridState)); } catch { /* ignore */ }
+}
+
+function accountNick(acc) {
+    const s = snapshots[acc];
+    if (s?.trainer?.nick && s.trainer.nick !== '-') return s.trainer.nick;
+    return s?.session?.nick || `Conta ${acc}`;
+}
+
+function applyGridLayout() {
+    const stage = $('browserStage');
+    if (!stage) return;
+    const inGrid = viewMode === 'grid';
+    for (const acc of ACCOUNTS) {
+        const bar = $(`wv-slot-${acc}`)?.querySelector('.wv-bar');
+        if (bar) bar.draggable = inGrid;
+    }
+    if (!inGrid) {
+        stage.style.gridTemplateColumns = '';
+        stage.style.gridTemplateRows = '';
+        for (const acc of ACCOUNTS) {
+            const el = $(`wv-slot-${acc}`);
+            if (!el) continue;
+            el.style.gridRow = '';
+            el.style.gridColumn = '';
+            el.classList.remove('grid-hidden');
+        }
+        positionGridGutters({ v: false, h: false });
+        return;
+    }
+
+    let visible = gridState.order.filter((acc) => !gridState.hidden.includes(acc));
+    if (gridState.max && visible.includes(gridState.max)) {
+        visible = [gridState.max];
+    } else {
+        gridState.max = 0;
+    }
+    const n = visible.length;
+    const cs = gridState.colSplit;
+    const rs = gridState.rowSplit;
+    const fr = (a) => `minmax(0, ${a.toFixed(3)}fr)`;
+    const place = new Map(); // conta -> [linha, coluna] (linha 1 e a barra de ferramentas)
+    let cols = 'minmax(0, 1fr)';
+    let rows = 'minmax(0, 1fr)';
+    const gutters = { v: false, h: false };
+
+    if (n <= 1) {
+        if (n === 1) place.set(visible[0], ['2', '1']);
+    } else if (gridState.layout === 'cols') {
+        cols = `repeat(${n}, minmax(0, 1fr))`;
+        visible.forEach((acc, i) => place.set(acc, ['2', String(i + 1)]));
+    } else if (gridState.layout === 'rows') {
+        rows = `repeat(${n}, minmax(0, 1fr))`;
+        visible.forEach((acc, i) => place.set(acc, [String(i + 2), '1']));
+    } else if (gridState.layout === 'focus') {
+        cols = `${fr(cs)} ${fr(1 - cs)}`;
+        rows = `repeat(${n - 1}, minmax(0, 1fr))`;
+        place.set(visible[0], [`2 / ${n + 1}`, '1']);
+        visible.slice(1).forEach((acc, i) => place.set(acc, [String(i + 2), '2']));
+        gutters.v = true;
+    } else {
+        const rowCount = Math.ceil(n / 2);
+        cols = `${fr(cs)} ${fr(1 - cs)}`;
+        rows = rowCount === 2 ? `${fr(rs)} ${fr(1 - rs)}` : 'minmax(0, 1fr)';
+        visible.forEach((acc, i) => {
+            const spanAll = n === 3 && i === 2;
+            place.set(acc, [String(Math.floor(i / 2) + 2), spanAll ? '1 / -1' : String((i % 2) + 1)]);
+        });
+        gutters.v = true;
+        gutters.h = rowCount === 2;
+    }
+
+    stage.style.gridTemplateColumns = cols;
+    stage.style.gridTemplateRows = n > 0 ? `auto ${rows}` : 'auto';
+    for (const acc of ACCOUNTS) {
+        const el = $(`wv-slot-${acc}`);
+        if (!el) continue;
+        const p = place.get(acc);
+        el.classList.toggle('grid-hidden', !p);
+        el.style.gridRow = p ? p[0] : '';
+        el.style.gridColumn = p ? p[1] : '';
+    }
+    const hint = $('gridHint');
+    if (hint) {
+        hint.textContent = n === 0
+            ? 'Todas as telas estão ocultas: clique numa conta em Ocultas para trazer de volta.'
+            : gridState.max
+                ? 'Tela maximizada: clique em ⤡ na barra dela para voltar à grade.'
+                : 'Arraste a barra de uma tela para trocar de lugar · arraste a divisória para redimensionar';
+    }
+    requestAnimationFrame(() => positionGridGutters(gutters));
+}
+
+function positionGridGutters(gutters) {
+    gridGutters = gutters;
+    const stage = $('browserStage');
+    const gv = $('gridGutterV');
+    const gh = $('gridGutterH');
+    if (!stage || !gv || !gh) return;
+    gv.hidden = !gutters.v;
+    gh.hidden = !gutters.h;
+    if (!gutters.v && !gutters.h) return;
+    const sr = stage.getBoundingClientRect();
+    const tb = $('gridToolbar')?.getBoundingClientRect();
+    const top = (tb ? tb.bottom : sr.top) - sr.top + 4;
+    const visible = gridState.order.filter((acc) => !gridState.hidden.includes(acc));
+    const rect = (acc) => $(`wv-slot-${acc}`)?.getBoundingClientRect();
+    if (gutters.v && visible.length >= 2) {
+        const a = rect(visible[0]);
+        const b = rect(visible[1]);
+        if (a && b) {
+            gv.style.left = `${(a.right + b.left) / 2 - sr.left}px`;
+            gv.style.top = `${top}px`;
+            gv.style.height = `${sr.height - top - 8}px`;
+        }
+    }
+    if (gutters.h && visible.length >= 3) {
+        const a = rect(visible[0]);
+        const c = rect(visible[2]);
+        if (a && c) {
+            gh.style.top = `${(a.bottom + c.top) / 2 - sr.top}px`;
+            gh.style.left = '8px';
+            gh.style.width = `${sr.width - 16}px`;
+        }
+    }
+}
+
+function wireGridGutter(el, axis) {
+    if (!el) return;
+    el.addEventListener('pointerdown', (ev) => {
+        ev.preventDefault();
+        const stage = $('browserStage');
+        stage.classList.add('resizing');
+        stage.classList.toggle('row', axis === 'h');
+        try { el.setPointerCapture(ev.pointerId); } catch { /* ignore */ }
+        const move = (e) => {
+            const r = stage.getBoundingClientRect();
+            if (axis === 'v') {
+                gridState.colSplit = clampSplit((e.clientX - r.left - 8) / Math.max(1, r.width - 16));
+            } else {
+                const tb = $('gridToolbar').getBoundingClientRect();
+                const top = tb.bottom + 8;
+                gridState.rowSplit = clampSplit((e.clientY - top) / Math.max(1, r.bottom - 8 - top));
+            }
+            applyGridLayout();
+        };
+        const up = () => {
+            el.removeEventListener('pointermove', move);
+            el.removeEventListener('pointerup', up);
+            el.removeEventListener('pointercancel', up);
+            stage.classList.remove('resizing', 'row');
+            saveGridState();
+        };
+        el.addEventListener('pointermove', move);
+        el.addEventListener('pointerup', up);
+        el.addEventListener('pointercancel', up);
+    });
+    el.addEventListener('dblclick', () => {
+        if (axis === 'v') gridState.colSplit = 0.5;
+        else gridState.rowSplit = 0.5;
+        saveGridState();
+        applyGridLayout();
+    });
+}
+
+function wireGridDrag() {
+    const stage = $('browserStage');
+    let dragAcc = 0;
+    const clearMarks = () => {
+        stage.classList.remove('dragging');
+        document.querySelectorAll('.wv-slot.drag-src, .wv-slot.drag-over').forEach((el) => {
+            el.classList.remove('drag-src', 'drag-over');
+        });
+    };
+    for (const acc of ACCOUNTS) {
+        const slot = $(`wv-slot-${acc}`);
+        const bar = slot?.querySelector('.wv-bar');
+        if (!slot || !bar) continue;
+        bar.addEventListener('dragstart', (ev) => {
+            if (viewMode !== 'grid' || ev.target.closest?.('button')) {
+                ev.preventDefault();
+                return;
+            }
+            dragAcc = acc;
+            ev.dataTransfer.effectAllowed = 'move';
+            try { ev.dataTransfer.setData('text/plain', String(acc)); } catch { /* ignore */ }
+            stage.classList.add('dragging');
+            slot.classList.add('drag-src');
+        });
+        bar.addEventListener('dragend', () => {
+            dragAcc = 0;
+            clearMarks();
+        });
+        slot.addEventListener('dragover', (ev) => {
+            if (!dragAcc || dragAcc === acc) return;
+            ev.preventDefault();
+            ev.dataTransfer.dropEffect = 'move';
+            slot.classList.add('drag-over');
+        });
+        slot.addEventListener('dragleave', (ev) => {
+            if (!slot.contains(ev.relatedTarget)) slot.classList.remove('drag-over');
+        });
+        slot.addEventListener('drop', (ev) => {
+            ev.preventDefault();
+            const from = dragAcc;
+            dragAcc = 0;
+            clearMarks();
+            if (!from || from === acc) return;
+            const order = [...gridState.order];
+            const i = order.indexOf(from);
+            const j = order.indexOf(acc);
+            if (i < 0 || j < 0) return;
+            [order[i], order[j]] = [order[j], order[i]];
+            gridState.order = order;
+            saveGridState();
+            applyGridLayout();
+        });
+    }
+}
+
+function renderGridToolbar() {
+    document.querySelectorAll('[data-grid-layout]').forEach((b) => {
+        b.classList.toggle('active', b.dataset.gridLayout === gridState.layout);
+    });
+    const wrap = $('gridHiddenWrap');
+    const chips = $('gridHiddenChips');
+    if (wrap && chips) {
+        wrap.hidden = gridState.hidden.length === 0;
+        chips.replaceChildren(...gridState.hidden.map((acc) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'grid-chip';
+            b.dataset.gridShow = String(acc);
+            b.title = 'Mostrar de novo na grade';
+            b.textContent = `+ ${acc}. ${accountNick(acc)}`;
+            return b;
+        }));
+    }
+    const muteBtn = $('btnGridMuteAll');
+    if (muteBtn) {
+        const embedded = [...webviews.keys()];
+        const anyOn = embedded.some((acc) => !isAccountMuted(acc));
+        muteBtn.disabled = embedded.length === 0;
+        muteBtn.innerHTML = `${anyOn ? ICON_SOUND_OFF : ICON_SOUND_ON}<span>${anyOn ? 'Mutar todas' : 'Som em todas'}</span>`;
+        muteBtn.title = embedded.length === 0 ? 'Nenhum jogo aberto na grade' : '';
+    }
+    for (const acc of ACCOUNTS) {
+        const mb = document.querySelector(`[data-slot-act="max"][data-slot="${acc}"]`);
+        if (!mb) continue;
+        const on = gridState.max === acc;
+        mb.textContent = on ? '⤡' : '⤢';
+        mb.title = on ? 'Voltar para a grade' : 'Maximizar esta tela';
+        mb.classList.toggle('active-toggle', on);
+    }
+}
+
+function isAccountMuted(acc) {
+    return audioState.get(acc)?.muted !== false;
+}
+
+function setAccountMuted(acc, muted) {
+    const wv = webviews.get(acc);
+    if (!wv) return;
+    const st = audioState.get(acc) || { muted: true, playing: false };
+    st.muted = Boolean(muted);
+    audioState.set(acc, st);
+    try { wv.setAudioMuted(st.muted); } catch { /* antes do dom-ready: o dom-ready aplica */ }
+    updateAudioIndicators(acc);
+}
+
+function updateAudioIndicators(acc) {
+    const embedded = webviews.has(acc);
+    const st = audioState.get(acc) || { muted: true, playing: false };
+    const playing = embedded && st.playing;
+    const tip = `${st.muted ? 'Mudo' : 'Som ligado'}${playing ? ' · tocando agora' : ''} · clique para ${st.muted ? 'ativar o som' : 'silenciar'}`;
+    const tabIcon = $(`tabAudio-${acc}`);
+    if (tabIcon) {
+        tabIcon.hidden = !embedded;
+        tabIcon.innerHTML = st.muted ? ICON_SOUND_OFF : ICON_SOUND_ON;
+        tabIcon.classList.toggle('is-muted', st.muted);
+        tabIcon.classList.toggle('is-playing', playing && !st.muted);
+        tabIcon.title = tip;
+        tabIcon.setAttribute('aria-label', tip);
+    }
+    const btn = $(`slotAudio-${acc}`);
+    if (btn) {
+        btn.hidden = !embedded;
+        btn.innerHTML = `${st.muted ? ICON_SOUND_OFF : ICON_SOUND_ON}<span>${st.muted ? 'Mudo' : 'Som'}</span>`;
+        btn.classList.toggle('is-muted', st.muted);
+        btn.classList.toggle('is-playing', playing && !st.muted);
+        btn.title = tip;
+    }
+    renderGridToolbar();
+}
+
+const PANEL_CARD_HTML = `
+  <header class="pcard-head" data-pc-act="select" title="Selecionar esta conta">
+    <span class="acc-dot"></span>
+    <div class="pcard-id"><b class="pcard-nick"></b><span class="pcard-sub"></span></div>
+    <span class="pcard-badge"></span>
+  </header>
+  <div class="pcard-warn" hidden></div>
+  <div class="pcard-poke">
+    <div class="pcard-sprite">?</div>
+    <div class="pcard-poke-info">
+      <div class="pcard-poke-name"></div>
+      <div class="pcard-hp"><i></i></div>
+      <div class="pcard-hp-txt"></div>
+    </div>
+  </div>
+  <dl class="pcard-stats"></dl>
+  <div class="pcard-drops"></div>
+  <div class="pcard-actions">
+    <button type="button" class="btn sm" data-pc-act="run"></button>
+    <button type="button" class="btn sm" data-pc-act="panel">Painel completo</button>
+    <button type="button" class="btn sm teal" data-pc-act="game">Abrir jogo</button>
+  </div>`;
+
+function renderPanelsGrid() {
+    const box = $('panelsGrid');
+    if (!box || viewMode !== 'panels-grid') return;
+    const want = gridState.order.join(',');
+    if (box.dataset.order !== want) {
+        box.dataset.order = want;
+        box.replaceChildren(...gridState.order.map((acc) => {
+            const card = document.createElement('article');
+            card.className = 'pcard';
+            card.dataset.acc = String(acc);
+            card.innerHTML = PANEL_CARD_HTML;
+            return card;
+        }));
+    }
+    for (const card of box.children) {
+        const acc = Number(card.dataset.acc);
+        const s = snapshots[acc] || {};
+        const t = s.trainer || {};
+        const st = s.stats || {};
+        const status = s.status || 'disconnected';
+        const hunt = t.huntName && t.huntName !== '-' ? t.huntName : '';
+        const warns = Array.isArray(s.modeWarnings) ? s.modeWarnings : [];
+        card.classList.toggle('active', acc === activeAccount);
+        card.querySelector('.acc-dot').className = `acc-dot ${status}`;
+        card.querySelector('.pcard-nick').textContent = `${acc}. ${accountNick(acc)}`;
+        card.querySelector('.pcard-sub').textContent = [STATUS_LABELS[status] || status.toUpperCase(), hunt].filter(Boolean).join(' · ');
+        card.querySelector('.pcard-badge').textContent = `Nv ${t.level || 0} · ${fmtNum(t.gold)} gold`;
+        const warnEl = card.querySelector('.pcard-warn');
+        warnEl.hidden = warns.length === 0;
+        warnEl.textContent = warns.length ? `⚠ ${warns.map((w) => w.title).join(' | ')}` : '';
+
+        const pk = s.activePokemon;
+        const spriteBox = card.querySelector('.pcard-sprite');
+        const spKey = pk && pk.speciesId > 0 ? `${pk.speciesId}:${pk.shiny ? 1 : 0}` : '';
+        if (spriteBox.dataset.key !== spKey) {
+            spriteBox.dataset.key = spKey;
+            spriteBox.classList.toggle('shiny', Boolean(pk?.shiny));
+            const url = spKey ? pokemonSpriteUrl(pk.speciesId, Boolean(pk.shiny)) : '';
+            if (url) {
+                const img = document.createElement('img');
+                img.src = url;
+                img.alt = '';
+                img.addEventListener('error', () => { spriteBox.textContent = '?'; });
+                spriteBox.replaceChildren(img);
+            } else {
+                spriteBox.textContent = '?';
+            }
+        }
+        const pct = pk ? Math.max(0, Math.min(100, Number(pk.hpPercent) || 0)) : 0;
+        card.querySelector('.pcard-poke-name').textContent = pk ? `${pk.shiny ? '★ ' : ''}${pk.name} Nv ${pk.level}` : 'Aguardando Pokémon';
+        const fill = card.querySelector('.pcard-hp i');
+        fill.style.width = `${pct}%`;
+        fill.style.background = pct > 55 ? '#10b981' : pct > 25 ? '#f59e0b' : '#ef4444';
+        card.querySelector('.pcard-hp-txt').textContent = pk ? `${fmtNum(pk.hp)} / ${fmtNum(pk.maxHp)} HP (${pct}%)` : '';
+
+        const tiles = [
+            ['XP/h', fmtNum(st.xpPerHour)],
+            ['Líq./h', fmtNum(st.netGoldPerHour ?? st.goldPerHour)],
+            ['Kills', fmtNum(st.kills)],
+            ['Capturas', fmtNum(st.captures)],
+            ['Shinies', fmtNum(st.shiniesCaptured)],
+            ['Kill médio', st.avgKillSec > 0 ? `${String(st.avgKillSec).replace('.', ',')}s` : '-'],
+            ['Cap./kill', st.kills > 0 ? `${String(st.capturePerKillPct || 0).replace('.', ',')}%` : '-'],
+            ['Tempo', fmtUptime(st.uptimeSec)],
+        ];
+        const statsHtml = tiles.map(([k, v]) => `<div><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd></div>`).join('');
+        const statsEl = card.querySelector('.pcard-stats');
+        if (statsEl.dataset.sig !== statsHtml) {
+            statsEl.dataset.sig = statsHtml;
+            statsEl.innerHTML = statsHtml;
+        }
+        const dr = s.drops || {};
+        const hitDrops = (dr.featured || []).filter((d) => d.qty > 0).slice(0, 4);
+        card.querySelector('.pcard-drops').textContent = hitDrops.length
+            ? `Drops: ${hitDrops.map((d) => `${d.name} x${d.qty}`).join(' · ')}`
+            : `Drops: ${dr.focusLabel ? `${dr.focusLabel} · ` : ''}nenhum ainda`;
+
+        const running = RUNNING_STATUSES.includes(status);
+        const runBtn = card.querySelector('[data-pc-act="run"]');
+        runBtn.textContent = running ? 'Pausar' : 'Iniciar Headless';
+        runBtn.className = running ? 'btn sm' : 'btn sm primary';
+    }
+}
+
+async function handlePanelCardAction(acc, act) {
+    if (act === 'select') {
+        selectAccount(acc);
+    } else if (act === 'run') {
+        const running = RUNNING_STATUSES.includes(snapshots[acc]?.status);
+        await sendAction(running ? 'pause' : 'start', {}, acc);
+    } else if (act === 'panel') {
+        selectAccount(acc);
+        setViewMode('panel-only');
+    } else if (act === 'game') {
+        selectAccount(acc);
+        setViewMode('split');
+        await openEmbeddedForAccount(acc);
+    }
+}
+
+function initGridControls() {
+    $('gridToolbar')?.addEventListener('click', (ev) => {
+        const layoutBtn = ev.target.closest('[data-grid-layout]');
+        const showBtn = ev.target.closest('[data-grid-show]');
+        if (layoutBtn) {
+            gridState.layout = layoutBtn.dataset.gridLayout;
+            gridState.max = 0;
+        } else if (showBtn) {
+            const acc = Number(showBtn.dataset.gridShow);
+            gridState.hidden = gridState.hidden.filter((a) => a !== acc);
+        } else if (ev.target.closest('#btnGridMuteAll')) {
+            const embedded = [...webviews.keys()];
+            const anyOn = embedded.some((acc) => !isAccountMuted(acc));
+            embedded.forEach((acc) => setAccountMuted(acc, anyOn));
+            return;
+        } else if (ev.target.closest('#btnGridReset')) {
+            gridState = { layout: '2x2', order: [...ACCOUNTS], hidden: [], max: 0, colSplit: 0.5, rowSplit: 0.5 };
+        } else {
+            return;
+        }
+        saveGridState();
+        applyGridLayout();
+        renderGridToolbar();
+    });
+    wireGridGutter($('gridGutterV'), 'v');
+    wireGridGutter($('gridGutterH'), 'h');
+    wireGridDrag();
+    for (const acc of ACCOUNTS) {
+        const icon = $(`tabAudio-${acc}`);
+        icon?.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            setAccountMuted(acc, !isAccountMuted(acc));
+        });
+        updateAudioIndicators(acc);
+    }
+    $('panelsGrid')?.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('[data-pc-act]');
+        const card = ev.target.closest('.pcard');
+        if (!btn || !card) return;
+        void handlePanelCardAction(Number(card.dataset.acc), btn.dataset.pcAct);
+    });
+    const stage = $('browserStage');
+    if (stage && typeof ResizeObserver === 'function') {
+        new ResizeObserver(() => {
+            if (viewMode === 'grid') positionGridGutters(gridGutters);
+        }).observe(stage);
+    }
+    applyGridLayout();
+    renderGridToolbar();
+}
+
 function setViewMode(mode, { skipAutoClose = false } = {}) {
     viewMode = mode;
     const ws = $('workspace');
-    ws.classList.remove('mode-split', 'mode-grid', 'mode-panel-only');
+    ws.classList.remove('mode-split', 'mode-grid', 'mode-panel-only', 'mode-panels-grid');
     ws.classList.add(`mode-${mode}`);
     document.querySelectorAll('.seg-btn').forEach((b) => {
         b.classList.toggle('active', b.dataset.view === mode);
     });
-    if (mode === 'panel-only' && !skipAutoClose && webviews.size > 0) {
-        void closeAllEmbeddedToHeadless();
+    if ((mode === 'panel-only' || mode === 'panels-grid') && !skipAutoClose && webviews.size > 0) {
+        void closeAllEmbeddedToHeadless(mode);
     }
+    applyGridLayout();
+    renderGridToolbar();
+    renderPanelsGrid();
 }
 
 function setSubtab(tab) {
     document.querySelectorAll('.subtab').forEach((b) => {
         b.classList.toggle('active', b.dataset.subtab === tab);
     });
+    if (tab === 'lives') setTimeout(requestLivesRefresh, 0);
     document.querySelectorAll('.tab-panel').forEach((p) => {
         p.classList.toggle('hidden', p.id !== `tab-${tab}`);
     });
@@ -324,11 +842,6 @@ function formatBonusMins(mins) {
     return h > 0 ? `${h}h${String(r).padStart(2, '0')}m` : `${r}m`;
 }
 
-function formatBonusLine(label, obj) {
-    const b = obj || {};
-    return `${label}: XP ${formatBonusMins(b.xp)} · Cap ${formatBonusMins(b.captura)} · Shiny ${formatBonusMins(b.shiny)}`;
-}
-
 async function saveConfig() {
     const targetRevives = Math.max(0, Number($('cTargetRevives').value) || 0);
     const liveTwitchRewards = readCheckedRewards('data-tw-reward');
@@ -341,6 +854,8 @@ async function saveConfig() {
         dailyPassEnabled: $('cPass').checked,
         preyEnabled: $('cPrey').checked,
         liveEnabled: $('cLives').checked,
+        liveStreakWatch: $('cLiveStreak').checked,
+        liveAutoFollow: $('cLiveFollow').checked,
         liveSmartBalance: $('cLiveSmart').checked,
         liveTargetHours: Number($('cLiveTargetHours').value) || 24,
         economyMode: $('cEconomy').checked ? 'on' : 'auto',
@@ -786,6 +1301,8 @@ function renderActiveAccountPanel() {
         $('cPass').checked = Boolean(cfg.dailyPassEnabled);
         $('cPrey').checked = Boolean(cfg.preyEnabled);
         $('cLives').checked = Boolean(cfg.liveEnabled);
+        $('cLiveStreak').checked = cfg.liveStreakWatch !== false;
+        $('cLiveFollow').checked = cfg.liveAutoFollow !== false;
         $('cLiveSmart').checked = cfg.liveSmartBalance !== false;
         $('cLiveTargetHours').value = String(cfg.liveTargetHours ?? 24);
         $('cEconomy').checked = cfg.economyMode === 'on';
@@ -860,22 +1377,120 @@ function renderActiveAccountPanel() {
     renderActivity(data);
 }
 
+function fmtAgo(ts) {
+    const sec = Math.max(0, Math.round((Date.now() - Number(ts || 0)) / 1000));
+    if (sec < 5) return 'agora';
+    if (sec < 60) return `há ${sec}s`;
+    const min = Math.floor(sec / 60);
+    return min < 60 ? `há ${min} min` : `há ${Math.floor(min / 60)}h`;
+}
+
+// Chip da linha do canal: sequencia no player real e se a conta segue o canal
+function buildWatchChip(ch) {
+    const w = ch.watch;
+    if (ch.platform !== 'twitch' || !w) return null;
+    const chip = document.createElement('span');
+    chip.className = 'watch-chip';
+    if (w.watching) {
+        chip.classList.add('watching');
+        chip.textContent = `▶ Sequência ${w.minutes || 0}/${w.targetMinutes || 15} min`;
+        chip.title = 'Assistindo no player real da Twitch (invisível, sem som) para a live contar na sequência.';
+    } else if (w.kind === 'watch' && w.ok) {
+        chip.classList.add('ok');
+        chip.textContent = '✓ Sequência';
+        chip.title = `Live assistida ${w.minutes || 0} min no player real ${fmtAgo(w.at)}. Conta para a sequência de lives.`;
+    } else if (w.kind === 'watch' && w.ok === false) {
+        chip.classList.add('warn');
+        chip.textContent = '! Sequência';
+        chip.title = `Não deu para assistir no player: ${w.reasonText || 'erro'}. Tento de novo em alguns minutos.`;
+    } else if (w.following) {
+        chip.classList.add('follow');
+        chip.textContent = '♥ Seguindo';
+        chip.title = 'Esta conta segue o canal na Twitch.';
+    } else {
+        return null;
+    }
+    if (w.following && !chip.classList.contains('follow')) chip.textContent += ' · ♥';
+    return chip;
+}
+
+const BUFF_KINDS = [['xp', 'XP', '#60a5fa'], ['captura', 'Captura', '#34d399'], ['shiny', 'Shiny', '#facc15']];
+let lastBuffSig = '';
+
+// Gestor inteligente: uma barra por buff mostrando quanto tempo falta em relacao a meta
+function renderBuffManager(lv) {
+    const box = $('buffManager');
+    if (!box) return;
+    const smartOn = Boolean(lv.smartBalance);
+    const targetH = Number(lv.targetHours || 24);
+    const guardMin = Number(lv.guardThresholdMin || 30);
+    const platforms = [
+        ['twitch', 'Twitch', 'tw', lv.twitchRewards],
+        ['kick', 'Kick', 'kk', lv.kickRewards],
+    ];
+    const html = [];
+    html.push(`<div class="bm-head"><div class="bm-title"><b>Gestor inteligente de buffs</b><span>${smartOn
+        ? `Mantém cada buff marcado com até <b>${targetH}h</b> guardadas e gasta os pontos primeiro no que está acabando.`
+        : `Desligado: só resgata um buff quando faltam ${guardMin} min ou menos.`}</span></div>`
+        + `<span class="bm-state ${smartOn ? 'on' : 'off'}">${smartOn ? 'Ligado' : 'Desligado'}</span></div>`);
+    for (const [plat, label, cls, kindsRaw] of platforms) {
+        const mins = lv.activeBonuses?.[plat] || {};
+        const st = lv.smartStatus?.[plat] || {};
+        const kinds = Array.isArray(kindsRaw) ? kindsRaw : [lv.rewardType || 'xp'];
+        const scaleMin = smartOn ? Math.max(1, Number(st.targetMin) || targetH * 60) : 24 * 60;
+        let summary = '';
+        if (!kinds.length) summary = '<span class="bm-sum muted">Nenhum buff marcado</span>';
+        else if (smartOn && st.allReached) summary = '<span class="bm-sum ok">✓ Todos na meta</span>';
+        else if (smartOn && st.nextKind) {
+            const nk = BUFF_KINDS.find(([k]) => k === st.nextKind);
+            summary = `<span class="bm-sum next">Próximo resgate: <b>${escapeHtml(nk ? nk[1] : st.nextKind)}</b></span>`;
+        }
+        html.push(`<div class="bm-plat"><div class="bm-plat-head"><span class="plat-badge ${cls}">${label}</span>${summary}</div>`);
+        for (const [kind, kLabel, color] of BUFF_KINDS) {
+            const on = kinds.includes(kind);
+            const m = Math.max(0, Number(mins[kind]) || 0);
+            const pct = Math.max(0, Math.min(100, (m / scaleMin) * 100));
+            let state = 'mid';
+            if (!on) state = 'off';
+            else if (m <= 0) state = 'empty';
+            else if (smartOn && pct >= 99.5) state = 'full';
+            else if (m <= Math.max(guardMin, scaleMin * 0.15)) state = 'low';
+            const isNext = smartOn && on && st.nextKind === kind;
+            const timeTxt = !on
+                ? 'não coletado'
+                : m <= 0
+                    ? 'sem buff'
+                    : `${formatBonusMins(m)}${smartOn ? ` <small>de ${targetH}h</small>` : ''}`;
+            html.push(`<div class="bm-row ${state}${isNext ? ' is-next' : ''}">`
+                + `<span class="bm-kind"><i style="background:${color}"></i>${kLabel}${isNext ? '<em>próximo</em>' : ''}</span>`
+                + `<span class="bm-bar"><span style="width:${pct.toFixed(1)}%"></span></span>`
+                + `<span class="bm-time">${timeTxt}</span></div>`);
+        }
+        html.push('</div>');
+    }
+    html.push('<div class="bm-legend"><span class="lg full">na meta</span><span class="lg mid">guardando</span><span class="lg low">acabando</span><span class="lg empty">sem buff</span></div>');
+    const sig = html.join('');
+    if (sig === lastBuffSig) return;
+    lastBuffSig = sig;
+    box.innerHTML = sig;
+}
+
+function requestLivesRefresh() {
+    if (document.hidden || $('tab-lives')?.classList.contains('hidden')) return;
+    void window.pokeHub.action(activeAccount, 'refresh-lives', {}).catch?.(() => {});
+}
+
 function renderLives(lv) {
     const twSummary = (lv.twitchRewards || [lv.rewardType || 'xp']).join('+').toUpperCase() || 'OFF';
     const kkSummary = (lv.kickRewards || [lv.rewardType || 'xp']).join('+').toUpperCase() || 'OFF';
     $('liveMinutes').textContent = fmtNum(lv.minutesWatched || 0);
     $('liveChests').textContent = fmtNum(lv.chestsClaimed || 0);
     $('liveRedeemed').textContent = fmtNum(lv.rewardsRedeemed || 0);
-    $('livesHead').textContent = lv.enabled ? `Coleta ativa · Twitch ${twSummary} · Kick ${kkSummary}` : 'Coleta desativada';
-    $('livesBonuses').textContent = `${formatBonusLine('TW', lv.activeBonuses?.twitch)}  |  ${formatBonusLine('KK', lv.activeBonuses?.kick)}`;
-    const fmtSmart = (label, st) => {
-        if (!st) return '';
-        if (st.allReached) return `${label}: todos >= ${formatBonusMins(st.targetMin)} ✓`;
-        return `${label}: próx. ${String(st.nextKind || '').toUpperCase()} (${formatBonusMins(st.nextMin)}/${formatBonusMins(st.targetMin)})`;
-    };
-    $('livesSmartLine').textContent = lv.smartBalance
-        ? `Gestor Inteligente (meta ${lv.targetHours || 24}h): ${fmtSmart('TW', lv.smartStatus?.twitch)}  |  ${fmtSmart('KK', lv.smartStatus?.kick)}`
-        : 'Gestor Inteligente: desligado (resgata apenas quando faltar <= 30m)';
+    const fresh = lv.balancesAt ? ` · pontos atualizados ${fmtAgo(lv.balancesAt)}` : '';
+    $('livesHead').textContent = lv.enabled
+        ? `Coleta ativa · Twitch ${twSummary} · Kick ${kkSummary}${fresh}`
+        : 'Coleta desativada';
+    renderBuffManager(lv);
 
     // Lista de lives com seletor individual de buff por canal
     const chanListEl = $('liveChannelList');
@@ -909,6 +1524,8 @@ function renderLives(lv) {
             nameEl.textContent = ch.channel;
             nameEl.title = ch.channel;
             info.appendChild(nameEl);
+            const watchChip = buildWatchChip(ch);
+            if (watchChip) info.appendChild(watchChip);
             if (typeof ch.balance === 'number') {
                 const ptsEl = document.createElement('span');
                 ptsEl.className = 'live-chan-pts';
@@ -1457,9 +2074,73 @@ function formatBytesMb(bytes) {
     return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const UPDATE_SNOOZE_KEY = 'nexo.updateSnooze';
+
+function readUpdateSnooze() {
+    try { return localStorage.getItem(UPDATE_SNOOZE_KEY) || ''; } catch { return ''; }
+}
+
+function writeUpdateSnooze(version) {
+    try { localStorage.setItem(UPDATE_SNOOZE_KEY, version); } catch { /* ignore */ }
+}
+
+let updateDoneBannerDismissed = false;
+const shortVer = (v) => String(v || '').replace(/\.0$/, '');
+
+// Faixa no topo: aparece sozinha quando ha versao nova (sem precisar abrir o menu),
+// quando a ultima atualizacao falhou e logo depois de atualizar.
+function renderUpdateBanner(st) {
+    const bar = $('updateBanner');
+    if (!bar) return;
+    const title = $('updateBannerTitle');
+    const sub = $('updateBannerSub');
+    const icon = $('updateBannerIcon');
+    const btnInstall = $('btnBannerInstall');
+    const btnNotes = $('btnBannerNotes');
+    const btnLater = $('btnBannerLater');
+    const busy = ['downloading', 'extracting', 'applying'].includes(st.status);
+    const canInstall = Boolean(st.hasUpdate && st.assetName && !st.isGitRepo);
+    let mode = '';
+
+    if (busy) {
+        mode = 'busy';
+        title.textContent = st.status === 'downloading'
+            ? `Baixando v${shortVer(st.latestVersion)} · ${st.percent || 0}%`
+            : 'Aplicando atualização: o Hub vai fechar e reabrir sozinho';
+        sub.textContent = 'Suas 4 contas, sessões e configurações ficam preservadas.';
+    } else if (st.failedTarget && st.hasUpdate) {
+        mode = 'error';
+        title.textContent = `A atualização para v${shortVer(st.failedTarget)} não foi aplicada`;
+        sub.textContent = `Clique em Tentar de novo. Detalhes em ${st.logPath || 'nexo-pokebot-last-update.log'}`;
+    } else if (st.hasUpdate && readUpdateSnooze() !== st.latestVersion) {
+        mode = 'available';
+        title.textContent = `Nova versão disponível: v${shortVer(st.latestVersion)}`;
+        const size = st.assetSize ? ` · ${formatBytesMb(st.assetSize)}` : '';
+        sub.textContent = st.isGitRepo
+            ? 'Pasta de desenvolvimento: atualize com git pull.'
+            : `Você está na v${shortVer(st.currentVersion)}${size}. Atualiza em 1 clique sem perder as contas.`;
+    } else if (st.justUpdatedFrom && !updateDoneBannerDismissed) {
+        mode = 'done';
+        title.textContent = `Atualizado para v${shortVer(st.currentVersion)}`;
+        sub.textContent = `Antes: v${shortVer(st.justUpdatedFrom)}. Veja o que mudou em Novidades.`;
+    }
+
+    bar.classList.toggle('hidden', !mode);
+    bar.classList.toggle('error', mode === 'error');
+    bar.classList.toggle('done', mode === 'done');
+    if (!mode) return;
+    icon.textContent = mode === 'error' ? '!' : mode === 'done' ? '✓' : '⬇';
+    btnInstall.classList.toggle('hidden', !(canInstall && (mode === 'available' || mode === 'error')));
+    btnInstall.textContent = mode === 'error' ? 'Tentar de novo' : 'Atualizar agora';
+    btnNotes.classList.toggle('hidden', busy);
+    btnLater.classList.toggle('hidden', busy);
+    btnLater.textContent = mode === 'done' ? 'Fechar' : 'Depois';
+}
+
 function renderUpdateUi(st) {
     if (!st) return;
     currentUpdateState = st;
+    renderUpdateBanner(st);
     const btn = $('btnUpdateToggle');
     const title = $('updatePopTitle');
     const verTag = $('updatePopVer');
@@ -1535,7 +2216,7 @@ function renderUpdateUi(st) {
             showToast({
                 kind: 'ok',
                 title: `Nova versão: v${st.latestVersion}`,
-                text: 'Clique em Atualizar no topo para baixar sem perder suas contas.',
+                text: 'Clique em Atualizar agora na faixa do topo. Suas contas ficam preservadas.',
             });
         }
     } else if (st.status === 'error') {
@@ -1562,6 +2243,8 @@ function renderUpdateUi(st) {
 
 function renderAll() {
     renderTopTabsAndSlots();
+    renderPanelsGrid();
+    if (viewMode === 'grid') renderGridToolbar();
     renderActiveAccountPanel();
 }
 
@@ -1628,6 +2311,26 @@ function wireEvents() {
         $('btnUpdateInstall')?.addEventListener('click', () => {
             void window.pokeHub.installUpdate();
         });
+        $('btnBannerInstall')?.addEventListener('click', () => {
+            void window.pokeHub.installUpdate();
+        });
+        $('btnBannerNotes')?.addEventListener('click', (ev) => {
+            ev.stopPropagation();
+            setPixOpen(false);
+            setUpdateOpen(true);
+        });
+        $('btnBannerLater')?.addEventListener('click', () => {
+            const st = currentUpdateState || {};
+            if (st.hasUpdate) writeUpdateSnooze(st.latestVersion);
+            updateDoneBannerDismissed = true;
+            renderUpdateBanner(st);
+        });
+        if (typeof window.pokeHub.onUpdateOpen === 'function') {
+            window.pokeHub.onUpdateOpen(() => {
+                setPixOpen(false);
+                setUpdateOpen(true);
+            });
+        }
         $('btnUpdateOpenRelease')?.addEventListener('click', () => {
             const url = currentUpdateState?.releaseUrl || 'https://github.com/felipegakkeku/nexo-pokebot/releases/latest';
             void window.pokeHub.openExternal(url, activeAccount);
@@ -1690,7 +2393,7 @@ function wireEvents() {
         if (webviews.has(activeAccount)) {
             await closeEmbeddedForAccount(activeAccount, { startHeadless: true });
         } else {
-            if (viewMode === 'panel-only') setViewMode('split');
+            if (viewMode === 'panel-only' || viewMode === 'panels-grid') setViewMode('split');
             await openEmbeddedForAccount(activeAccount);
         }
     });
@@ -1869,16 +2572,19 @@ function wireEvents() {
             const acc = Number(btn.dataset.slot);
             const act = btn.dataset.slotAct;
             if (act === 'mute') {
-                const wv = webviews.get(acc);
-                if (wv) {
-                    try {
-                        const nextMuted = !wv.isAudioMuted();
-                        wv.setAudioMuted(nextMuted);
-                        btn.textContent = nextMuted ? 'Mudo' : 'Som ON';
-                    } catch {
-                        // ignora antes do dom-ready
-                    }
-                }
+                setAccountMuted(acc, !isAccountMuted(acc));
+            } else if (act === 'max') {
+                gridState.max = gridState.max === acc ? 0 : acc;
+                gridState.hidden = gridState.hidden.filter((a) => a !== acc);
+                saveGridState();
+                applyGridLayout();
+                renderGridToolbar();
+            } else if (act === 'hide') {
+                if (!gridState.hidden.includes(acc)) gridState.hidden.push(acc);
+                if (gridState.max === acc) gridState.max = 0;
+                saveGridState();
+                applyGridLayout();
+                renderGridToolbar();
             } else if (act === 'focus') {
                 selectAccount(acc);
                 setViewMode('split');
@@ -1901,6 +2607,8 @@ function wireEvents() {
             }
         });
     });
+
+    initGridControls();
 
     // IPC callbacks from main process
     window.pokeHub.onWebviewSend(({ account, rawJson }) => {
@@ -1951,6 +2659,8 @@ function startPolling() {
             void pollSnapshots();
         }
     }, 1250);
+    // Pontos das lives: leitura leve a cada 20s enquanto a aba Lives estiver aberta
+    setInterval(requestLivesRefresh, 20_000);
     if (huntCountdownTimer) clearInterval(huntCountdownTimer);
     huntCountdownTimer = setInterval(() => {
         if (!document.hidden) {

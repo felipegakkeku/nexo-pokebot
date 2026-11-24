@@ -758,6 +758,55 @@ export const checkTwitchLiveBatch = async (ctx, channels = []) => {
     return out;
 };
 
+/**
+ * Leitura leve dos pontos de canal: uma unica consulta GQL para varios canais,
+ * sem pings, baus ou resgates. Usada para manter o painel de lives atualizado
+ * mesmo com o bot pausado.
+ * @param {object} ctx Contexto do modulo (CONFIG.live com token e estado).
+ * @param {string[]} logins Canais da Twitch.
+ * @returns {Promise<{ok: boolean, updated: number, error?: string|null}>}
+ */
+export const refreshTwitchBalances = async (ctx, logins = []) => {
+    const { CONFIG, state } = ctx;
+    const token = String(CONFIG.live?.twitchToken || '').trim();
+    const list = [...new Set((Array.isArray(logins) ? logins : [])
+        .map((l) => String(l || '').trim().toLowerCase())
+        .filter((l) => /^[a-z0-9_]{1,40}$/.test(l)))].slice(0, 30);
+    if (!token || list.length === 0) return { ok: false, updated: 0, error: token ? null : 'sem token' };
+    const res = await twitchGqlCall(ctx, { token, deviceId: String(CONFIG.live?.twitchDeviceId || '') }, {
+        query: 'query($l:[String!]){users(logins:$l){login stream{id} channel{self{communityPoints{balance}}}}}',
+        variables: { l: list },
+    });
+    const users = res?.data?.users;
+    if (!Array.isArray(users)) {
+        return { ok: false, updated: 0, error: res?.failed || res?.errors?.[0]?.message || null };
+    }
+    if (!state.liveStatus) state.liveStatus = { twitch: {}, kick: {} };
+    const keyByLow = new Map(Object.keys(state.liveStatus.twitch || {}).map((k) => [k.toLowerCase(), k]));
+    const now = Date.now();
+    let updated = 0;
+    for (const u of users) {
+        const login = String(u?.login || '').toLowerCase();
+        if (!login) continue;
+        const st = state.liveStatus.twitch[keyByLow.get(login) ?? login];
+        if (st) {
+            st.live = Boolean(u.stream?.id);
+            st.broadcastId = u.stream?.id || null;
+        }
+        const bal = u?.channel?.self?.communityPoints?.balance;
+        if (typeof bal === 'number') {
+            recordChannelBalance(state, 'twitch', login, bal);
+            if (st) {
+                st.balance = bal;
+                st.balanceAt = now;
+            }
+            updated += 1;
+        }
+    }
+    state.liveBalancesAt = now;
+    return { ok: true, updated };
+};
+
 const discoverSpadeUrl = async (ctx, login) => {
     const cached = sharedSpadeCache.get('twitch');
     if (cached && Date.now() - cached.at < SPADE_CACHE_MS) return cached.url;
@@ -894,6 +943,7 @@ export const stepTwitchChannel = async (ctx, login, { token = '', deviceId = '',
     const rewards = user.channel?.communityPointsSettings?.customRewards || [];
 
     status.live = Boolean(broadcastId);
+    status.broadcastId = broadcastId;
     status.error = token && !userId ? 'sessão Twitch não reconhecida' : null;
     let balance = typeof cp?.balance === 'number' ? cp.balance : null;
     const now = Date.now();
@@ -907,6 +957,7 @@ export const stepTwitchChannel = async (ctx, login, { token = '', deviceId = '',
 
     if (balance !== null) {
         recordChannelBalance(state, 'twitch', login, balance);
+        status.balanceAt = now;
         for (const k of LIVE_REWARD_KINDS) {
             if (!configuredKinds.includes(k)) {
                 rt.guardReads.twitch.delete(guardKey(channelKey, k));

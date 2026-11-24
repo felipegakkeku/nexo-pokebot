@@ -38,6 +38,7 @@ import {
     getEffectiveBonusStateForCtx,
     mergeGameWsMessage,
     runLiveCycle,
+    refreshTwitchBalances,
     selectChannelsToWatch,
 } from '../modules/live-rewards.js';
 import { createHeadlessHuntGuideEvaluator, describeHuntGuide, readHuntGuideInPage } from './hunt-guide.mjs';
@@ -120,6 +121,8 @@ const EDITABLE_CONFIG_KEYS = new Set([
     'liveWatchTwitch',
     'liveWatchKick',
     'liveAutoClaimChest',
+    'liveAutoFollow',
+    'liveStreakWatch',
     'liveAutoRedeem',
     'liveRewardType',
     'liveTwitchRewards',
@@ -256,6 +259,8 @@ function buildConfig(prefs = {}, saved = {}, overrides = {}, isolatedAccount = f
         liveWatchTwitch: p.liveWatchTwitch ?? true,
         liveWatchKick: p.liveWatchKick ?? true,
         liveAutoClaimChest: p.liveAutoClaimChest ?? true,
+        liveAutoFollow: p.liveAutoFollow ?? true,
+        liveStreakWatch: p.liveStreakWatch ?? true,
         liveAutoRedeem: p.liveAutoRedeem ?? true,
         liveRewardType: ['xp', 'captura', 'shiny'].includes(p.liveRewardType) ? p.liveRewardType : 'xp',
         liveTwitchRewards: Array.isArray(p.liveTwitchRewards) ? parseRewardKinds(p.liveTwitchRewards, []) : null,
@@ -374,6 +379,8 @@ function normalizeConfigPatch(current, patch = {}) {
     if (patch.liveWatchTwitch !== undefined) next.liveWatchTwitch = Boolean(patch.liveWatchTwitch);
     if (patch.liveWatchKick !== undefined) next.liveWatchKick = Boolean(patch.liveWatchKick);
     if (patch.liveAutoClaimChest !== undefined) next.liveAutoClaimChest = Boolean(patch.liveAutoClaimChest);
+    if (patch.liveAutoFollow !== undefined) next.liveAutoFollow = Boolean(patch.liveAutoFollow);
+    if (patch.liveStreakWatch !== undefined) next.liveStreakWatch = Boolean(patch.liveStreakWatch);
     if (patch.liveAutoRedeem !== undefined) next.liveAutoRedeem = Boolean(patch.liveAutoRedeem);
     if (typeof patch.liveRewardType === 'string' && ['xp', 'captura', 'shiny'].includes(patch.liveRewardType)) {
         next.liveRewardType = patch.liveRewardType;
@@ -1902,6 +1909,8 @@ export function createLiveRewardsBridge({
                     smartNote: stObj?.smartNote || '',
                     override: channelRewards[key] || '',
                     effectiveKinds: resolveChannelRewardKinds(liveCfgView, platform, low),
+                    balanceAt: Number(stObj?.balanceAt || 0),
+                    watch: platform === 'twitch' ? (liveState.liveWatch?.[low] || null) : null,
                 });
             };
             const gameList = liveState.liveGameData?.[platform]?.oficiais ?? liveState.liveGameData?.[platform]?.canaisConsultados ?? [];
@@ -1962,6 +1971,8 @@ export function createLiveRewardsBridge({
             hasTwitchToken: Boolean(cfg.liveTwitchToken),
             hasKickToken: Boolean(cfg.liveKickToken),
             minutesWatched: Number(liveState.stats.liveMinutesWatched || 0),
+            balancesAt: Number(liveState.liveBalancesAt || 0),
+            guardThresholdMin: Number(cfg.liveGuardThresholdMin ?? 30),
             chestsClaimed: Number(liveState.stats.liveChestsClaimed || 0),
             rewardsRedeemed: Number(liveState.stats.liveRewardsRedeemed || 0),
             officialUrls: officialLiveUrls(),
@@ -1982,10 +1993,46 @@ export function createLiveRewardsBridge({
         onLog?.('reward', `Lives: caixinha +50 resgatada em ${low}${source === 'auto' ? ' (automático)' : ''}.`);
     };
 
+    // Sessao no player real da Twitch (janela oculta do Hub): sequencia e seguir
+    const noteWatchSession = (channel, info = {}) => {
+        const low = String(channel || '').trim().toLowerCase();
+        if (!low) return;
+        if (!liveState.liveWatch) liveState.liveWatch = {};
+        const prev = liveState.liveWatch[low] || {};
+        const next = { ...prev, ...info, at: Date.now() };
+        if (info.following) next.following = true;
+        liveState.liveWatch[low] = next;
+        if (info.watching) return;
+        if (info.kind === 'watch' && info.ok) {
+            onLog?.('reward', `Lives: ${low} assistida por ${info.minutes} min no player da Twitch (conta para a sequência).`);
+        } else if (info.kind === 'watch' && info.reasonText) {
+            onLog?.('warn', `Lives: não consegui assistir ${low} no player da Twitch (${info.reasonText}).`);
+        }
+        if (info.followedNow) onLog?.('reward', `Lives: agora seguindo ${low} na Twitch.`);
+    };
+
+    // Pontos dos canais sem esperar o ciclo completo (funciona com o bot pausado)
+    let lastBalanceRefreshAt = 0;
+    let balanceRefreshInFlight = null;
+    const refreshBalances = () => {
+        const cfg = getConfig?.() || {};
+        if (cfg.liveEnabled === false || !cfg.liveTwitchToken) return Promise.resolve(false);
+        if (balanceRefreshInFlight) return balanceRefreshInFlight;
+        if (Date.now() - lastBalanceRefreshAt < 10_000) return Promise.resolve(false);
+        lastBalanceRefreshAt = Date.now();
+        const logins = getLivesSnapshot().channels.filter((c) => c.platform === 'twitch').map((c) => c.channel);
+        balanceRefreshInFlight = refreshTwitchBalances(liveCtx, logins)
+            .catch(() => null)
+            .finally(() => { balanceRefreshInFlight = null; });
+        return balanceRefreshInFlight;
+    };
+
     return {
         ingestWsMessage,
         runOnce,
         noteChestClaimed,
+        noteWatchSession,
+        refreshBalances,
         startTimer,
         stopTimer,
         setPaused,
@@ -3991,6 +4038,10 @@ export function createHeadlessController(options = {}) {
             liveBridge.runOnce({ force: true });
             return true;
         }
+        if (name === 'refresh-lives') {
+            void liveBridge.refreshBalances();
+            return true;
+        }
         if (name === 'reset-stats') {
             const isOnlineNow = status === 'connected' || status === 'bridge';
             stats = createFreshStats(isOnlineNow ? nowFn() : null);
@@ -4345,6 +4396,7 @@ export function createHeadlessController(options = {}) {
         getRawSession,
         getLiveCredentials,
         noteLiveChestClaimed: (channel, source) => liveBridge.noteChestClaimed(channel, source),
+        noteLiveWatchSession: (channel, info) => liveBridge.noteWatchSession(channel, info),
         syncWebviewSession,
         openGame,
         openLives,
@@ -4552,6 +4604,8 @@ export async function startGuiServer(options = {}) {
                 ok = controller.triggerAction('cancel-login');
             } else if (action === 'run-lives') {
                 ok = controller.triggerAction('run-lives');
+            } else if (action === 'refresh-lives') {
+                ok = controller.triggerAction('refresh-lives');
             } else if (action === 'reset-stats') {
                 ok = controller.triggerAction('reset-stats');
             } else if (action === 'login-twitch') {

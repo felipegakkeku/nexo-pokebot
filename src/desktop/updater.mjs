@@ -425,21 +425,51 @@ export async function downloadAndStageUpdate(options = {}) {
 }
 
 /**
- * Dispara o script PowerShell desacoplado para aplicar a atualizacao apos o fechamento do app.
+ * Monta o comando PowerShell que cria o processo do apply-update.ps1 via WMI (Win32_Process.Create).
+ * O processo nasce filho do WmiPrvSE, fora da arvore e do Job Object do app: sobrevive ao app fechar.
  * @param {string} scriptPath Caminho do apply-update.ps1.
+ * @returns {string}
  */
-export function launchApplyUpdateScript(scriptPath) {
-    const child = spawn(
+export function buildDetachedLaunchCommand(scriptPath) {
+    const cmdLine = `powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${resolve(scriptPath)}"`;
+    return [
+        "$si = New-CimInstance -ClassName Win32_ProcessStartup -ClientOnly -Property @{ ShowWindow = [uint16]0 }",
+        `$r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = '${escapePsSingle(cmdLine)}'; ProcessStartupInformation = $si }`,
+        'if ($r.ReturnValue -ne 0) { exit 1 }',
+        'Write-Output $r.ProcessId',
+    ].join('; ');
+}
+
+/**
+ * Dispara o script que aplica a atualizacao depois que o app fechar.
+ * Antes era um spawn "detached", mas o PowerShell morria junto com o app (mesmo Job
+ * Object do processo pai) e o update nunca era aplicado. Agora cria via WMI e so
+ * cai no spawn se o WMI falhar.
+ * @param {string} scriptPath Caminho do apply-update.ps1.
+ * @param {object} [options] Opcoes (execFileImpl/spawnImpl para teste).
+ * @returns {Promise<{ pid: number, method: 'wmi' | 'spawn' }>}
+ */
+export async function launchApplyUpdateScript(scriptPath, options = {}) {
+    const execFileImpl = options.execFileImpl || execFileAsync;
+    const spawnImpl = options.spawnImpl || spawn;
+    try {
+        const { stdout } = await execFileImpl(
+            'powershell.exe',
+            ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', buildDetachedLaunchCommand(scriptPath)],
+            { windowsHide: true, timeout: 20_000 }
+        );
+        const pid = Number.parseInt(String(stdout || '').trim().split(/\s+/).pop(), 10);
+        if (Number.isFinite(pid) && pid > 0) return { pid, method: 'wmi' };
+    } catch {
+        // segue para o spawn
+    }
+    const child = spawnImpl(
         'powershell.exe',
         ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', scriptPath],
-        {
-            detached: true,
-            stdio: 'ignore',
-            windowsHide: true,
-        }
+        { detached: true, stdio: 'ignore', windowsHide: true }
     );
-    child.unref();
-    return child;
+    child.unref?.();
+    return { pid: Number(child.pid) || 0, method: 'spawn' };
 }
 
 async function runCli() {
@@ -477,7 +507,7 @@ async function runCli() {
         },
     });
     console.log(`[Nexo Updater] Aplicando atualizacao para v${staged.version}...`);
-    launchApplyUpdateScript(staged.scriptPath);
+    await launchApplyUpdateScript(staged.scriptPath);
 }
 
 const isCli = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
