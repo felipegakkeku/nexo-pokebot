@@ -222,7 +222,10 @@
       </div>
       <div class="sl-bottom">
         <div class="sl-col"><h4>${IC('activity')}Últimos eventos</h4><ul class="sl-events"></ul></div>
-        <div class="sl-col"><h4>${IC('package')}Drops da sessão</h4><div class="sl-drops"></div></div>
+        <div class="sl-col sl-side">
+          <h4>${IC('tv')}Buffs das lives</h4><div class="sl-buffs lb-box"></div>
+          <h4>${IC('package')}Drops da sessão</h4><div class="sl-drops"></div>
+        </div>
       </div>`;
     const IMPORTANT_KINDS = new Set(['shiny', 'shiny-miss', 'reward', 'error', 'warn', 'ok']);
     const MISS_BALL_LABELS = { 1: 'Poke Ball', 2: 'Great Ball', 3: 'Super Ball', 4: 'Ultra Ball', 5: 'Beast Ball' };
@@ -279,7 +282,10 @@
         set('killsSub', `${String(st.killsPerMin || 0).replace('.', ',')}/min · ${st.avgKillSec ? `${String(st.avgKillSec).replace('.', ',')}s cada` : '-'}`);
         set('shiny', `${Number(st.shiniesCaptured || 0)}<small> / ${Number(st.shiniesSeen || 0)}</small>`);
         set('shinySub', Number(st.shiniesMissed || 0) ? `${st.shiniesMissed} escaparam` : `${fmtCompact(st.captures)} capturas`);
-        const evs = recentEvents(acc, 10);
+        const bbox = q('.sl-buffs');
+        const bHtml = buffsHtml(acc, true);
+        if (bbox.dataset.sig !== bHtml) { bbox.dataset.sig = bHtml; bbox.innerHTML = bHtml || '<span class="hint-text">Sem dados das lives ainda.</span>'; }
+        const evs = recentEvents(acc, 40);
         const evSig = evs.map((e) => e.id).join(',') + Math.floor(Date.now() / 30_000);
         const ul = q('.sl-events');
         if (ul.dataset.sig !== evSig) {
@@ -919,6 +925,7 @@
             grid: { layout: gridState.layout, order: [...(gridState.order || [])], hidden: [...(gridState.hidden || [])], max: gridState.max || 0, splitX: gridState.splitX, splitY: gridState.splitY },
             dockCols: [...dockCols], dockWeights: [...dockWeights],
             activityPinned, dockWidth, hudPos,
+            cards: { hidden: [...cardState.hidden], collapsed: [...cardState.collapsed] }, paneW,
         };
     }
     function applyLayout(l) {
@@ -930,6 +937,8 @@
         if (Array.isArray(l.dockCols)) { dockCols = [...l.dockCols]; dockWeights = [...(l.dockWeights || [])]; sanitizeCols(); saveDock(); }
         if (l.dockWidth) { dockWidth = l.dockWidth; LS.set('nexo.activityDockW', dockWidth); }
         if (l.hudPos) setHudPos(l.hudPos);
+        if (l.cards) { cardState = l.cards; sanitizeCards(); saveCards(); applyCards(); }
+        if (l.paneW != null) { paneW = Number(l.paneW) || 0; LS.set('nexo.paneW', paneW); applyPaneWidth(); }
         setActivityPinned(Boolean(l.activityPinned));
         if (l.viewMode && l.viewMode !== viewMode) setViewMode(l.viewMode);
         else { applyGridLayout(); renderGridToolbar(); buildDock(); }
@@ -1369,12 +1378,14 @@
         if (POPOUT) {
             renderPopoutBar();
             renderHero();
+            renderOverviewExtras();
             renderScope();
             ensureAria();
             return;
         }
         renderTabs();
         renderHero();
+        renderOverviewExtras();
         for (const acc of ACCOUNTS) {
             renderStageLive(acc);
             renderHud(acc);
@@ -1423,6 +1434,196 @@
         if (!view) return false;
         renderLogView(view);
         return true;
+    }
+
+    // ===== Buffs das lives: resumo usado na Visão geral e no painel vivo =====
+    const LB_KINDS = [['xp', 'XP'], ['captura', 'Captura'], ['shiny', 'Shiny']];
+    const LB_KIND_LABEL = { xp: 'XP', captura: 'Captura', shiny: 'Shiny' };
+    const fmtBuffMin = (m) => {
+        const v = Math.max(0, Math.round(Number(m) || 0));
+        if (v >= 1440) return `${Math.floor(v / 1440)}d ${Math.floor((v % 1440) / 60)}h`;
+        return v >= 60 ? `${Math.floor(v / 60)}h ${String(v % 60).padStart(2, '0')}m` : `${v}m`;
+    };
+    function buffsHtml(acc, compact = false) {
+        const lv = snapshots[acc]?.lives;
+        if (!lv) return '';
+        const bonus = lv.activeBonuses || {};
+        const plats = [
+            ['kick', 'Kick', 'kk', Boolean(lv.hasKickToken), lv.kickRewards],
+            ['twitch', 'Twitch', 'tw', Boolean(lv.hasTwitchToken), lv.twitchRewards],
+        ];
+        const kinds = LB_KINDS.map(([k, label]) => {
+            let activeCount = 0;
+            const rows = plats.map(([p, pl, cls, tok, listRaw]) => {
+                const list = Array.isArray(listRaw) ? listRaw : [lv.rewardType || 'xp'];
+                const m = Math.max(0, Number(bonus[p]?.[k]) || 0);
+                if (m > 0) activeCount += 1;
+                const collects = tok && list.includes(k);
+                const txt = !tok ? 'sem conta' : m > 0 ? fmtBuffMin(m) : collects ? 'sem buff' : 'não coleta';
+                const st = !tok ? 'off' : m <= 0 ? (collects ? 'empty' : 'off') : m <= 30 ? 'low' : 'ok';
+                return `<div class="lb-row ${st}"><span class="plat-badge ${cls}">${pl}</span><span class="lb-time">${txt}</span></div>`;
+            }).join('');
+            const tag = activeCount ? `+${activeCount * 15}%` : 'parado';
+            return `<div class="lb-kind ${k}${activeCount ? ' on' : ''}"><div class="lb-head"><i></i><b>${label}</b><span class="lb-tag" title="Cada plataforma com o buff ativo soma +15%">${tag}</span></div>${rows}</div>`;
+        }).join('');
+        const next = [];
+        for (const [p, pl] of plats) {
+            const k = lv.smartStatus?.[p]?.nextKind;
+            if (lv.smartBalance && k) next.push(`${LB_KIND_LABEL[k] || k} na ${pl}`);
+        }
+        const foot = [
+            lv.enabled ? 'Coleta ligada' : 'Coleta desligada',
+            next.length ? `próximo: ${next.join(', ')}` : '',
+            compact ? '' : `${fmtNum(lv.minutesWatched || 0)} min assistidos`,
+            compact ? '' : `${fmtNum(lv.chestsClaimed || 0)} baús +50`,
+        ].filter(Boolean).join(' · ');
+        return `<div class="lb-grid">${kinds}</div><div class="lb-foot">${escapeHtml(foot)}</div>`;
+    }
+    const COL_MODE_LABEL = { off: 'Farm normal', pokedex: 'Completar Pokédex', topcatch: 'Top Catch' };
+    function renderOverviewExtras() {
+        const s = snapshots[activeAccount] || {};
+        const box = $('ovBuffs');
+        if (box) {
+            const html = buffsHtml(activeAccount) || '<span class="hint-text">Conecte a conta para ver os buffs.</span>';
+            if (box.dataset.sig !== html) { box.dataset.sig = html; box.innerHTML = html; }
+        }
+        const pill = $('colModePill');
+        if (pill) {
+            const mode = s.collection?.mode || s.config?.farmObjective || 'off';
+            const txt = COL_MODE_LABEL[mode] || mode;
+            if (pill.textContent !== txt) pill.textContent = txt;
+            pill.classList.toggle('on', mode !== 'off');
+        }
+    }
+
+    // ===== Cards: fechar, recolher e devolver =====
+    const CARD_LABEL = {
+        poke: 'Pokémon ativo', buffs: 'Buffs das lives', collection: 'Pokédex e Top Catch', perf: 'Desempenho',
+        drops: 'Drops', inv: 'Mochila', quick: 'Ações rápidas', hunt: 'Hunt e objetivo', routines: 'Rotinas',
+        prefs: 'Preferências', alerts: 'Alertas', conn: 'Contas vinculadas', liveStats: 'Recompensas da conta',
+        channels: 'Canais e chat', shinyFeed: 'Shinies do servidor',
+    };
+    let cardState = LS.get('nexo.cards', null);
+    function sanitizeCards() {
+        if (!cardState || typeof cardState !== 'object') cardState = {};
+        const clean = (a) => (Array.isArray(a) ? [...new Set(a.filter((k) => CARD_LABEL[k]))] : []);
+        cardState = { hidden: clean(cardState.hidden), collapsed: clean(cardState.collapsed) };
+    }
+    sanitizeCards();
+    const saveCards = () => LS.set('nexo.cards', cardState);
+    function setupCards() {
+        document.querySelectorAll('.card[data-card]').forEach((card) => {
+            if (card.dataset.cardReady) return;
+            let head = card.querySelector(':scope > .card-head-row');
+            if (!head) {
+                const h3 = card.querySelector(':scope > h3');
+                if (!h3) return;
+                head = document.createElement('div');
+                head.className = 'card-head-row';
+                h3.before(head);
+                head.append(h3);
+            }
+            card.dataset.cardReady = '1';
+            head.classList.add('has-tools');
+            const name = CARD_LABEL[card.dataset.card] || 'card';
+            const tools = document.createElement('span');
+            tools.className = 'card-tools';
+            tools.innerHTML = `<button type="button" class="icon-btn card-tool" data-card-act="collapse" title="Recolher ou abrir (clique no título também)" aria-label="Recolher ${esc(name)}">${IC('chevron')}</button>`
+                + `<button type="button" class="icon-btn card-tool" data-card-act="hide" title="Fechar este card. Ele volta pelo rodapé da aba." aria-label="Fechar ${esc(name)}">${IC('x')}</button>`;
+            head.append(tools);
+        });
+        document.querySelectorAll('.tab-panel').forEach((panel) => {
+            if (!panel.querySelector('.card[data-card]') || panel.querySelector(':scope > .cards-restore')) return;
+            const bar = document.createElement('div');
+            bar.className = 'cards-restore hidden';
+            panel.append(bar);
+        });
+        applyCards();
+    }
+    function applyCards() {
+        const hidden = new Set(cardState.hidden);
+        const collapsed = new Set(cardState.collapsed);
+        document.querySelectorAll('.card[data-card]').forEach((card) => {
+            const k = card.dataset.card;
+            card.classList.toggle('card-off', hidden.has(k));
+            card.classList.toggle('is-collapsed', collapsed.has(k));
+            card.querySelector('[data-card-act="collapse"]')?.setAttribute('aria-expanded', String(!collapsed.has(k)));
+        });
+        document.querySelectorAll('.tab-panel > .cards-restore').forEach((bar) => {
+            const keys = [...bar.parentElement.querySelectorAll('.card[data-card].card-off')].map((c) => c.dataset.card);
+            bar.classList.toggle('hidden', !keys.length);
+            const html = keys.length
+                ? `<span>${IC('eyeoff')}Cards fechados:</span>${keys.map((k) => `<button type="button" class="filter-pill" data-card-show="${esc(k)}" title="Mostrar de novo">${escapeHtml(CARD_LABEL[k] || k)}</button>`).join('')}`
+                : '';
+            if (bar.dataset.sig !== html) { bar.dataset.sig = html; bar.innerHTML = html; }
+        });
+    }
+    function toggleCardKey(list, k, on) {
+        const set = new Set(cardState[list]);
+        if (on) set.add(k); else set.delete(k);
+        cardState[list] = [...set];
+        saveCards();
+        applyCards();
+    }
+    function onCardClick(ev) {
+        const show = ev.target.closest('[data-card-show]');
+        if (show) { toggleCardKey('hidden', show.dataset.cardShow, false); return; }
+        const act = ev.target.closest('[data-card-act]');
+        const card = ev.target.closest('.card[data-card]');
+        if (!card) return;
+        const k = card.dataset.card;
+        if (act?.dataset.cardAct === 'hide') { toggleCardKey('hidden', k, true); return; }
+        const onTitle = !act && ev.target.closest('.card-head-row > h3');
+        if (act?.dataset.cardAct === 'collapse' || onTitle) toggleCardKey('collapsed', k, !cardState.collapsed.includes(k));
+    }
+
+    // ===== Painel lateral com largura arrastável (modo Painel + Jogo) =====
+    const PANE_MIN = 380;
+    let paneW = Number(LS.get('nexo.paneW', 0)) || 0;
+    function applyPaneWidth() {
+        const pane = document.querySelector('.control-pane');
+        if (!pane) return;
+        if (POPOUT || !paneW) {
+            pane.style.removeProperty('width');
+            pane.style.removeProperty('max-width');
+            pane.style.removeProperty('min-width');
+            return;
+        }
+        const max = Math.max(PANE_MIN, Math.round(window.innerWidth * 0.72));
+        pane.style.width = `${Math.max(PANE_MIN, Math.min(max, paneW))}px`;
+        pane.style.maxWidth = 'none';
+        pane.style.minWidth = `${PANE_MIN}px`;
+    }
+    function ensurePaneResizer() {
+        const pane = document.querySelector('.control-pane');
+        if (!pane || POPOUT || pane.querySelector(':scope > .pane-resizer')) return;
+        const grip = document.createElement('div');
+        grip.className = 'pane-resizer';
+        grip.title = 'Arraste para alargar o painel · duplo clique volta ao tamanho padrão';
+        grip.setAttribute('role', 'separator');
+        grip.setAttribute('aria-orientation', 'vertical');
+        grip.setAttribute('aria-label', 'Largura do painel');
+        pane.append(grip);
+        grip.addEventListener('dblclick', () => { paneW = 0; LS.set('nexo.paneW', 0); applyPaneWidth(); });
+        grip.addEventListener('pointerdown', (ev) => {
+            ev.preventDefault();
+            grip.setPointerCapture(ev.pointerId);
+            const startX = ev.clientX;
+            const startW = pane.getBoundingClientRect().width;
+            document.body.classList.add('is-resizing');
+            const move = (e) => { paneW = Math.round(startW + (e.clientX - startX)); applyPaneWidth(); };
+            const up = () => {
+                grip.removeEventListener('pointermove', move);
+                grip.removeEventListener('pointerup', up);
+                document.body.classList.remove('is-resizing');
+                paneW = Math.round(pane.getBoundingClientRect().width);
+                LS.set('nexo.paneW', paneW);
+            };
+            grip.addEventListener('pointermove', move);
+            grip.addEventListener('pointerup', up);
+        });
+        applyPaneWidth();
+        window.addEventListener('resize', applyPaneWidth);
     }
 
     window.hubUi = {
@@ -1548,9 +1749,13 @@
         window.addEventListener('blur', () => { if (!document.hidden) markAway(); });
         window.addEventListener('focus', () => markBack(false));
 
+        setupCards();
+        document.addEventListener('click', onCardClick);
+        $('btnOvGoLives')?.addEventListener('click', () => goAccount(activeAccount, 'lives'));
         if (!POPOUT) {
             ensureActivityDock();
             buildDock();
+            ensurePaneResizer();
         }
         syncMenuState();
         ensureAria(true);

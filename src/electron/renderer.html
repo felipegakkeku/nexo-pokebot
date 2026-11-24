@@ -14,7 +14,7 @@
       <div class="brand">
         <img src="../../assets/nexo-pokebot-icon.png" width="28" height="28" alt="Nexo PokeBot" class="brand-icon" />
         <span class="brand-title">Nexo PokeBot</span>
-        <span class="brand-ver">v1.0.14</span>
+        <span class="brand-ver">v1.0.15</span>
       </div>
 
       <nav class="account-tabs" id="accountTabs" aria-label="Contas">
@@ -77,7 +77,7 @@
           <div class="update-popover hidden" id="updatePopover" role="dialog" aria-label="Atualização do Nexo PokeBot">
             <div class="update-pop-head">
               <span class="update-pop-title" id="updatePopTitle">Atualizações</span>
-              <span class="update-ver-tag" id="updatePopVer">v1.0.14</span>
+              <span class="update-ver-tag" id="updatePopVer">v1.0.15</span>
             </div>
             <div class="update-pop-desc" id="updatePopDesc">Verificando Releases do GitHub...</div>
             <div class="update-progress hidden" id="updateProgWrap">
@@ -212,7 +212,7 @@
           <!-- VISÃO GERAL -->
           <div id="tab-overview" class="tab-panel">
             <div class="mode-warn-banner hidden" id="modeWarnBanner" role="alert"></div>
-            <div class="card">
+            <div class="card" data-card="poke">
               <h3>Pokémon ativo e hunt</h3>
               <div class="poke-row">
                 <div class="poke-sprite" id="pokeSprite">?</div>
@@ -226,38 +226,24 @@
                   <div class="hunt-guide-badge" id="huntGuideLine"></div>
                 </div>
               </div>
-              <div class="hunt-row">
-                <select id="huntSelect"></select>
-                <button type="button" class="btn" id="btnChangeHunt">Trocar hunt</button>
-                <button type="button" class="btn center-btn" id="btnGoCenter" title="Ir para o Centro Médico (disponível ao sair de combate, mesma contagem da troca de hunt)">Centro Médico</button>
-              </div>
-              <div class="pending-hunt-bar hidden" id="pendingHuntBar">
-                <span id="pendingHuntText"></span>
-                <button type="button" class="btn sm" id="btnCancelPendingHunt">Cancelar</button>
-              </div>
             </div>
 
-            <div class="card collection-card" id="collectionCard">
+            <div class="card" data-card="buffs" id="ovBuffsCard">
+              <div class="card-head-row">
+                <h3>Buffs das lives</h3>
+                <button type="button" class="btn sm" id="btnOvGoLives" title="Abrir a aba Lives com canais e o gestor de buffs">Ver lives</button>
+              </div>
+              <div class="lb-box" id="ovBuffs"><span class="hint-text">Conecte a conta para ver os buffs.</span></div>
+            </div>
+
+            <div class="card collection-card" id="collectionCard" data-card="collection">
               <div class="card-head-row">
                 <h3>Pokédex &amp; Top Catch</h3>
                 <div class="col-head-tools">
+                  <span class="col-mode-pill" id="colModePill" title="Objetivo de coleção. Muda em Automação, no card Hunt e objetivo"></span>
                   <span class="tc-timer-pill" id="tcTimer" title="Tempo restante da semana atual do evento Top Catch (reseta domingo 00h Brasília)">Sem dados</span>
                   <button type="button" class="btn sm" id="btnRefreshTopCatch" title="Atualizar lista semanal e ranking do Top Catch">↻</button>
                 </div>
-              </div>
-              <div class="col-mode-row" id="colModeRow" role="group" aria-label="Objetivo de farm">
-                <button type="button" class="col-mode-btn active" data-col-mode="off">Normal</button>
-                <button type="button" class="col-mode-btn" data-col-mode="pokedex">Completar Pokédex</button>
-                <button type="button" class="col-mode-btn" data-col-mode="topcatch">Top Catch</button>
-              </div>
-              <div class="col-focus-row" id="colFocusRow">
-                <label for="colFocusSelect">Trajeto (/hunt)</label>
-                <select id="colFocusSelect">
-                  <option value="xp">XP/h (/hunt)</option>
-                  <option value="ouro">Ouro/h (/hunt)</option>
-                  <option value="shiny">Shiny/h (/hunt)</option>
-                  <option value="fast">Mais rápido (menor nível)</option>
-                </select>
               </div>
               <div class="tc-grid">
                 <div class="tc-stat">
@@ -282,7 +268,7 @@
               <div class="col-status hidden" id="colStatusLine"></div>
             </div>
 
-            <div class="card">
+            <div class="card" data-card="perf">
               <div class="card-head-row">
                 <h3>Desempenho e eficiência</h3>
                 <button type="button" class="btn sm" id="btnResetStats" title="Zerar contadores e drops desta sessão">Zerar sessão</button>
@@ -304,7 +290,7 @@
               </div>
             </div>
 
-            <div class="card" id="dropsCard">
+            <div class="card" id="dropsCard" data-card="drops">
               <div class="card-head-row">
                 <h3>Drops da sessão</h3>
                 <span class="focus-badge" id="dropsFocusBadge">XP / Gold / Shiny</span>
@@ -321,12 +307,12 @@
               <div class="recent-drops" id="recentDropsList"></div>
             </div>
 
-            <div class="card">
+            <div class="card" data-card="inv">
               <h3>Mochila</h3>
               <div class="inv-grid" id="invGrid"></div>
             </div>
 
-            <div class="card">
+            <div class="card" data-card="quick">
               <h3>Ações rápidas</h3>
               <div class="quick-grid">
                 <button type="button" class="btn" id="btnRestockNow">Repor itens</button>
@@ -358,7 +344,35 @@
               <span class="scope-hint">Rotinas e preferências valem para a conta escolhida no topo. Salva sozinho a cada mudança.</span>
               <button type="button" class="btn sm" id="btnCopyCfg" title="Copia rotinas e preferências desta conta para as outras três" data-icon="copy">Copiar para as outras contas</button>
             </div>
-            <div class="card">
+            <div class="card" data-card="hunt">
+              <h3>Hunt e objetivo</h3>
+              <div class="hunt-row">
+                <select id="huntSelect" aria-label="Hunt"></select>
+                <button type="button" class="btn" id="btnChangeHunt">Trocar hunt</button>
+                <button type="button" class="btn center-btn" id="btnGoCenter" title="Ir para o Centro Médico (disponível ao sair de combate, mesma contagem da troca de hunt)">Centro Médico</button>
+              </div>
+              <div class="pending-hunt-bar hidden" id="pendingHuntBar">
+                <span id="pendingHuntText"></span>
+                <button type="button" class="btn sm" id="btnCancelPendingHunt">Cancelar</button>
+              </div>
+              <div class="cfg-group-title">Objetivo de coleção</div>
+              <div class="col-mode-row" id="colModeRow" role="group" aria-label="Objetivo de farm">
+                <button type="button" class="col-mode-btn active" data-col-mode="off">Normal</button>
+                <button type="button" class="col-mode-btn" data-col-mode="pokedex">Completar Pokédex</button>
+                <button type="button" class="col-mode-btn" data-col-mode="topcatch">Top Catch</button>
+              </div>
+              <div class="col-focus-row" id="colFocusRow">
+                <label for="colFocusSelect">Trajeto (/hunt)</label>
+                <select id="colFocusSelect">
+                  <option value="xp">XP/h (/hunt)</option>
+                  <option value="ouro">Ouro/h (/hunt)</option>
+                  <option value="shiny">Shiny/h (/hunt)</option>
+                  <option value="fast">Mais rápido (menor nível)</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="card" data-card="routines">
               <h3>Rotinas automáticas</h3>
               <div class="toggle-list" id="cfgToggles">
                 <div class="cfg-group-title">Farm</div>
@@ -383,7 +397,7 @@
               <div class="mode-warn-box" id="cfgModeWarnBox"></div>
             </div>
 
-            <div class="card">
+            <div class="card" data-card="prefs">
               <h3>Preferências e limites</h3>
               <div class="form-grid" id="cfgFields">
                 <div class="cfg-group-title">Captura e mercado</div>
@@ -412,7 +426,7 @@
                 </div>
                 <div class="field"><label for="cReserve">Reserva mínima gold</label><input type="number" id="cReserve" min="0" max="100000000" step="5000" /></div>
                 <div class="field"><label for="cTargetRevives">Alvo revives</label><input type="number" id="cTargetRevives" min="0" max="5000" step="5" /></div>
-                <div class="cfg-group-title">Hunt e coleção</div>
+                <div class="cfg-group-title">Acompanhamento da /hunt</div>
                 <div class="field"><label for="cGuideMode">Acompanhamento /hunt</label>
                   <select id="cGuideMode">
                     <option value="off">Desligado</option>
@@ -427,14 +441,14 @@
                     <option value="shiny">Shiny/h</option>
                   </select>
                 </div>
-                <div class="field"><label for="cFarmObjective">Objetivo de coleção</label>
+                <div class="field hidden"><label for="cFarmObjective">Objetivo de coleção</label>
                   <select id="cFarmObjective">
                     <option value="off">Desligado (farm normal)</option>
                     <option value="pokedex">Completar Pokédex</option>
                     <option value="topcatch">Modo Top Catch (semanal)</option>
                   </select>
                 </div>
-                <div class="field"><label for="cFarmObjectiveFocus">Trajeto da coleção (/hunt)</label>
+                <div class="field hidden"><label for="cFarmObjectiveFocus">Trajeto da coleção (/hunt)</label>
                   <select id="cFarmObjectiveFocus">
                     <option value="xp">XP/h (/hunt)</option>
                     <option value="ouro">Ouro/h (/hunt)</option>
@@ -519,7 +533,7 @@
               </div>
             </div>
 
-            <div class="card sound-card" id="soundCard">
+            <div class="card sound-card" id="soundCard" data-card="alerts">
               <div class="card-head-row">
                 <h3>Alertas</h3>
                 <span class="scope-badge all" data-icon="sliders">Vale para as 4 contas</span>
@@ -699,7 +713,7 @@
 
           <!-- CONEXÕES -->
           <div id="tab-connections" class="tab-panel hidden">
-            <div class="card">
+            <div class="card" data-card="conn">
               <h3>Contas vinculadas</h3>
               <div class="field" style="margin-bottom:8px;">
                 <label for="cBrowserProfile">Perfil externo do Chrome, Edge ou Brave (opcional)</label>
@@ -754,7 +768,7 @@
 
           </div>
           <div id="tab-lives" class="tab-panel hidden">
-            <div class="card live-overview">
+            <div class="card live-overview" data-card="liveStats">
               <h3>Recompensas da conta</h3>
               <div class="live-metrics">
                 <div><strong id="liveMinutes">—</strong><span>Minutos assistidos</span></div>
@@ -764,7 +778,7 @@
               <div class="hunt-note" id="livesHead"></div>
               <div class="buff-manager" id="buffManager"></div>
             </div>
-            <div class="card">
+            <div class="card" data-card="channels">
               <h3>Canais e chat</h3>
               <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
                 <button type="button" class="btn sm" id="btnOpenLives">Abrir Lives Oficiais</button>
@@ -786,7 +800,7 @@
               <div class="log-view" id="logViewMain" data-log-view="main"></div>
               <div class="log-box hidden" id="logBox"></div>
             </div>
-            <div class="card"><h3>Últimos shinies do servidor</h3><ul id="shinyFeed" class="shiny-feed"></ul></div>
+            <div class="card" data-card="shinyFeed"><h3>Últimos shinies do servidor</h3><ul id="shinyFeed" class="shiny-feed"></ul></div>
           </div>
         </div>
       </section>

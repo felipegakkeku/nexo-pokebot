@@ -4,6 +4,15 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+## 1.0.15
+
+- **Painel com largura arrastável**: no modo Painel + Jogo, arraste a borda direita do painel para alargar (até 72% da janela); duplo clique volta ao tamanho padrão.
+- **Cards que fecham e recolhem**: cada card tem ⌄ para recolher (clicar no título também) e ✕ para fechar. Os fechados aparecem no rodapé da aba em **Cards fechados** e voltam com um clique. Layouts salvos guardam os cards e a largura do painel.
+- **Layout que se ajusta à largura**: com espaço sobrando, os cards ficam lado a lado (2 colunas a partir de 900 px, 3 a partir de 1400 px) e os números de Desempenho, Mochila e Ações rápidas se espalham em mais colunas.
+- **Visão geral só com dados**: ganhou o card **Buffs das lives** (tempo de XP, Captura e Shiny na Kick e na Twitch, bônus somado e próximo resgate) e uma etiqueta com o objetivo de coleção no card Pokédex e Top Catch.
+- **Configuração foi para Automação**: o novo card **Hunt e objetivo**, no topo da Automação, reúne a troca de hunt, o Centro Médico e o objetivo de coleção (Normal, Completar Pokédex, Top Catch) com o trajeto.
+- **Tela Headless**: a coluna da direita mostra também os buffs das lives e os últimos eventos preenchem a altura.
+
 ## 1.0.14
 
 - **Poção mais econômica (restock otimizado)**: nova opção em **Poção para comprar**. Calcula o gold por HP que cada poção cura de verdade no Pokémon ativo (o que passa do HP que falta abaixo do limiar se perde) e compra e põe em 1º na fila do "Usar Poções" a que rende mais. Em Pokémon de muito HP a Small vira uma por segundo e sai mais cara que uma Hyper ou Ultimate; poção que cura menos de 10% do HP fica por último. O registro avisa quando a escolha muda.
