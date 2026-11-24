@@ -1071,9 +1071,10 @@ function renderUpdateUi(st) {
     const btnCheck = $('btnUpdateCheck');
     const brandVer = document.querySelector('.brand-ver');
 
-    const curVer = st.currentVersion || '1.0.0';
+    const curVer = st.currentVersion || '1.0.1';
     const shortCur = curVer.replace(/\.0$/, '');
     if (brandVer) brandVer.textContent = `v${shortCur}`;
+    document.title = `Nexo PokeBot v${shortCur}`;
 
     const hasUpd = Boolean(st.hasUpdate);
     const busy = st.status === 'checking' || st.status === 'downloading' || st.status === 'extracting' || st.status === 'applying';

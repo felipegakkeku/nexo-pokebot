@@ -3955,7 +3955,7 @@ export function createHeadlessController(options = {}) {
             : (config.browserProfile && activeExistingProfile?.id ? activeExistingProfile.id : (config.browserProfile || ''));
 
         return {
-            version: '1.0',
+            version: '1.0.1',
             status,
             mode: connectionMode,
             lastError,

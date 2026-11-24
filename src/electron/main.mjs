@@ -734,7 +734,7 @@ async function createMainWindow() {
         show: false,
         autoHideMenuBar: true,
         backgroundColor: '#0a0f19',
-        title: 'Nexo PokeBot v1.0',
+        title: `Nexo PokeBot v${installedVersion}`,
         ...(icon ? { icon } : {}),
         webPreferences: {
             webviewTag: true,

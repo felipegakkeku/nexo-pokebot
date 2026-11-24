@@ -18,8 +18,8 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("Nexo PokeBot: Hub multi-contas e automacao desenvolvidos especificamente para o PokeIdle")]
 [assembly: AssemblyProduct("Nexo PokeBot")]
 [assembly: AssemblyCompany("Nexo")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.0.1.0")]
+[assembly: AssemblyFileVersion("1.0.1.0")]
 
 namespace PokeBotDesktop
 {

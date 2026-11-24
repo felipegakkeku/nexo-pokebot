@@ -2,6 +2,15 @@
 
 Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova versão (o workflow usa o texto da seção como nota da Release).
 
+## 1.0.1
+
+Correções de estabilidade no **Gestor Inteligente de Buffs** e isolamento multi-conta das lives:
+
+- **Isolamento completo por conta nas lives (`src/modules/live-rewards.js`, `src/headless/gui-server.mjs`)**: cada uma das 4 contas agora mantém seu próprio estado de execução (pings da Twitch, WebSockets e leitura de pontos da Kick, `guardReads`, cooldowns de resgate, cache de integridade e `dispose` individual), eliminando o bloqueio mútuo entre a Conta 1 e as Contas 2 a 4.
+- **Gestor Inteligente sem starvation de XP**: quando há buffs zerados ou atrasados disponíveis no canal (ex.: Captura ou Shiny), o gestor agora reserva os pontos do canal em vez de gastar repetidamente em XP, aplica desempate LRU em empates, mantém a mesma regra no `runBonusGuard` (canais offline), estima o bônus recém-resgatado imediatamente e respeita a meta no clique manual de **Coletar das lives**.
+- **Visibilidade por canal na aba Lives**: exibe logo abaixo do canal o motivo de espera (ex.: `guardando p/ CAPTURA (500 pts)` ou `próx. CAPTURA (5000 pts · 10h)`).
+- **Título e versão dinâmicos no Hub**: versão lida automaticamente do `package.json` na barra superior e título da janela.
+
 ## 1.0.0
 
 Primeiro lançamento oficial do **Nexo PokeBot** (versão 1.0), desenvolvido especificamente para o **PokeIdle (`pokeidle.io`)**, consolidando a linhagem 6.x do userscript em um hub desktop multi-contas completo:
