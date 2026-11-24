@@ -126,6 +126,19 @@ parentPort?.on('message', async (msg) => {
             parentPort.postMessage({ id, result: null });
             return;
         }
+        const ranked = pool
+            .filter((row) => row?.slug)
+            .map((row) => ({
+                slug: String(row.slug),
+                name: String(row.nome || row.slug),
+                level: Number(row.nivel || 0),
+                region: String(row.regiao || ''),
+                value: Number({ xp: row.xpPokemonH, ouro: row.ouroH, shiny: row.shinyH }[metric] || 0),
+                xpH: Number(row.xpPokemonH || 0),
+                goldH: Number(row.ouroH || 0),
+                shinyH: Number(row.shinyH || 0),
+                unsafe: Boolean(row.umHit || Number(row.mortesH || 0) >= 0.5),
+            }));
         parentPort.postMessage({
             id,
             result: {
@@ -137,6 +150,7 @@ parentPort?.on('message', async (msg) => {
                 region: best.regiao,
                 value,
                 unsafe: Boolean(best.umHit || Number(best.mortesH || 0) >= 0.5),
+                ranked,
                 source: 'headless',
             },
         });

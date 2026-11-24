@@ -234,6 +234,51 @@
               </div>
             </div>
 
+            <div class="card collection-card" id="collectionCard">
+              <div class="card-head-row">
+                <h3>Pokédex &amp; Top Catch</h3>
+                <div class="col-head-tools">
+                  <span class="tc-timer-pill" id="tcTimer" title="Tempo restante da semana atual do evento Top Catch (reseta domingo 00h Brasília)">Sem dados</span>
+                  <button type="button" class="btn sm" id="btnRefreshTopCatch" title="Atualizar lista semanal e ranking do Top Catch">↻</button>
+                </div>
+              </div>
+              <div class="col-mode-row" id="colModeRow" role="group" aria-label="Objetivo de farm">
+                <button type="button" class="col-mode-btn active" data-col-mode="off">Normal</button>
+                <button type="button" class="col-mode-btn" data-col-mode="pokedex">Completar Pokédex</button>
+                <button type="button" class="col-mode-btn" data-col-mode="topcatch">Top Catch</button>
+              </div>
+              <div class="col-focus-row" id="colFocusRow">
+                <label for="colFocusSelect">Trajeto (/hunt)</label>
+                <select id="colFocusSelect">
+                  <option value="xp">XP/h (/hunt)</option>
+                  <option value="ouro">Ouro/h (/hunt)</option>
+                  <option value="shiny">Shiny/h (/hunt)</option>
+                  <option value="fast">Mais rápido (menor nível)</option>
+                </select>
+              </div>
+              <div class="tc-grid">
+                <div class="tc-stat">
+                  <span>Top Catch (semana)</span>
+                  <b id="tcCount">0</b>
+                  <small id="tcCountSub">conecte para sincronizar</small>
+                </div>
+                <div class="tc-stat">
+                  <span>Ranking Top Catch</span>
+                  <b id="tcRank">-</b>
+                  <small id="tcRankSub">sem ranking</small>
+                </div>
+              </div>
+              <div class="tc-milestone">
+                <div class="tc-milestone-head">
+                  <span id="tcMilestoneTxt">Marco: 0 / 10</span>
+                  <span id="tcMilestoneReward">30m XP</span>
+                </div>
+                <div class="tc-bar"><div class="tc-bar-fill" id="tcMilestoneFill" style="width:0%"></div></div>
+              </div>
+              <div class="col-dex-line" id="dexSummary">Pokédex: conecte para carregar hunts liberadas</div>
+              <div class="col-status hidden" id="colStatusLine"></div>
+            </div>
+
             <div class="card">
               <div class="card-head-row">
                 <h3>Desempenho e eficiência</h3>
@@ -379,6 +424,21 @@
                     <option value="xp">XP/h</option>
                     <option value="ouro">Ouro/h</option>
                     <option value="shiny">Shiny/h</option>
+                  </select>
+                </div>
+                <div class="field"><label for="cFarmObjective">Objetivo de coleção</label>
+                  <select id="cFarmObjective">
+                    <option value="off">Desligado (farm normal)</option>
+                    <option value="pokedex">Completar Pokédex</option>
+                    <option value="topcatch">Modo Top Catch (semanal)</option>
+                  </select>
+                </div>
+                <div class="field"><label for="cFarmObjectiveFocus">Trajeto da coleção (/hunt)</label>
+                  <select id="cFarmObjectiveFocus">
+                    <option value="xp">XP/h (/hunt)</option>
+                    <option value="ouro">Ouro/h (/hunt)</option>
+                    <option value="shiny">Shiny/h (/hunt)</option>
+                    <option value="fast">Mais rápido (menor nível)</option>
                   </select>
                 </div>
                 <div class="field"><label for="cLiveTargetHours">Meta por buff (lives)</label>

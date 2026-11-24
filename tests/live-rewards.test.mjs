@@ -25,8 +25,50 @@ import {
     stepKickChannel,
     runLiveCycle,
     mergeGameWsMessage,
+    parseRetryAfterMs,
+    getPlatformRateLimit,
+    resetLiveRateLimits,
 } from '../src/modules/live-rewards.js';
 import { createRuntime } from '../src/modules/runtime.js';
+
+test('live: Retry-After aceita segundos e data sem encurtar a espera do servidor', () => {
+    const now = Date.UTC(2026, 10, 24, 12);
+    assert.equal(parseRetryAfterMs('900', now), 900_000);
+    assert.equal(parseRetryAfterMs(new Date(now + 1_800_000).toUTCString(), now), 1_800_000);
+    assert.equal(parseRetryAfterMs('inválido', now), null);
+});
+
+test('live: uma resposta 429 bloqueia requisições já enfileiradas de outras contas', async () => {
+    resetLiveRateLimits();
+    let calls = 0;
+    const ctx = () => ({
+        CONFIG: { live: {} },
+        state: { stats: {} },
+        net: {
+            paceMs: 5,
+            async fetch() {
+                calls += 1;
+                return { status: 429, ok: false, headers: { 'Retry-After': '900' } };
+            },
+        },
+    });
+    try {
+        for (const platform of ['twitch', 'kick']) {
+            const step = platform === 'twitch' ? stepTwitchChannel : stepKickChannel;
+            const before = calls;
+            const other = platform === 'twitch' ? 'kick' : 'twitch';
+            const otherBefore = getPlatformRateLimit(other).consecutive;
+            const result = await Promise.all([step(ctx(), 'a'), step(ctx(), 'b'), step(ctx(), 'c', { force: true })]);
+            assert.equal(calls, before + 1, platform);
+            assert.ok(result.every((item) => item.error?.includes('429')));
+            assert.equal(getPlatformRateLimit(platform).consecutive, 1);
+            assert.ok(getPlatformRateLimit(platform).remainingMs > 890_000);
+            assert.equal(getPlatformRateLimit(other).consecutive, otherBefore);
+        }
+    } finally {
+        resetLiveRateLimits();
+    }
+});
 
 test('live: atualização só de bônus preserva a lista oficial e lista vazia substitui a anterior', () => {
     const state = {};

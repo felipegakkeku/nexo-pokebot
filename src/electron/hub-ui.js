@@ -991,6 +991,8 @@
         cTargetRevives: 'Quantos revives manter. 0 desliga a compra.',
         cGuideMode: 'Acompanha a recomendação do /hunt: só avisa ou troca de hunt sozinho, sempre no tempo exato de saída de combate.',
         cGuideMetric: 'O que o /hunt deve priorizar ao recomendar hunt.',
+        cFarmObjective: 'Alterna entre farm normal, Completar Pokédex (captura espécies ainda não registradas) e Modo Top Catch (captura espécies ainda não pegas nesta semana do evento, mesmo já tendo na Pokédex, e troca para o próximo mapa).',
+        cFarmObjectiveFocus: 'Define qual trajeto do /hunt priorizar ao escolher o próximo mapa da Pokédex ou Top Catch (XP/h, Ouro/h, Shiny/h ou menor nível).',
         cLiveTargetHours: 'Quantas horas guardar de cada buff das lives.',
         cLiveTier: 'Qual pacote de recompensa comprar com os pontos das lives.',
     };

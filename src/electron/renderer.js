@@ -1179,6 +1179,8 @@ function readConfigForm() {
         minGoldReserve: Math.max(0, Number($('cReserve').value) || 0),
         huntGuideMode: $('cGuideMode').value,
         huntGuideMetric: $('cGuideMetric').value,
+        farmObjective: $('cFarmObjective')?.value || 'off',
+        farmObjectiveFocus: $('cFarmObjectiveFocus')?.value || 'xp',
         liveRewardType: fallbackKind,
         liveTwitchRewards,
         liveKickRewards,
@@ -1273,6 +1275,7 @@ function renderConfigModePreview() {
     const caidosOn = Boolean($('cCaidos')?.checked);
     const livesOn = Boolean($('cLives')?.checked);
     const smartOn = Boolean($('cLiveSmart')?.checked);
+    const objMode = $('cFarmObjective')?.value || 'off';
 
     const items = [];
     if (pingOnly) {
@@ -1283,10 +1286,13 @@ function renderConfigModePreview() {
         });
     } else {
         if (!caidosOn) {
+            const objLabel = objMode === 'pokedex' ? 'Completar Pokédex' : (objMode === 'topcatch' ? 'Modo Top Catch' : '');
             items.push({
-                cls: 'warn',
-                title: 'Limitação ativa: Captura automática desligada',
-                detail: 'O bot não vai lançar Pokébolas em Pokémon caídos nem em Shinies.',
+                cls: objLabel ? 'danger' : 'warn',
+                title: objLabel ? `Limitação ativa: ${objLabel} exige captura automática` : 'Limitação ativa: Captura automática desligada',
+                detail: objLabel
+                    ? `Sem "Capturar Pokémon caídos", o modo ${objLabel} não captura os Pokémon pendentes para avançar de mapa.`
+                    : 'O bot não vai lançar Pokébolas em Pokémon caídos nem em Shinies.',
             });
         }
         if (serverEco) {
@@ -1496,6 +1502,7 @@ function renderActiveAccountPanel() {
         huntSel.value = t.huntSlug;
     }
     refreshHuntAndCenterButtons();
+    renderCollectionCard(data);
     renderVoteBar(data);
 
     // KPIs e Eficiência
@@ -1638,6 +1645,8 @@ function renderActiveAccountPanel() {
         $('cReserve').value = cfg.minGoldReserve ?? 0;
         $('cGuideMode').value = cfg.huntGuideMode || 'off';
         $('cGuideMetric').value = cfg.huntGuideMetric || 'xp';
+        if ($('cFarmObjective')) $('cFarmObjective').value = cfg.farmObjective || 'off';
+        if ($('cFarmObjectiveFocus')) $('cFarmObjectiveFocus').value = cfg.farmObjectiveFocus || 'xp';
         $('cLiveTier').value = cfg.liveRewardTier || 'smart';
         $('cLiveMaxTw').value = cfg.liveMaxTwitchSlots ?? 4;
         $('cLiveMaxKk').value = cfg.liveMaxKickSlots ?? 2;
@@ -2016,6 +2025,7 @@ function refreshHuntAndCenterButtons() {
             pendingBar.classList.add('hidden');
         }
     }
+    refreshTopCatchTimer(data);
 }
 
 const TOAST_ICONS = {
@@ -2320,8 +2330,8 @@ function isToastWorthyLog(entry) {
     const txt = String(entry.text || '');
     if (k === 'shiny' || k === 'shiny-miss' || k === 'reward' || k === 'error') return true;
     if (k === 'warn') return /sess[aã]o|combate|falha|desconect|expir|erro|morreu|morte|cancelad|limita|shiny|captura|somente ping|feed de campo/i.test(txt);
-    if (k === 'ok') return /troca de hunt|centro m[eé]dico|equipe curada|conectad|cookies|sincronizad|salva/i.test(txt);
-    if (k === 'info') return /\/hunt recomenda|troca .* agendada|indo para o centro/i.test(txt);
+    if (k === 'ok') return /troca de hunt|centro m[eé]dico|equipe curada|conectad|cookies|sincronizad|salva|pok[eé]dex|top catch/i.test(txt);
+    if (k === 'info') return /\/hunt recomenda|troca .* agendada|indo para o centro|pok[eé]dex|top catch/i.test(txt);
     return false;
 }
 
@@ -2489,6 +2499,140 @@ function fmtShortDuration(ms) {
     if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
     if (m > 0) return `${m}m`;
     return `${Math.max(1, totalSec)}s`;
+}
+
+function fmtEventCountdown(ms) {
+    const totalSec = Math.max(0, Math.floor(Number(ms || 0) / 1000));
+    if (totalSec <= 0) return 'Encerrando...';
+    const d = Math.floor(totalSec / 86400);
+    const h = Math.floor((totalSec % 86400) / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    const s = totalSec % 60;
+    if (d > 0) return `${d}d ${h}h ${String(m).padStart(2, '0')}m`;
+    if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m ${String(s).padStart(2, '0')}s`;
+    return `${m}m ${String(s).padStart(2, '0')}s`;
+}
+
+function refreshTopCatchTimer(data = snapshots[activeAccount]) {
+    const timerEl = $('tcTimer');
+    if (!timerEl) return;
+    const tc = data?.collection?.topCatch;
+    if (!tc?.endMs) {
+        if (timerEl.textContent !== 'Sem dados') timerEl.textContent = 'Sem dados';
+        timerEl.classList.remove('ending');
+        return;
+    }
+    const remMs = Math.max(0, Number(tc.endMs) - Date.now());
+    const label = remMs > 0 ? `Falta ${fmtEventCountdown(remMs)}` : 'Virando semana...';
+    if (timerEl.textContent !== label) timerEl.textContent = label;
+    timerEl.classList.toggle('ending', remMs > 0 && remMs < 12 * 3600_000);
+    const tip = `Semana Top Catch ${tc.week || ''} (reseta domingo 00h Brasília)`;
+    if (timerEl.title !== tip) timerEl.title = tip;
+}
+
+function renderCollectionCard(data = snapshots[activeAccount]) {
+    const card = $('collectionCard');
+    if (!card) return;
+    const col = data?.collection || {};
+    const mode = col.mode || data?.config?.farmObjective || 'off';
+    const focus = col.focus || data?.config?.farmObjectiveFocus || 'xp';
+
+    document.querySelectorAll('#colModeRow [data-col-mode]').forEach((btn) => {
+        btn.classList.toggle('active', btn.dataset.colMode === mode);
+    });
+    const focusSel = $('colFocusSelect');
+    if (focusSel && document.activeElement !== focusSel && focusSel.value !== focus) {
+        focusSel.value = focus;
+    }
+    $('colFocusRow')?.classList.toggle('is-dim', mode === 'off');
+
+    refreshTopCatchTimer(data);
+
+    const tc = col.topCatch || {};
+    const dex = col.pokedex || {};
+    const isOnline = data?.status === 'connected' || data?.status === 'bridge';
+
+    const countEl = $('tcCount');
+    const countSubEl = $('tcCountSub');
+    if (countEl) {
+        countEl.textContent = `${fmtNum(tc.count || 0)} espécies`;
+    }
+    if (countSubEl) {
+        if (tc.loaded && Number(tc.unlockedTotal || 0) > 0) {
+            countSubEl.textContent = `${fmtNum(tc.unlockedCaptured)}/${fmtNum(tc.unlockedTotal)} liberadas (${tc.pct || 0}%) · ${fmtNum(tc.unlockedPendingHunts)} hunts`;
+        } else if (isOnline) {
+            countSubEl.textContent = 'clique em ↻ para carregar lista semanal';
+        } else {
+            countSubEl.textContent = 'conecte para sincronizar';
+        }
+    }
+
+    const rk = tc.ranking || null;
+    const rankEl = $('tcRank');
+    const rankSubEl = $('tcRankSub');
+    const rankTile = rankEl?.closest('.tc-stat');
+    if (rankTile) rankTile.classList.toggle('in-prize', Boolean(rk?.inPrizeZone));
+    if (rankEl && rankSubEl) {
+        if (rk && rk.pos != null) {
+            const prizeTag = rk.prize ? ` · ${rk.prize.diamantes} 💎${rk.prize.selo ? ' ★' : ''}` : '';
+            rankEl.textContent = `#${fmtNum(rk.pos)}${prizeTag}`;
+            if (rk.inPrizeZone && rk.above) {
+                const diff = Math.max(1, Number(rk.above.count || 0) - Number(tc.count || 0));
+                rankSubEl.textContent = `Acima: ${rk.above.nick || '#'} (+${fmtNum(diff)}) · 1º: ${fmtNum(rk.top1Count)}`;
+            } else if (rk.inPrizeZone) {
+                rankSubEl.textContent = rk.pos === 1 ? 'Líder do Top Catch semanal!' : `1º lugar: ${fmtNum(rk.top1Count)} espécies`;
+            } else if (rk.top100Cutoff != null) {
+                const diff100 = Math.max(1, Number(rk.top100Cutoff) - Number(tc.count || 0));
+                rankSubEl.textContent = `Top 100: ${fmtNum(rk.top100Cutoff)} (+${fmtNum(diff100)}) · 1º: ${fmtNum(rk.top1Count)}`;
+            } else {
+                rankSubEl.textContent = `${fmtNum(rk.totalRanked)} no ranking`;
+            }
+        } else if (rk && rk.top1Count != null) {
+            rankEl.textContent = 'Sem captura';
+            rankSubEl.textContent = `1º: ${fmtNum(rk.top1Count)} · Top 100: ${fmtNum(rk.top100Cutoff ?? 0)}`;
+        } else {
+            rankEl.textContent = '-';
+            rankSubEl.textContent = isOnline ? 'clique em ↻ para buscar ranking' : 'sem ranking';
+        }
+    }
+
+    const ms = tc.milestone || null;
+    const msTxt = $('tcMilestoneTxt');
+    const msRew = $('tcMilestoneReward');
+    const msFill = $('tcMilestoneFill');
+    if (ms && msTxt && msRew && msFill) {
+        if (ms.completedAll) {
+            msTxt.textContent = `Marcos: ${fmtNum(ms.current)} / 600`;
+            msRew.textContent = 'Todos concluídos ✓';
+            msFill.style.width = '100%';
+            msFill.classList.add('done');
+        } else {
+            msTxt.textContent = `Marco: ${fmtNum(ms.current)} / ${fmtNum(ms.next)} (faltam ${fmtNum(ms.remainingToNext)})`;
+            msRew.textContent = ms.nextRewardLabel || '';
+            msFill.style.width = `${Math.max(0, Math.min(100, Number(ms.progressPct || 0)))}%`;
+            msFill.classList.remove('done');
+        }
+    }
+
+    const dexEl = $('dexSummary');
+    if (dexEl) {
+        if (Number(dex.unlockedTotal || 0) > 0) {
+            dexEl.textContent = `Pokédex: ${fmtNum(dex.unlockedCaptured)} / ${fmtNum(dex.unlockedTotal)} liberadas (${dex.pct || 0}%) · faltam ${fmtNum(dex.unlockedPendingHunts)} hunts · ${fmtNum(dex.capturedTotal)} registradas`;
+        } else if (Number(dex.capturedTotal || 0) > 0) {
+            dexEl.textContent = `Pokédex: ${fmtNum(dex.capturedTotal)} espécies registradas`;
+        } else {
+            dexEl.textContent = 'Pokédex: conecte para carregar hunts liberadas';
+        }
+    }
+
+    const stEl = $('colStatusLine');
+    if (stEl) {
+        const showStatus = mode !== 'off' && Boolean(col.statusText);
+        stEl.classList.toggle('hidden', !showStatus);
+        stEl.classList.toggle('done', Boolean(col.completed));
+        stEl.classList.toggle('topcatch', mode === 'topcatch' && !col.completed);
+        if (showStatus) stEl.textContent = col.statusText;
+    }
 }
 
 function renderVoteBar(data = snapshots[activeAccount]) {
@@ -2891,6 +3035,20 @@ function wireEvents() {
     });
     $('btnGoCenter').addEventListener('click', () => sendAction('go-center'));
     $('btnCancelPendingHunt').addEventListener('click', () => sendAction('cancel-pending-hunt'));
+    $('colModeRow')?.addEventListener('click', async (ev) => {
+        const btn = ev.target.closest('[data-col-mode]');
+        if (!btn) return;
+        const nextMode = btn.dataset.colMode || 'off';
+        if ($('cFarmObjective')) $('cFarmObjective').value = nextMode;
+        renderConfigModePreview();
+        await sendAction('set-config', { config: { farmObjective: nextMode } });
+    });
+    $('colFocusSelect')?.addEventListener('change', async (ev) => {
+        const nextFocus = ev.target.value || 'xp';
+        if ($('cFarmObjectiveFocus')) $('cFarmObjectiveFocus').value = nextFocus;
+        await sendAction('set-config', { config: { farmObjectiveFocus: nextFocus } });
+    });
+    $('btnRefreshTopCatch')?.addEventListener('click', () => sendAction('refresh-topcatch'));
 
     $('btnResetStats').addEventListener('click', () => sendAction('reset-stats'));
     $('dropFilterBar').addEventListener('click', async (ev) => {
@@ -2964,7 +3122,7 @@ function wireEvents() {
             });
         }
     });
-    $('cfgFields').addEventListener('change', () => setConfigDirty(true));
+    $('cfgFields').addEventListener('change', () => { setConfigDirty(true); renderConfigModePreview(); });
     $('cfgFields').addEventListener('input', () => setConfigDirty(true));
     $('cfgChips').addEventListener('change', () => setConfigDirty(true));
     $('btnSaveCfg').addEventListener('click', saveConfig);
@@ -3138,8 +3296,8 @@ function startPolling() {
             void pollSnapshots();
         }
     }, 1250);
-    // Pontos das lives: leitura leve a cada 20s enquanto a aba Lives estiver aberta
-    setInterval(requestLivesRefresh, 20_000);
+    // Pontos das lives: leitura leve a cada 45s enquanto a aba Lives estiver aberta (evita 429)
+    setInterval(requestLivesRefresh, 45_000);
     if (huntCountdownTimer) clearInterval(huntCountdownTimer);
     huntCountdownTimer = setInterval(() => {
         if (!document.hidden) {

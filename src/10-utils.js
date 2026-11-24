@@ -23,9 +23,15 @@
                     timeout: options.timeoutMs || 15000,
                     onload: (res) => {
                         const textVal = res.responseText ?? '';
+                        const headers = Object.create(null);
+                        for (const line of String(res.responseHeaders || '').split(/\r?\n/)) {
+                            const colon = line.indexOf(':');
+                            if (colon > 0) headers[line.slice(0, colon).trim().toLowerCase()] = line.slice(colon + 1).trim();
+                        }
                         resolve({
                             ok: res.status >= 200 && res.status < 300,
                             status: res.status,
+                            headers,
                             text: async () => textVal,
                             json: async () => JSON.parse(textVal),
                         });

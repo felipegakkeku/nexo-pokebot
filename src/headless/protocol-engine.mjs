@@ -418,11 +418,16 @@ export function computeModeWarnings({
     }
 
     if (cfg.caidosEnabled === false) {
+        const isCollectionMode = cfg.farmObjective === 'pokedex' || cfg.farmObjective === 'topcatch';
         warnings.push({
             code: 'caidos-disabled',
-            severity: 'warn',
-            title: 'Captura automática desligada',
-            detail: 'O bot não vai lançar Pokébolas em Pokémon caídos nem em Shinies enquanto "Capturar Pokémon caídos" estiver desmarcado.',
+            severity: isCollectionMode ? 'danger' : 'warn',
+            title: isCollectionMode
+                ? `Captura automática desligada (${cfg.farmObjective === 'pokedex' ? 'Pokédex' : 'Top Catch'} travado)`
+                : 'Captura automática desligada',
+            detail: isCollectionMode
+                ? 'O modo de coleção precisa da captura automática ligada para registrar espécies e trocar de mapa.'
+                : 'O bot não vai lançar Pokébolas em Pokémon caídos nem em Shinies enquanto "Capturar Pokémon caídos" estiver desmarcado.',
             fixLabel: 'Reativar captura',
             fixConfig: { caidosEnabled: true },
         });
@@ -607,11 +612,13 @@ export function evaluateHeadlessTick({
     tracker = {},
     nowMs = Date.now(),
     forceRestock = false,
+    desiredMissingKeys = null,
 }) {
     if (!state) return [];
     tracker.slotThrownAt ??= {};
 
     const actions = [];
+    const collectionMode = config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch';
 
     const preferredPotionIds = normalizePotionIds(config.preferredPotionIds);
     const currentPotionIds = Array.isArray(state.automation?.potionIds)
@@ -630,9 +637,12 @@ export function evaluateHeadlessTick({
             preferredPotionIds.some((id, idx) => currentPotionIds[idx] !== id)
         )
     );
-    const autoSetCooldownMs = needsPotionSync ? 5_000 : 30_000;
+    const needsCollectionControl = collectionMode && config.caidosEnabled !== false &&
+        Boolean(state.automation?.autoBallSemParar || state.automation?.autoBallAteCapturar);
+    const autoSetCooldownMs = needsPotionSync || needsCollectionControl ? 5_000 : 30_000;
 
-    if ((needsNativeHeal || needsPotionSync) && nowMs - (tracker.lastAutoSetAt || 0) >= autoSetCooldownMs) {
+    if ((needsNativeHeal || needsPotionSync || needsCollectionControl) &&
+        nowMs - (tracker.lastAutoSetAt || 0) >= autoSetCooldownMs) {
         const autoPayload = { t: 'auto.set' };
         for (const campo of CAMPOS_AUTO_SET) {
             if (state.automation[campo] !== undefined) {
@@ -646,6 +656,10 @@ export function evaluateHeadlessTick({
         }
         if (preferredPotionIds.length > 0) {
             autoPayload.potionIds = [...preferredPotionIds];
+        }
+        if (needsCollectionControl) {
+            autoPayload.autoBallAteCapturar = false;
+            autoPayload.autoBallSemParar = false;
         }
         tracker.lastAutoSetAt = nowMs;
         actions.push(autoPayload);
@@ -663,11 +677,30 @@ export function evaluateHeadlessTick({
 
     if (config.caidosEnabled !== false && field) {
         let corpses = field.getFallenCorpses(nowMs, config.prioritizeExpiring !== false);
+        const hasMissingSet = desiredMissingKeys instanceof Set && desiredMissingKeys.size > 0;
+        const isDesiredMissing = (c) => {
+            if (!hasMissingSet) return false;
+            const k = chavePokedex(c.speciesId);
+            return k != null && desiredMissingKeys.has(String(k));
+        };
         const vipAutoBall = Boolean(
             state.loja?.vip && (state.automation?.autoBallSemParar || state.automation?.autoBallAteCapturar)
         );
-        if (vipAutoBall) {
-            corpses = corpses.filter((c) => c.shiny === true);
+        if (collectionMode) {
+            corpses = corpses.filter(isDesiredMissing);
+        } else if (vipAutoBall) {
+            // No modo Top Catch / Pokedex, o autoBallAteCapturar nativo nao lanca em especies ja na Pokedex;
+            // preservamos shinies E especies ainda pendentes no objetivo ativo.
+            corpses = corpses.filter((c) => c.shiny === true || isDesiredMissing(c));
+        }
+        if (hasMissingSet && corpses.length > 1) {
+            corpses = [...corpses].sort((a, b) => {
+                if (Boolean(a.shiny) !== Boolean(b.shiny)) return a.shiny ? -1 : 1;
+                const ma = isDesiredMissing(a);
+                const mb = isDesiredMissing(b);
+                if (ma !== mb) return ma ? -1 : 1;
+                return 0;
+            });
         }
         const target = corpses.find((c) => nowMs - (tracker.slotThrownAt[c.slot] || 0) >= 1200);
         if (target) {
@@ -805,4 +838,404 @@ export function evaluateHeadlessTick({
     }
 
     return actions;
+}
+
+// ===== Pokedex & Top Catch (protocolo oficial PokeIdle) =====
+
+const FUSO_BRASILIA_MS = 3 * 60 * 60_000;
+const SEMANA_MS = 7 * 24 * 60 * 60_000;
+
+export const TOP_CATCH_MILESTONES = Object.freeze([
+    Object.freeze({ marco: 10, label: '30m XP' }),
+    Object.freeze({ marco: 25, label: '30m PokeXP' }),
+    Object.freeze({ marco: 50, label: '1h XP + 1h PokeXP' }),
+    Object.freeze({ marco: 100, label: '30m Shiny' }),
+    Object.freeze({ marco: 150, label: '30m XP + PokeXP + Shiny' }),
+    Object.freeze({ marco: 200, label: '1h XP + PokeXP + Shiny' }),
+    Object.freeze({ marco: 300, label: '2h XP + PokeXP + Shiny' }),
+    Object.freeze({ marco: 400, label: '12h Shiny' }),
+    Object.freeze({ marco: 600, label: '1.000 Beast Balls + 24h Shiny' }),
+]);
+
+export const TOP_CATCH_PRIZE_TIERS = Object.freeze([
+    Object.freeze({ ate: 1, diamantes: 50, selo: true }),
+    Object.freeze({ ate: 10, diamantes: 20, selo: false }),
+    Object.freeze({ ate: 100, diamantes: 5, selo: false }),
+]);
+
+/**
+ * Resolve a chave canonica da Pokedex / Top Catch para um pokeId (identico a shared/pokedex.mjs).
+ * @param {number|string|null|undefined} pokeId ID da especie no servidor.
+ * @returns {number|null} Chave numerica da Pokedex ou null.
+ */
+export function chavePokedex(pokeId) {
+    const id = Number(pokeId);
+    if (!Number.isFinite(id) || id < 1) return null;
+    if (id >= 10501 && id <= 10548) return id - 8500;
+    if (id >= 2001 && id < 2059) return id;
+    if (id >= 13000) return id % 1000;
+    return id;
+}
+
+/**
+ * Calcula a chave YYYY-MM-DD (domingo em Brasilia UTC-3) da semana atual do Top Catch.
+ * @param {number} [nowMs=Date.now()] Timestamp do servidor em ms.
+ * @returns {string} Data do domingo inicial da semana.
+ */
+export function getTopCatchWeekKey(nowMs = Date.now()) {
+    const brasilia = new Date(Number(nowMs) - FUSO_BRASILIA_MS);
+    const desdeDomingo = brasilia.getUTCDay();
+    return new Date(Date.UTC(
+        brasilia.getUTCFullYear(),
+        brasilia.getUTCMonth(),
+        brasilia.getUTCDate() - desdeDomingo,
+    )).toISOString().slice(0, 10);
+}
+
+/**
+ * Retorna a janela (inicio, fim, restante em ms) de uma semana do Top Catch.
+ * @param {string|null} weekKey Chave YYYY-MM-DD (usa semana atual se vazia).
+ * @param {number} [nowMs=Date.now()] Timestamp atual do servidor em ms.
+ * @returns {{ week: string, startMs: number, endMs: number, remainingMs: number, ending: boolean }}
+ */
+export function getTopCatchWeekWindow(weekKey = null, nowMs = Date.now()) {
+    const week = typeof weekKey === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(weekKey)
+        ? weekKey
+        : getTopCatchWeekKey(nowMs);
+    const startMs = Date.parse(`${week}T00:00:00Z`) + FUSO_BRASILIA_MS;
+    const endMs = startMs + SEMANA_MS;
+    const remainingMs = Math.max(0, endMs - Number(nowMs));
+    return { week, startMs, endMs, remainingMs, ending: remainingMs <= 0 };
+}
+
+/**
+ * Calcula o progresso do jogador nos marcos de recompensa do Top Catch.
+ * @param {number} count Total de especies capturadas na semana.
+ * @param {number} [paidMilestone=0] Ultimo marco ja pago pelo servidor.
+ * @returns {object} Progresso detalhado de marcos.
+ */
+export function getTopCatchMilestoneProgress(count, paidMilestone = 0) {
+    const n = Math.max(0, Math.floor(Number(count) || 0));
+    let previous = 0;
+    let nextObj = null;
+    for (const m of TOP_CATCH_MILESTONES) {
+        if (n < m.marco) {
+            nextObj = m;
+            break;
+        }
+        previous = m.marco;
+    }
+    const span = nextObj ? Math.max(1, nextObj.marco - previous) : 1;
+    const progressPct = nextObj
+        ? Math.max(0, Math.min(100, Math.round(((n - previous) / span) * 100)))
+        : 100;
+    return {
+        current: n,
+        previous,
+        next: nextObj ? nextObj.marco : null,
+        nextRewardLabel: nextObj ? nextObj.label : 'Todos os marcos concluídos',
+        remainingToNext: nextObj ? Math.max(0, nextObj.marco - n) : 0,
+        progressPct,
+        paidMilestone: Math.max(0, Math.floor(Number(paidMilestone) || 0)),
+        completedAll: !nextObj,
+    };
+}
+
+/**
+ * Calcula a posicao atual do jogador no ranking semanal de Top Catch (identico a tcPosicaoCom).
+ * @param {string} nick Nick do treinador.
+ * @param {number} count Especies capturadas na semana.
+ * @param {number} trainerLevel Nivel do treinador (desempate).
+ * @param {Array<object>|null} linhas Linhas de ranking.capturas do servidor.
+ * @returns {object|null} Posicao, premio e diferencas.
+ */
+export function computeTopCatchRankingPosition(nick, count, trainerLevel = 0, linhas = null) {
+    if (!Array.isArray(linhas) || linhas.length === 0) return null;
+    const n = Math.max(0, Math.floor(Number(count) || 0));
+    const lvl = Number(trainerLevel) || 0;
+    const lowNick = String(nick || '').toLowerCase();
+    const iEu = lowNick ? linhas.findIndex((l) => String(l?.nick || '').toLowerCase() === lowNick) : -1;
+    const outros = lowNick ? linhas.filter((l) => String(l?.nick || '').toLowerCase() !== lowNick) : linhas;
+    const daLista = iEu >= 0 && (Number(linhas[iEu]?.valor) || 0) === n;
+    const acima = daLista
+        ? linhas.slice(0, iEu)
+        : outros.filter((l) => {
+            const v = Number(l?.valor) || 0;
+            return v > n || (v === n && (Number(l?.level) || 0) >= lvl);
+        });
+    const pos = n > 0 ? acima.length + 1 : null;
+    const tier = pos != null ? TOP_CATCH_PRIZE_TIERS.find((f) => pos <= f.ate) ?? null : null;
+    const aboveEntry = acima.length > 0 ? acima[acima.length - 1] : null;
+    const top100Entry = linhas.length >= 100 ? linhas[99] : linhas[linhas.length - 1];
+    const top10Entry = linhas.length >= 10 ? linhas[9] : null;
+    const top1Entry = linhas[0] || null;
+    return {
+        pos,
+        inPrizeZone: Boolean(tier),
+        prize: tier ? { diamantes: tier.diamantes, selo: Boolean(tier.selo) } : null,
+        above: aboveEntry ? { nick: aboveEntry.nick || '', count: Number(aboveEntry.valor || 0) } : null,
+        top100Cutoff: top100Entry ? Number(top100Entry.valor || 0) : null,
+        top10Cutoff: top10Entry ? Number(top10Entry.valor || 0) : null,
+        top1Count: top1Entry ? Number(top1Entry.valor || 0) : null,
+        totalRanked: linhas.length,
+    };
+}
+
+/**
+ * Extrai o conjunto de chaves de especies ja capturadas (c > 0) na Pokedex do jogador.
+ * @param {Record<string, object>|null} pokedex Mapa estado.pokedex.
+ * @param {Iterable<string|number>|null} [extraKeys=null] Chaves otimistas capturadas na sessao.
+ * @returns {Set<string>} Conjunto de chaves canonicas (string).
+ */
+export function getPokedexCapturedSet(pokedex, extraKeys = null) {
+    const out = new Set();
+    if (pokedex && typeof pokedex === 'object') {
+        for (const [rawKey, entry] of Object.entries(pokedex)) {
+            if (!(Number(entry?.c || 0) > 0)) continue;
+            const norm = chavePokedex(rawKey);
+            if (norm != null) out.add(String(norm));
+        }
+    }
+    if (extraKeys) {
+        for (const k of extraKeys) {
+            const norm = chavePokedex(k);
+            if (norm != null) out.add(String(norm));
+            else if (k != null && String(k)) out.add(String(k));
+        }
+    }
+    return out;
+}
+
+/**
+ * Lista as especies de uma hunt que ainda nao estao presentes em `capturedSet`.
+ * @param {object|null} hunt Entrada da hunt contendo `especies` ou `speciesId`.
+ * @param {Set<string>|null} capturedSet Conjunto de chaves ja capturadas.
+ * @returns {Array<{ pokeId: number, key: string, name: string }>} Especies faltantes.
+ */
+export function getHuntMissingSpecies(hunt, capturedSet) {
+    if (!hunt || typeof hunt !== 'object') return [];
+    const list = Array.isArray(hunt.especies) && hunt.especies.length > 0
+        ? hunt.especies
+        : (hunt.speciesId != null ? [{ pokeId: hunt.speciesId, nome: hunt.nome || `#${hunt.speciesId}` }] : []);
+    const seen = new Set();
+    const missing = [];
+    for (const sp of list) {
+        const rawId = sp?.pokeId ?? sp?.speciesId ?? sp?.id;
+        const keyNum = chavePokedex(rawId);
+        if (keyNum == null) continue;
+        const key = String(keyNum);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        if (!capturedSet || !capturedSet.has(key)) {
+            missing.push({
+                pokeId: Number(rawId),
+                key,
+                name: String(sp?.nome || sp?.name || hunt.nome || `#${rawId}`),
+            });
+        }
+    }
+    return missing;
+}
+
+/**
+ * Consolida contadores de Pokedex e Top Catch sobre todas as hunts liberadas pelo nivel do treinador.
+ * @param {object} params Contexto com hunts, trainerLevel, pokedex, weeklyCaughtSet e extraPokedexKeys.
+ * @returns {{ pokedex: object, topCatch: object }} Resumo de progresso.
+ */
+export function computeCollectionSummary({
+    hunts = [],
+    trainerLevel = 0,
+    pokedex = null,
+    weeklyCaughtSet = null,
+    extraPokedexKeys = null,
+} = {}) {
+    const dexSet = getPokedexCapturedSet(pokedex, extraPokedexKeys);
+    const weekSet = weeklyCaughtSet instanceof Set ? weeklyCaughtSet : null;
+    const lvl = Number(trainerLevel) || 0;
+    const unlockedSpecies = new Set();
+    const unlockedDexCaught = new Set();
+    const unlockedWeekCaught = new Set();
+    let dexPendingHunts = 0;
+    let weekPendingHunts = 0;
+
+    for (const h of hunts || []) {
+        if (!h || typeof h !== 'object') continue;
+        if (lvl > 0 && Number(h.nivel || 0) > lvl) continue;
+        const allSp = getHuntMissingSpecies(h, null);
+        if (allSp.length === 0) continue;
+        let huntMissingDex = false;
+        let huntMissingWeek = false;
+        for (const sp of allSp) {
+            unlockedSpecies.add(sp.key);
+            if (dexSet.has(sp.key)) unlockedDexCaught.add(sp.key);
+            else huntMissingDex = true;
+            if (weekSet) {
+                if (weekSet.has(sp.key)) unlockedWeekCaught.add(sp.key);
+                else huntMissingWeek = true;
+            }
+        }
+        if (huntMissingDex) dexPendingHunts += 1;
+        if (weekSet && huntMissingWeek) weekPendingHunts += 1;
+    }
+
+    const unlockedTotal = unlockedSpecies.size;
+    const dexCapturedTotal = dexSet.size;
+    return {
+        pokedex: {
+            capturedTotal: dexCapturedTotal,
+            unlockedTotal,
+            unlockedCaptured: unlockedDexCaught.size,
+            unlockedMissing: Math.max(0, unlockedTotal - unlockedDexCaught.size),
+            unlockedPendingHunts: dexPendingHunts,
+            pct: unlockedTotal > 0 ? Math.round((unlockedDexCaught.size / unlockedTotal) * 100) : 0,
+        },
+        topCatch: {
+            unlockedTotal,
+            unlockedCaptured: weekSet ? unlockedWeekCaught.size : 0,
+            unlockedMissing: weekSet ? Math.max(0, unlockedTotal - unlockedWeekCaught.size) : unlockedTotal,
+            unlockedPendingHunts: weekSet ? weekPendingHunts : 0,
+            pct: unlockedTotal > 0 && weekSet ? Math.round((unlockedWeekCaught.size / unlockedTotal) * 100) : 0,
+        },
+    };
+}
+
+/**
+ * Seleciona a melhor hunt alvo para o modo Completar Pokedex ou Modo Top Catch,
+ * combinando especies faltantes com o ranking real do /hunt (xp, ouro, shiny) ou modo rapido (fast).
+ * @param {object} params Contexto de selecao.
+ * @returns {object} Decisao com targetSlug, targetHunt, metricas e contagem pendente.
+ */
+export function selectObjectiveHunt({
+    mode = 'off',
+    focus = 'xp',
+    currentSlug = '',
+    activeTargetSlug = null,
+    rotateAfterCatch = false,
+    hunts = [],
+    trainerLevel = 0,
+    activePokemonLevel = 0,
+    capturedSet = null,
+    huntRanking = null,
+} = {}) {
+    if (mode !== 'pokedex' && mode !== 'topcatch') {
+        return { active: false, targetSlug: null, completed: false };
+    }
+    const lvl = Number(trainerLevel) || 0;
+    const pkLvl = Number(activePokemonLevel) || lvl || 0;
+    const rankMap = new Map();
+    if (Array.isArray(huntRanking)) {
+        for (const row of huntRanking) {
+            if (row?.slug) rankMap.set(String(row.slug), row);
+        }
+    }
+    const hasRank = rankMap.size > 0;
+    const metricKey = focus === 'ouro' ? 'goldH' : (focus === 'shiny' ? 'shinyH' : 'xpH');
+
+    const candidates = [];
+    let currentCandidate = null;
+    const missingSpeciesAll = new Set();
+
+    for (const h of hunts || []) {
+        if (!h?.slug) continue;
+        if (lvl > 0 && Number(h.nivel || 0) > lvl) continue;
+        const missing = getHuntMissingSpecies(h, capturedSet);
+        if (missing.length === 0) continue;
+        for (const sp of missing) missingSpeciesAll.add(sp.key);
+
+        const r = rankMap.get(h.slug) || null;
+        const metricValue = r ? Number(r[metricKey] ?? r.value ?? 0) : 0;
+        const unsafe = r
+            ? Boolean(r.unsafe)
+            : (pkLvl > 0 && Number(h.nivel || 0) > Math.max(pkLvl * 1.15, pkLvl + 15));
+        const item = {
+            hunt: h,
+            slug: h.slug,
+            name: h.nome || h.slug,
+            level: Number(h.nivel || 0),
+            missing,
+            rankRow: r,
+            metricValue,
+            unsafe,
+        };
+        candidates.push(item);
+        if (h.slug === currentSlug) currentCandidate = item;
+    }
+
+    if (candidates.length === 0) {
+        return {
+            active: true,
+            mode,
+            focus,
+            completed: true,
+            targetSlug: null,
+            targetHunt: null,
+            currentHasMissing: false,
+            currentMissing: [],
+            pendingHuntsCount: 0,
+            missingSpeciesCount: 0,
+            usedHuntGuide: hasRank,
+            metricValue: 0,
+            unsafe: false,
+        };
+    }
+
+    const safePool = candidates.filter((c) => !c.unsafe);
+    const eligiblePool = safePool.length > 0 ? safePool : candidates;
+    const alternatives = mode === 'topcatch' && rotateAfterCatch
+        ? eligiblePool.filter((candidate) => candidate.slug !== currentSlug)
+        : [];
+    const pool = alternatives.length ? alternatives : eligiblePool;
+
+    if (focus === 'fast') {
+        pool.sort((a, b) =>
+            (a.level - b.level) ||
+            (b.missing.length - a.missing.length) ||
+            (b.metricValue - a.metricValue) ||
+            a.name.localeCompare(b.name)
+        );
+    } else if (hasRank) {
+        pool.sort((a, b) =>
+            (Number(Boolean(b.rankRow)) - Number(Boolean(a.rankRow))) ||
+            (b.metricValue - a.metricValue) ||
+            (b.missing.length - a.missing.length) ||
+            (a.level - b.level)
+        );
+    } else {
+        // Sem /hunt instalado: prioriza nivel mais alto seguro (melhor XP/ouro) ate o nivel do Pokemon ativo
+        pool.sort((a, b) =>
+            (b.level - a.level) ||
+            (b.missing.length - a.missing.length) ||
+            a.name.localeCompare(b.name)
+        );
+    }
+
+    // Estabilidade: se ja estamos na hunt alvo ativa (e ela segue segura e com especie pendente), termina de capturar antes de trocar.
+    let chosen = pool[0];
+    if (
+        currentCandidate && alternatives.length === 0 &&
+        activeTargetSlug &&
+        currentCandidate.slug === activeTargetSlug &&
+        (!currentCandidate.unsafe || safePool.length === 0)
+    ) {
+        chosen = currentCandidate;
+    }
+
+    return {
+        active: true,
+        mode,
+        focus,
+        completed: false,
+        targetSlug: chosen.slug,
+        targetHunt: chosen.hunt,
+        targetName: chosen.name,
+        targetLevel: chosen.level,
+        currentHasMissing: Boolean(currentCandidate),
+        currentMissing: currentCandidate ? currentCandidate.missing : [],
+        targetMissing: chosen.missing,
+        pendingHuntsCount: candidates.length,
+        missingSpeciesCount: missingSpeciesAll.size,
+        usedHuntGuide: Boolean(chosen.rankRow),
+        metricValue: chosen.metricValue,
+        unsafe: chosen.unsafe,
+    };
 }

@@ -41,6 +41,9 @@ import {
     resolveRestockPotionId,
     evaluateHeadlessTick,
     computeModeWarnings,
+    getPokedexCapturedSet,
+    getTopCatchWeekWindow,
+    selectObjectiveHunt,
 } from '../src/headless/protocol-engine.mjs';
 import { parseCliArgs } from '../src/headless/cli-runner.mjs';
 import {
@@ -57,6 +60,46 @@ import {
 } from '../src/headless/gui-server.mjs';
 import { buildDesktopExecutable, buildPokeballIconBuffer } from '../src/desktop/build-exe.mjs';
 import { startMultiAccountDaemon } from '../src/headless/multi-daemon.mjs';
+
+test('coleção: Pokédex e Top Catch usam conjuntos diferentes e o Top Catch troca de mapa após captura', () => {
+    const hunts = [
+        { slug: 'perto', nome: 'Perto', nivel: 8, especies: [{ pokeId: 1 }, { pokeId: 2 }] },
+        { slug: 'longe', nome: 'Longe', nivel: 12, especies: [{ pokeId: 3 }] },
+        { slug: 'travada', nome: 'Travada', nivel: 100, especies: [{ pokeId: 4 }] },
+    ];
+    const options = { focus: 'ouro', currentSlug: 'perto', activeTargetSlug: 'perto', trainerLevel: 20, hunts,
+        huntRanking: [{ slug: 'perto', goldH: 300 }, { slug: 'longe', goldH: 250 }, { slug: 'travada', goldH: 999 }] };
+    const dex = getPokedexCapturedSet({ 1: { c: 3 }, 2: { c: 1 }, 13003: { c: 0 } });
+    const dexHunt = selectObjectiveHunt({ ...options, mode: 'pokedex', capturedSet: dex });
+    assert.equal(dexHunt.targetSlug, 'longe');
+    const weekly = new Set(['1']);
+    const topCatch = selectObjectiveHunt({ ...options, mode: 'topcatch', capturedSet: weekly });
+    assert.equal(topCatch.targetSlug, 'perto');
+    assert.deepEqual(topCatch.targetMissing.map((sp) => sp.key), ['2']);
+    const next = selectObjectiveHunt({ ...options, mode: 'topcatch', capturedSet: weekly, rotateAfterCatch: true });
+    assert.equal(next.targetSlug, 'longe');
+    assert.equal(next.metricValue, 250);
+    const rollover = getTopCatchWeekWindow('2026-11-22', Date.UTC(2026, 10, 29, 2, 59));
+    assert.equal(rollover.endMs, Date.UTC(2026, 10, 29, 3));
+    assert.equal(rollover.remainingMs, 60_000);
+});
+
+test('coleção: lança bola só em espécies pendentes e desliga a captura VIP que ignora o objetivo', () => {
+    const state = { gold: 1000, balls: { 1: 10 }, automation: { autoBallSemParar: true }, loja: { vip: true } };
+    const field = { getFallenCorpses: () => [
+        { slot: 'ja', speciesId: 1, shiny: true },
+        { slot: 'pendente', speciesId: 2 },
+    ] };
+    const config = { farmObjective: 'pokedex', ensureNativeAutoHeal: false, restockEnabled: false,
+        dailyPassEnabled: false, preyEnabled: false, preferredBall: 'poke' };
+    const actions = evaluateHeadlessTick({ state, field, config, desiredMissingKeys: new Set(['2']), nowMs: 60_000 });
+    assert.deepEqual(actions.find((action) => action.t === 'ball.throw'), { t: 'ball.throw', slot: 'pendente', ballId: 1 });
+    const auto = actions.find((action) => action.t === 'auto.set');
+    assert.equal(auto.autoBallSemParar, false);
+    assert.equal(auto.autoBallAteCapturar, false);
+    const noTarget = evaluateHeadlessTick({ state, field, config, desiredMissingKeys: new Set(), nowMs: 60_000 });
+    assert.equal(noTarget.some((action) => action.t === 'ball.throw'), false);
+});
 import { syncCookiesToConfig } from '../src/modules/live-rewards.js';
 import {
     HUNT_EXTENSION_ID,

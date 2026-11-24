@@ -26,6 +26,14 @@ import {
     resolvePokemonSpriteDex,
     evaluateHeadlessTick,
     computeModeWarnings,
+    chavePokedex,
+    getTopCatchWeekWindow,
+    getTopCatchMilestoneProgress,
+    computeTopCatchRankingPosition,
+    getPokedexCapturedSet,
+    getHuntMissingSpecies,
+    computeCollectionSummary,
+    selectObjectiveHunt,
 } from './protocol-engine.mjs';
 import {
     liveRewards,
@@ -42,6 +50,7 @@ import {
     runLiveCycle,
     refreshTwitchBalances,
     selectChannelsToWatch,
+    getPlatformRateLimit,
 } from '../modules/live-rewards.js';
 import { createHeadlessHuntGuideEvaluator, describeHuntGuide, readHuntGuideInPage } from './hunt-guide.mjs';
 
@@ -94,7 +103,7 @@ const LOGIN_URLS = Object.freeze({
 const PING_INTERVAL_MS = 25_000;
 const WATCHDOG_INTERVAL_MS = 10_000;
 const WATCHDOG_TIMEOUT_MS = 35_000;
-const LIVE_CYCLE_INTERVAL_MS = 30_000;
+const LIVE_CYCLE_INTERVAL_MS = 55_000;
 const MIN_RECONNECT_MS = 2_000;
 const MAX_RECONNECT_MS = 30_000;
 const MAX_LOGS = 120;
@@ -126,6 +135,8 @@ const EDITABLE_CONFIG_KEYS = new Set([
     'targetHuntSlug',
     'huntGuideMode',
     'huntGuideMetric',
+    'farmObjective',
+    'farmObjectiveFocus',
     'liveEnabled',
     'liveWatchTwitch',
     'liveWatchKick',
@@ -265,6 +276,8 @@ function buildConfig(prefs = {}, saved = {}, overrides = {}, isolatedAccount = f
         targetHuntSlug: null,
         huntGuideMode: 'off',
         huntGuideMetric: 'xp',
+        farmObjective: 'off',
+        farmObjectiveFocus: 'xp',
         liveEnabled: p.liveEnabled ?? true,
         liveWatchTwitch: p.liveWatchTwitch ?? true,
         liveWatchKick: p.liveWatchKick ?? true,
@@ -310,6 +323,8 @@ function normalizeConfigPatch(current, patch = {}) {
     const next = { ...current };
     if (['off', 'notify', 'auto'].includes(patch.huntGuideMode)) next.huntGuideMode = patch.huntGuideMode;
     if (['xp', 'ouro', 'shiny'].includes(patch.huntGuideMetric)) next.huntGuideMetric = patch.huntGuideMetric;
+    if (['off', 'pokedex', 'topcatch'].includes(patch.farmObjective)) next.farmObjective = patch.farmObjective;
+    if (['xp', 'ouro', 'shiny', 'fast'].includes(patch.farmObjectiveFocus)) next.farmObjectiveFocus = patch.farmObjectiveFocus;
     if (patch.caidosEnabled !== undefined) next.caidosEnabled = Boolean(patch.caidosEnabled);
     if (typeof patch.preferredBall === 'string' && ['auto', 'poke', 'great', 'super', 'ultra', 'beast'].includes(patch.preferredBall)) {
         next.preferredBall = patch.preferredBall;
@@ -571,19 +586,29 @@ function ingestWelcomeCatalog(welcomeMsg, catalog) {
         const especies = Array.isArray(hunt.especies) ? hunt.especies : [];
         let primarySpecies = null;
         let primaryWeight = -1;
+        const normalizedSpecies = [];
         for (const sp of especies) {
             if (!sp || sp.pokeId == null) continue;
+            const pid = Number(sp.pokeId);
+            const spName = sp.nome ? String(sp.nome) : (catalog.pokemonNames[pid] || `#${pid}`);
             if (sp.nome) {
-                catalog.pokemonNames[sp.pokeId] = String(sp.nome);
-                const dex = resolvePokemonSpriteDex(sp.pokeId, sp.nome);
+                catalog.pokemonNames[pid] = spName;
+                const dex = resolvePokemonSpriteDex(pid, spName);
                 if (dex > 0) {
                     catalog.pokemonDexByName ??= {};
-                    catalog.pokemonDexByName[String(sp.nome).trim().toLowerCase()] = dex;
+                    catalog.pokemonDexByName[spName.trim().toLowerCase()] = dex;
                 }
             }
             const weight = Number(sp.pontos || 0);
+            const keyNum = chavePokedex(pid);
+            normalizedSpecies.push({
+                pokeId: pid,
+                key: keyNum != null ? String(keyNum) : String(pid),
+                nome: spName,
+                pontos: weight,
+            });
             if (primarySpecies == null || weight > primaryWeight) {
-                primarySpecies = sp.pokeId;
+                primarySpecies = pid;
                 primaryWeight = weight;
             }
         }
@@ -600,6 +625,7 @@ function ingestWelcomeCatalog(welcomeMsg, catalog) {
             area: String(hunt.area ?? hunt.regiao ?? ''),
             nivel: Number(hunt.nivel ?? hunt.level ?? 0),
             speciesId,
+            especies: normalizedSpecies,
         };
         catalog.huntsBySlug[slug] = huntInfo;
         huntsList.push(huntInfo);
@@ -1743,6 +1769,7 @@ export function createLiveRewardsBridge({
     intervalMs = LIVE_CYCLE_INTERVAL_MS,
 } = {}) {
     let liveTimer = null;
+    let liveStartDelayTimer = null;
     let warnedNoToken = false;
 
     const liveState = {
@@ -1801,6 +1828,7 @@ export function createLiveRewardsBridge({
         net: {
             fetch: (url, opts) => fetch(url, { ...opts, signal: opts?.signal ?? AbortSignal.timeout(12_000) }),
             createWebSocket: (url) => new WebSocket(url),
+            paceMs: { twitch: 450, kick: 1500 },
         },
         updateHud: () => {},
     };
@@ -1850,13 +1878,31 @@ export function createLiveRewardsBridge({
     };
 
     const startTimer = () => {
-        if (liveTimer) return;
-        liveTimer = setInterval(() => {
-            runOnce({ force: false });
-        }, intervalMs);
+        if (liveTimer || liveStartDelayTimer) return;
+        const jitterMs = intervalMs >= 10_000
+            ? Math.floor(Math.random() * Math.min(12_000, Math.floor(intervalMs / 2)))
+            : 0;
+        if (jitterMs > 0) {
+            liveStartDelayTimer = setTimeout(() => {
+                liveStartDelayTimer = null;
+                if (!liveState.running || liveTimer) return;
+                liveTimer = setInterval(() => {
+                    runOnce({ force: false });
+                }, intervalMs);
+                runOnce({ force: false });
+            }, jitterMs);
+        } else {
+            liveTimer = setInterval(() => {
+                runOnce({ force: false });
+            }, intervalMs);
+        }
     };
 
     const stopTimer = () => {
+        if (liveStartDelayTimer) {
+            clearTimeout(liveStartDelayTimer);
+            liveStartDelayTimer = null;
+        }
         if (liveTimer) {
             clearInterval(liveTimer);
             liveTimer = null;
@@ -2055,8 +2101,9 @@ export function createLiveRewardsBridge({
     const refreshBalances = () => {
         const cfg = getConfig?.() || {};
         if (cfg.liveEnabled === false || !cfg.liveTwitchToken) return Promise.resolve(false);
+        if (getPlatformRateLimit('twitch').blocked) return Promise.resolve(false);
         if (balanceRefreshInFlight) return balanceRefreshInFlight;
-        if (Date.now() - lastBalanceRefreshAt < 10_000) return Promise.resolve(false);
+        if (Date.now() - lastBalanceRefreshAt < 30_000) return Promise.resolve(false);
         lastBalanceRefreshAt = Date.now();
         const logins = getLivesSnapshot().channels.filter((c) => c.platform === 'twitch').map((c) => c.channel);
         balanceRefreshInFlight = refreshTwitchBalances(liveCtx, logins)
@@ -2221,6 +2268,27 @@ export function createHeadlessController(options = {}) {
     let huntGuideStatus = null;
     let huntGuideSwapAt = null;
     let huntGuideTarget = null;
+    let huntGuideRanking = null; // { metric, ranked, fetchedAt, pokemonId }
+    let objectiveTargetSlug = null;
+    let objectiveRotateFromSlug = null;
+    let objectiveLastDecision = null;
+    let objectiveLastLogKey = '';
+    const optimisticPokedexKeys = new Set();
+    const createTopCatchState = () => ({
+        week: null,
+        ini: false,
+        count: 0,
+        lastMinute: 0,
+        paidMilestone: 0,
+        keys: new Set(),
+        loaded: false,
+        lastRequestedAt: 0,
+        previousWeek: null,
+        rankingRows: null,
+        rankingFetchedAt: 0,
+        rankingRequestedAt: 0,
+    });
+    let topCatchState = createTopCatchState();
     let lastWelcome = null;
     let bridgeAbortCtrl = null;
     let silentSyncAttempted = false;
@@ -2633,19 +2701,246 @@ export function createHeadlessController(options = {}) {
         return false;
     };
 
+    const syncTopCatchFromState = (state) => {
+        const snap = state?.topCatch;
+        if (!snap || typeof snap !== 'object') return;
+        const week = typeof snap.s === 'string' && snap.s ? snap.s : null;
+        if (week && topCatchState.week && week < topCatchState.week) return;
+        if (week && topCatchState.week && week > topCatchState.week) {
+            topCatchState.keys.clear();
+            topCatchState.loaded = false;
+            topCatchState.count = 0;
+            topCatchState.lastMinute = 0;
+            topCatchState.paidMilestone = 0;
+            topCatchState.lastRequestedAt = 0;
+            topCatchState.rankingRequestedAt = 0;
+            topCatchState.rankingRows = null;
+            topCatchState.rankingFetchedAt = 0;
+            objectiveRotateFromSlug = null;
+        }
+        if (week) topCatchState.week = week;
+        topCatchState.ini = Boolean(snap.ini);
+        if (Number.isFinite(Number(snap.n))) topCatchState.count = Math.max(0, Number(snap.n));
+        if (Number.isFinite(Number(snap.m))) topCatchState.lastMinute = Math.max(0, Number(snap.m));
+        if (Number.isFinite(Number(snap.r))) topCatchState.paidMilestone = Math.max(0, Number(snap.r));
+        if (topCatchState.ini && topCatchState.count === 0) {
+            topCatchState.loaded = true;
+        }
+    };
+
+    const requestTopCatchSync = ({ force = false, includeRanking = true } = {}) => {
+        const isOnline = status === 'connected' || status === 'bridge';
+        if (!isOnline || config.economyPingOnly) return false;
+        const state = merger.getState();
+        if (!force && !state?.topCatch && config.farmObjective !== 'topcatch') return false;
+        const now = nowFn();
+        let sent = false;
+        const tcMinGap = force ? 2_000 : (topCatchState.loaded ? 120_000 : 8_000);
+        if (now - topCatchState.lastRequestedAt >= tcMinGap) {
+            if (sendFrame({ t: 'topcatch.pedir' })) {
+                topCatchState.lastRequestedAt = now;
+                sent = true;
+            }
+        }
+        if (includeRanking) {
+            const rkMinGap = force ? 5_000 : 90_000;
+            if (now - topCatchState.rankingRequestedAt >= rkMinGap) {
+                if (sendFrame({ t: 'ranking.pedir', aba: 'capturas' })) {
+                    topCatchState.rankingRequestedAt = now;
+                    sent = true;
+                }
+            }
+        }
+        return sent;
+    };
+
+    const getEffectiveWeeklyCaughtSet = () => {
+        if (!topCatchState.loaded ||
+            (topCatchState.week && getTopCatchWeekWindow(topCatchState.week, getSyncedNowMs()).ending)) return null;
+        return new Set(topCatchState.keys);
+    };
+
+    const resetCollectionState = () => {
+        optimisticPokedexKeys.clear();
+        topCatchState = createTopCatchState();
+        objectiveTargetSlug = null;
+        objectiveRotateFromSlug = null;
+        objectiveLastDecision = null;
+        objectiveLastLogKey = '';
+        huntGuideRanking = null;
+    };
+
+    const getDesiredMissingKeysForTick = (state) => {
+        const mode = config.farmObjective;
+        if (mode !== 'pokedex' && mode !== 'topcatch') return null;
+        if (mode === 'pokedex' && !state?.pokedex) return null;
+        const currentHunt = state?.huntSlug ? catalog.huntsBySlug?.[state.huntSlug] : null;
+        if (!currentHunt) return null;
+        const capturedSet = mode === 'pokedex'
+            ? getPokedexCapturedSet(state?.pokedex, optimisticPokedexKeys)
+            : getEffectiveWeeklyCaughtSet();
+        if (!capturedSet) return null;
+        const missing = getHuntMissingSpecies(currentHunt, capturedSet);
+        return new Set(missing.map((m) => m.key));
+    };
+
+    const formatObjectiveRate = (value, focus) => {
+        if (!Number.isFinite(value) || value <= 0) return '';
+        const fmt = new Intl.NumberFormat('pt-BR', { notation: 'compact', maximumFractionDigits: 2 });
+        if (focus === 'shiny') return `1 shiny / ${fmt.format(1 / value)} h`;
+        return `${fmt.format(value)} ${focus === 'ouro' ? 'ouro/h' : 'XP/h'}`;
+    };
+
+    const queueObjectiveHuntSwap = (slug, reasonLabel) => {
+        const isOnline = status === 'connected' || status === 'bridge';
+        if (!isOnline || !slug) return false;
+        const state = merger.getState();
+        if (state?.huntSlug === slug) return false;
+        if (pendingHuntSlug === slug) return false;
+        const waitMs = Math.max(getCombatLockMs(state), getHuntSwapLockMs());
+        const huntLabel = catalog.huntNames?.[slug] || slug;
+        if (waitMs > 0) {
+            pendingHuntSlug = slug;
+            schedulePendingHuntFlush();
+            pushLog('info', `${reasonLabel}: troca para ${huntLabel} agendada (${(waitMs / 1000).toFixed(1)}s fora de combate).`);
+            return true;
+        }
+        if (sendFrame({ t: 'hunt.select', slug })) {
+            tracker.lastHuntSlug = slug;
+            pushLog('ok', `${reasonLabel}: trocando para ${huntLabel}.`);
+            return true;
+        }
+        return false;
+    };
+
+    const evaluateFarmObjective = ({ triggerSwap = true } = {}) => {
+        const mode = config.farmObjective;
+        const focus = config.farmObjectiveFocus || 'xp';
+        if (mode !== 'pokedex' && mode !== 'topcatch') {
+            objectiveTargetSlug = null;
+            objectiveLastDecision = null;
+            return null;
+        }
+        const state = merger.getState();
+        const isOnline = status === 'connected' || status === 'bridge';
+        if (!state || catalog.huntsList.length === 0) {
+            objectiveLastDecision = {
+                active: true,
+                mode,
+                focus,
+                loading: true,
+                statusText: 'Aguardando catálogo de hunts do servidor...',
+            };
+            return objectiveLastDecision;
+        }
+        const capturedSet = mode === 'pokedex'
+            ? getPokedexCapturedSet(state.pokedex, optimisticPokedexKeys)
+            : getEffectiveWeeklyCaughtSet();
+        if (mode === 'topcatch' && !capturedSet) {
+            if (isOnline) requestTopCatchSync({ force: false, includeRanking: true });
+            objectiveLastDecision = {
+                active: true,
+                mode,
+                focus,
+                loading: true,
+                statusText: 'Sincronizando espécies da semana do Top Catch...',
+            };
+            return objectiveLastDecision;
+        }
+        if (mode === 'pokedex' && !state.pokedex) {
+            objectiveLastDecision = { active: true, mode, focus, loading: true, statusText: 'Aguardando o registro da Pokédex do servidor...' };
+            return objectiveLastDecision;
+        }
+        const activePk = (state.pokemons || []).find((pk) => pk && String(pk.id) === String(state.activeId)) || null;
+        const matchingRanking = focus !== 'fast' && huntGuideRanking?.metric === focus &&
+            String(huntGuideRanking.pokemonId) === String(activePk?.id)
+            ? huntGuideRanking.ranked
+            : null;
+        const decision = selectObjectiveHunt({
+            mode,
+            focus,
+            currentSlug: state.huntSlug || '',
+            activeTargetSlug: objectiveTargetSlug,
+            rotateAfterCatch: mode === 'topcatch' && Boolean(state.huntSlug && state.huntSlug === objectiveRotateFromSlug),
+            hunts: catalog.huntsList,
+            trainerLevel: Number(state.level || 0),
+            activePokemonLevel: Number(activePk?.level || 0),
+            capturedSet,
+            huntRanking: matchingRanking,
+        });
+        const modeLabel = mode === 'pokedex' ? 'Pokédex' : 'Top Catch';
+        const focusLabel = { xp: 'XP/h', ouro: 'Ouro/h', shiny: 'Shiny/h', fast: 'Mais rápido' }[focus] || 'XP/h';
+
+        if (decision.completed) {
+            objectiveTargetSlug = null;
+            const statusText = mode === 'pokedex'
+                ? 'Pokédex concluída em todas as hunts liberadas!'
+                : 'Top Catch concluído em todas as hunts liberadas desta semana!';
+            decision.statusText = statusText;
+            objectiveLastDecision = decision;
+            const logKey = `done:${mode}:${topCatchState.week || ''}`;
+            if (objectiveLastLogKey !== logKey) {
+                objectiveLastLogKey = logKey;
+                pushLog('ok', statusText);
+            }
+            return decision;
+        }
+
+        objectiveTargetSlug = decision.targetSlug;
+        if (objectiveRotateFromSlug && (state.huntSlug !== objectiveRotateFromSlug ||
+            decision.targetSlug === objectiveRotateFromSlug)) objectiveRotateFromSlug = null;
+        const rateTxt = decision.usedHuntGuide ? formatObjectiveRate(decision.metricValue, focus) : '';
+        decision.targetMetricLabel = rateTxt;
+        if (decision.targetSlug === state.huntSlug) {
+            const missNames = (decision.currentMissing || []).slice(0, 3).map((m) => m.name).join(', ');
+            decision.statusText = `${modeLabel} (${focusLabel}): buscando ${missNames || decision.targetName}${rateTxt ? ` · ${rateTxt}` : ''} · faltam ${decision.pendingHuntsCount} hunts`;
+        } else {
+            decision.statusText = `${modeLabel} (${focusLabel}) -> ${decision.targetName} (Nv ${decision.targetLevel})${rateTxt ? ` · ${rateTxt}` : ''} · faltam ${decision.pendingHuntsCount} hunts`;
+        }
+        objectiveLastDecision = decision;
+
+        if (
+            triggerSwap &&
+            isOnline &&
+            config.caidosEnabled !== false &&
+            !config.economyPingOnly &&
+            decision.targetSlug &&
+            decision.targetSlug !== state.huntSlug &&
+            state.noCentro !== true &&
+            !(Number(state.mistico?.prazo || 0) > nowFn())
+        ) {
+            queueObjectiveHuntSwap(decision.targetSlug, `${modeLabel} (${focusLabel})`);
+        }
+        return decision;
+    };
+
     const checkHuntGuide = async () => {
         const bridge = activeBridge;
         const mode = config.huntGuideMode;
-        const metric = config.huntGuideMetric;
+        const objMode = config.farmObjective;
+        const objFocus = config.farmObjectiveFocus || 'xp';
+        const objNeedsGuide = (objMode === 'pokedex' || objMode === 'topcatch') && objFocus !== 'fast';
+        const metric = objNeedsGuide ? objFocus : config.huntGuideMetric;
         const activeStatus = status;
         const isOnline = activeStatus === 'bridge' || activeStatus === 'connected';
-        if (mode === 'off' || huntGuideRequest || !isOnline || config.economyPingOnly) return;
+        if (isOnline && (objMode === 'topcatch' || merger.getState()?.topCatch)) {
+            requestTopCatchSync({ force: false, includeRanking: true });
+        }
+        if ((mode === 'off' && !objNeedsGuide) || huntGuideRequest || !isOnline || config.economyPingOnly) {
+            if (objMode === 'pokedex' || objMode === 'topcatch') {
+                evaluateFarmObjective({ triggerSwap: true });
+            }
+            return;
+        }
 
         const canUseBridge = activeStatus === 'bridge' && typeof bridge?.readHuntGuide === 'function';
         const canUseHeadless = Boolean(headlessHuntGuide?.evaluate && lastWelcome && merger.getState());
         if (!canUseBridge && !canUseHeadless) {
             if (activeStatus === 'connected' && headlessHuntGuide && !headlessHuntGuide.isAvailable?.()) {
                 huntGuideStatus = { note: 'Instale a extensão /hunt for PokeIdle no Chrome para ranking automático.' };
+            }
+            if (objMode === 'pokedex' || objMode === 'topcatch') {
+                evaluateFarmObjective({ triggerSwap: true });
             }
             return;
         }
@@ -2666,25 +2961,48 @@ export function createHeadlessController(options = {}) {
         try {
             const best = await request;
             if ((activeStatus === 'bridge' && activeBridge !== bridge) || status !== activeStatus ||
-                config.huntGuideMode !== mode || config.huntGuideMetric !== metric) return;
+                config.huntGuideMode !== mode || config.farmObjective !== objMode) return;
             if (!best) {
-                huntGuideStatus = {
-                    note: activeStatus === 'connected'
-                        ? (headlessHuntGuide?.isAvailable?.()
-                            ? 'Aguardando dados do Pokémon ativo para calcular /hunt.'
-                            : 'Instale a extensão /hunt for PokeIdle no Chrome para /hunt automático.')
-                        : 'Aguardando o ranking da extensão /hunt no jogo.',
-                };
+                if (mode !== 'off') {
+                    huntGuideStatus = {
+                        note: activeStatus === 'connected'
+                            ? (headlessHuntGuide?.isAvailable?.()
+                                ? 'Aguardando dados do Pokémon ativo para calcular /hunt.'
+                                : 'Instale a extensão /hunt for PokeIdle no Chrome para /hunt automático.')
+                            : 'Aguardando o ranking da extensão /hunt no jogo.',
+                    };
+                }
+                if (objMode === 'pokedex' || objMode === 'topcatch') {
+                    evaluateFarmObjective({ triggerSwap: true });
+                }
                 return;
             }
             const state = merger.getState();
             const pokemon = state?.pokemons?.find((pk) => String(pk.id) === String(best.pokemonId));
             if (!pokemon || String(state.activeId) !== String(best.pokemonId) ||
                 Number(pokemon.level) < Number(best.pokemonLevel)) return;
+
+            if (Array.isArray(best.ranked) && best.ranked.length > 0) {
+                huntGuideRanking = {
+                    metric,
+                    ranked: best.ranked,
+                    fetchedAt: nowFn(),
+                    pokemonId: best.pokemonId,
+                };
+            }
+
             const sameHunt = best.slug === state.huntSlug;
             const note = describeHuntGuide(best, metric) + (best.unsafe ? ' · risco de morte' : '');
             const previous = huntGuideStatus;
             huntGuideStatus = { slug: best.slug, metric, note, sameHunt, unsafe: best.unsafe };
+
+            if (objMode === 'pokedex' || objMode === 'topcatch') {
+                const decision = evaluateFarmObjective({ triggerSwap: true });
+                // Enquanto o modo Pokedex / Top Catch tiver hunts pendentes, ele controla a troca de mapa.
+                if (decision && !decision.completed) return;
+            }
+
+            if (mode === 'off') return;
             if (!sameHunt && (previous?.slug !== best.slug || previous?.metric !== metric || previous?.sameHunt)) {
                 pushLog('info', `/hunt recomenda ${note}`);
             }
@@ -2707,8 +3025,11 @@ export function createHeadlessController(options = {}) {
                 pushLog('info', `/hunt pediu a troca para ${best.name}.`);
             }
         } catch {
-            if (status === activeStatus && config.huntGuideMode === mode && config.huntGuideMetric === metric) {
-                huntGuideStatus = { note: 'Ranking /hunt indisponível no momento.' };
+            if (status === activeStatus && config.huntGuideMode === mode) {
+                if (mode !== 'off') huntGuideStatus = { note: 'Ranking /hunt indisponível no momento.' };
+                if (objMode === 'pokedex' || objMode === 'topcatch') {
+                    evaluateFarmObjective({ triggerSwap: true });
+                }
             }
         } finally {
             if (huntGuideRequest === request) huntGuideRequest = null;
@@ -2767,16 +3088,20 @@ export function createHeadlessController(options = {}) {
             ...catalog,
             huntSpeciesId: catalog.huntSpeciesBySlug?.[state?.huntSlug] ?? null,
         };
+        const effectiveTargetSlug = (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch') && objectiveTargetSlug
+            ? objectiveTargetSlug
+            : (config.huntGuideMode === 'auto' && huntGuideTarget ? huntGuideTarget : config.targetHuntSlug);
         const actions = evaluateHeadlessTick({
             state,
             field,
             catalog: evalCatalog,
-            config: config.huntGuideMode === 'auto' && huntGuideTarget
-                ? { ...config, targetHuntSlug: huntGuideTarget }
+            config: effectiveTargetSlug
+                ? { ...config, targetHuntSlug: effectiveTargetSlug }
                 : config,
             tracker,
             nowMs: nowFn(),
             forceRestock,
+            desiredMissingKeys: getDesiredMissingKeysForTick(state),
         });
         sendActions(actions);
         const report = tracker.lastRestockReport;
@@ -2895,6 +3220,22 @@ export function createHeadlessController(options = {}) {
                 const name = e.pokemon?.nome || e.pokemon?.name || catalog.pokemonNames?.[e.pokemon?.speciesId] || `#${e.pokemon?.speciesId ?? '?'}`;
                 const level = e.pokemon?.level ?? e.pokemon?.nivel ?? '?';
                 pushLog(isShiny ? 'shiny' : 'catch', `Capturado${isShiny ? ' SHINY' : ''}: ${name} (Nv ${level})`);
+                const caughtKey = chavePokedex(e.pokemon?.speciesId);
+                if (caughtKey != null) {
+                    const keyStr = String(caughtKey);
+                    const weeklyBefore = getEffectiveWeeklyCaughtSet();
+                    optimisticPokedexKeys.add(keyStr);
+                    if (weeklyBefore && !weeklyBefore.has(keyStr)) {
+                        topCatchState.keys.add(keyStr);
+                        topCatchState.count = Math.max(topCatchState.count + 1, topCatchState.keys.size);
+                        if (config.farmObjective === 'topcatch') {
+                            objectiveRotateFromSlug = merger.getState()?.huntSlug || null;
+                        }
+                    }
+                    if (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch') {
+                        evaluateFarmObjective({ triggerSwap: true });
+                    }
+                }
                 if (isShiny) {
                     const curSlug = merger.getState()?.huntSlug || '';
                     const spId = Number(e.pokemon?.speciesId) || null;
@@ -2910,6 +3251,50 @@ export function createHeadlessController(options = {}) {
                         details: extractPokemonDetails(e.pokemon),
                     });
                     if (ownShinies.length > 10) ownShinies.pop();
+                }
+            } else if (kind === 'topCatchNova') {
+                const week = String(e.s || topCatchState.week || '');
+                if (week && topCatchState.week && week < topCatchState.week) continue;
+                const key = chavePokedex(e.chave);
+                const chave = key == null ? '' : String(key);
+                if (week && topCatchState.week && week > topCatchState.week) {
+                    topCatchState.week = week;
+                    topCatchState.keys.clear();
+                    topCatchState.ini = false;
+                    topCatchState.count = 0;
+                    topCatchState.lastMinute = 0;
+                    topCatchState.paidMilestone = 0;
+                    topCatchState.loaded = false;
+                    topCatchState.rankingRows = null;
+                    topCatchState.lastRequestedAt = 0;
+                    topCatchState.rankingRequestedAt = 0;
+                    objectiveRotateFromSlug = null;
+                } else if (week && !topCatchState.week) {
+                    topCatchState.week = week;
+                }
+                if (chave) {
+                    const isNew = !topCatchState.keys.has(chave);
+                    topCatchState.keys.add(chave);
+                    if (Number.isFinite(Number(e.n))) topCatchState.count = Math.max(Number(e.n), topCatchState.keys.size);
+                    else if (isNew) topCatchState.count = Math.max(topCatchState.count + 1, topCatchState.keys.size);
+                    if (Number.isFinite(Number(e.m))) topCatchState.lastMinute = Number(e.m);
+                    if (isNew) {
+                        if (config.farmObjective === 'topcatch') {
+                            objectiveRotateFromSlug = merger.getState()?.huntSlug || null;
+                        }
+                        pushLog('reward', `Top Catch: nova espécie na semana (${topCatchState.count} no total)!`);
+                    }
+                    if (config.farmObjective === 'topcatch') {
+                        evaluateFarmObjective({ triggerSwap: true });
+                    }
+                }
+            } else if (kind === 'topCatchMarco') {
+                const marco = Number(e.marco) || 0;
+                if (marco > topCatchState.paidMilestone) {
+                    topCatchState.paidMilestone = marco;
+                }
+                if (marco > 0) {
+                    pushLog('reward', `Top Catch: marco de ${marco} espécies atingido!`);
                 }
             } else if (kind === 'votoCreditado') {
                 const qtd = Number(e.qtd || 1);
@@ -3026,6 +3411,48 @@ export function createHeadlessController(options = {}) {
             return;
         }
 
+        if (m.t === 'topCatch') {
+            const week = typeof m.s === 'string' && m.s ? m.s : topCatchState.week;
+            if (week && topCatchState.week && week < topCatchState.week) return;
+            if (week && topCatchState.week && week > topCatchState.week) {
+                topCatchState.keys.clear();
+                topCatchState.rankingRows = null;
+                topCatchState.count = 0;
+                topCatchState.lastMinute = 0;
+                topCatchState.paidMilestone = 0;
+                objectiveRotateFromSlug = null;
+            }
+            if (week) topCatchState.week = week;
+            topCatchState.ini = Boolean(m.ini);
+            if (Array.isArray(m.e)) {
+                for (const pair of m.e) {
+                    const k = chavePokedex(Array.isArray(pair) ? pair[0] : pair);
+                    if (k != null) topCatchState.keys.add(String(k));
+                }
+            }
+            if (Number.isFinite(Number(m.n))) {
+                topCatchState.count = Math.max(topCatchState.keys.size, Number(m.n));
+            } else {
+                topCatchState.count = topCatchState.keys.size;
+            }
+            if (Number.isFinite(Number(m.m))) topCatchState.lastMinute = Math.max(0, Number(m.m));
+            if (Number.isFinite(Number(m.r))) topCatchState.paidMilestone = Math.max(topCatchState.paidMilestone, Number(m.r));
+            if (m.ant && typeof m.ant === 'object') {
+                topCatchState.previousWeek = { s: String(m.ant.s || ''), n: Number(m.ant.n || 0) };
+            }
+            topCatchState.loaded = topCatchState.count === 0 || topCatchState.keys.size >= topCatchState.count;
+            if (config.farmObjective === 'topcatch') {
+                evaluateFarmObjective({ triggerSwap: true });
+            }
+            return;
+        }
+
+        if (m.t === 'ranking' && m.aba === 'capturas' && Array.isArray(m.linhas)) {
+            topCatchState.rankingRows = m.linhas;
+            topCatchState.rankingFetchedAt = nowFn();
+            return;
+        }
+
         if (m.t === 'votoCreditado') {
             const qtd = Number(m.qtd || 1);
             pushLog('reward', `+${qtd} diamante${qtd === 1 ? '' : 's'} creditado${qtd === 1 ? '' : 's'} pelo voto no IdleHub.io!`);
@@ -3059,11 +3486,16 @@ export function createHeadlessController(options = {}) {
             lastWelcome = m;
             field.reset();
             seenShinySlots.clear();
+            const previousNick = merger.getState()?.nick;
+            if (previousNick && m.estado?.nick && previousNick.toLowerCase() !== m.estado.nick.toLowerCase()) {
+                resetCollectionState();
+            }
             liveBridge.ingestWsMessage(m);
             ingestWelcomeCatalog(m, catalog);
             if (m.estado) merger.merge(m.estado);
             const state = merger.getState();
             syncCombatTimersFromState(m.estado, state);
+            syncTopCatchFromState(state);
             tracker.lastHuntSlug = state?.huntSlug || tracker.lastHuntSlug;
             pushLog(
                 'ok',
@@ -3072,11 +3504,12 @@ export function createHeadlessController(options = {}) {
                     : `Conectado em wss://pokeidle.io como ${state?.nick || session?.nick} (Hunt: ${state?.huntSlug || '-'}).`
             );
 
-            if (!isBridge && config.targetHuntSlug && state?.huntSlug !== config.targetHuntSlug) {
+            if (!isBridge && config.farmObjective === 'off' && config.targetHuntSlug && state?.huntSlug !== config.targetHuntSlug) {
                 pushLog('info', `Selecionando hunt configurada: ${config.targetHuntSlug}`);
                 sendFrame({ t: 'hunt.select', slug: config.targetHuntSlug });
             }
 
+            const needGuideNow = config.huntGuideMode !== 'off' || config.farmObjective !== 'off';
             if (isBridge) {
                 economyActive = false;
                 lastCampoAt = 0;
@@ -3090,10 +3523,21 @@ export function createHeadlessController(options = {}) {
                 battleKillsWithoutCampo = 0;
                 campoFeedDegraded = false;
                 sendFrame({ t: 'cliente.economia', ativo: economyActive });
-                if (config.huntGuideMode !== 'off') {
+                if (needGuideNow) {
                     ensureHuntGuideTimer();
                     void checkHuntGuide();
                 }
+            }
+            if (state?.topCatch || config.farmObjective === 'topcatch') {
+                requestTopCatchSync({ force: false, includeRanking: true });
+            }
+            const waitingInitialRank = Boolean(
+                huntGuideRequest &&
+                config.farmObjectiveFocus !== 'fast' &&
+                huntGuideRanking?.metric !== config.farmObjectiveFocus
+            );
+            if (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch') {
+                evaluateFarmObjective({ triggerSwap: !waitingInitialRank });
             }
             if (pendingHuntSlug) schedulePendingHuntFlush();
             runTickForState(state);
@@ -3110,6 +3554,7 @@ export function createHeadlessController(options = {}) {
             if (m.estado) merger.merge(m.estado);
             const state = merger.getState();
             syncCombatTimersFromState(m.estado, state);
+            syncTopCatchFromState(state);
             if (pendingHuntSlug && state?.huntSlug === pendingHuntSlug) {
                 pendingHuntSlug = null;
                 clearHuntFlushTimer();
@@ -3120,6 +3565,14 @@ export function createHeadlessController(options = {}) {
                 status = 'bridge';
                 lastError = null;
                 void checkHuntGuide();
+            }
+            if (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch') {
+                const waitingInitialRank = Boolean(
+                    huntGuideRequest &&
+                    config.farmObjectiveFocus !== 'fast' &&
+                    huntGuideRanking?.metric !== config.farmObjectiveFocus
+                );
+                evaluateFarmObjective({ triggerSwap: !waitingInitialRank });
             }
             tracker.lastHuntSlug = state?.huntSlug || tracker.lastHuntSlug;
             runTickForState(state);
@@ -3280,6 +3733,7 @@ export function createHeadlessController(options = {}) {
 
     const adoptGameSession = (result) => {
         if (session?.nick?.toLowerCase() !== result.nick.toLowerCase()) {
+            resetCollectionState();
             merger = createStateMerger();
             tracker = { lastHuntSlug: config.targetHuntSlug || null };
             for (const key of Object.keys(stats)) stats[key] = key === 'startedAt' ? null : 0;
@@ -4034,6 +4488,8 @@ export function createHeadlessController(options = {}) {
     const updateConfig = (patch = {}) => {
         const prevGuideMode = config.huntGuideMode;
         const prevGuideMetric = config.huntGuideMetric;
+        const prevFarmObjective = config.farmObjective;
+        const prevFarmObjectiveFocus = config.farmObjectiveFocus;
         const prevEcoMode = config.economyMode;
         const prevPingOnly = config.economyPingOnly;
         const prevCaidosEnabled = config.caidosEnabled;
@@ -4044,14 +4500,40 @@ export function createHeadlessController(options = {}) {
         if (JSON.stringify(config.preferredPotionIds || []) !== prevPotionsKey) {
             tracker.lastAutoSetAt = 0;
         }
-        if (prevGuideMode !== config.huntGuideMode || prevGuideMetric !== config.huntGuideMetric) {
-            huntGuideStatus = null;
-            huntGuideTarget = null;
-            huntGuideSwapAt = null;
-            if (config.huntGuideMode !== 'off' && (status === 'bridge' || status === 'connected')) {
+        const guideChanged = prevGuideMode !== config.huntGuideMode || prevGuideMetric !== config.huntGuideMetric;
+        const objectiveChanged = prevFarmObjective !== config.farmObjective || prevFarmObjectiveFocus !== config.farmObjectiveFocus;
+        if (guideChanged || objectiveChanged) {
+            if (guideChanged) {
+                huntGuideStatus = null;
+                huntGuideTarget = null;
+                huntGuideSwapAt = null;
+            }
+            if (objectiveChanged) {
+                objectiveTargetSlug = null;
+                objectiveRotateFromSlug = null;
+                objectiveLastDecision = null;
+                objectiveLastLogKey = '';
+                if (prevFarmObjectiveFocus !== config.farmObjectiveFocus) {
+                    huntGuideRanking = null;
+                }
+            }
+            const isOnlineNow = status === 'bridge' || status === 'connected';
+            const needGuideNow = config.huntGuideMode !== 'off' || config.farmObjective !== 'off';
+            if (needGuideNow && isOnlineNow) {
                 ensureHuntGuideTimer();
+                if (config.farmObjective === 'topcatch') {
+                    requestTopCatchSync({ force: true, includeRanking: true });
+                }
                 void checkHuntGuide();
-            } else if (config.huntGuideMode === 'off') {
+                if (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch') {
+                    const waitingInitialRank = Boolean(
+                        huntGuideRequest &&
+                        config.farmObjectiveFocus !== 'fast' &&
+                        huntGuideRanking?.metric !== config.farmObjectiveFocus
+                    );
+                    evaluateFarmObjective({ triggerSwap: !waitingInitialRank });
+                }
+            } else if (!needGuideNow) {
                 clearHuntGuideTimer();
             }
         }
@@ -4240,6 +4722,11 @@ export function createHeadlessController(options = {}) {
             void refreshVoteStatus({ force: true });
             return true;
         }
+        if (name === 'refresh-topcatch') {
+            const sent = requestTopCatchSync({ force: true, includeRanking: true });
+            if (config.farmObjective !== 'off') void checkHuntGuide();
+            return sent;
+        }
         return false;
     };
 
@@ -4340,6 +4827,60 @@ export function createHeadlessController(options = {}) {
             campoFeedDegraded,
         });
 
+        const serverNowSnap = now + serverClockOffsetMs;
+        const weeklySetSnap = getEffectiveWeeklyCaughtSet();
+        const colSummary = computeCollectionSummary({
+            hunts: catalog.huntsList,
+            trainerLevel: Number(state?.level || 0),
+            pokedex: state?.pokedex || null,
+            weeklyCaughtSet: weeklySetSnap,
+            extraPokedexKeys: optimisticPokedexKeys,
+        });
+        const tcWindow = getTopCatchWeekWindow(topCatchState.week || state?.topCatch?.s || null, serverNowSnap);
+        const tcCount = Math.max(topCatchState.count, topCatchState.keys.size);
+        const tcMilestone = getTopCatchMilestoneProgress(tcCount, topCatchState.paidMilestone);
+        const tcRanking = computeTopCatchRankingPosition(
+            state?.nick || session?.nick || '',
+            tcCount,
+            Number(state?.level || 0),
+            topCatchState.rankingRows
+        );
+        const objDec = (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch')
+            ? (objectiveLastDecision || evaluateFarmObjective({ triggerSwap: false }))
+            : null;
+        const collectionSnap = {
+            mode: config.farmObjective || 'off',
+            focus: config.farmObjectiveFocus || 'xp',
+            statusText: objDec?.statusText || '',
+            loading: Boolean(objDec?.loading),
+            completed: Boolean(objDec?.completed),
+            usedHuntGuide: Boolean(objDec?.usedHuntGuide),
+            targetSlug: objDec?.targetSlug || null,
+            targetName: objDec?.targetName || null,
+            targetLevel: Number(objDec?.targetLevel || 0),
+            targetMetricLabel: objDec?.targetMetricLabel || '',
+            currentMissing: Array.isArray(objDec?.currentMissing) ? objDec.currentMissing : [],
+            pokedex: colSummary.pokedex,
+            topCatch: {
+                week: tcWindow.week,
+                startMs: tcWindow.startMs,
+                endMs: tcWindow.endMs,
+                remainingMs: tcWindow.remainingMs,
+                ending: tcWindow.ending,
+                loaded: topCatchState.loaded,
+                ini: topCatchState.ini,
+                count: tcCount,
+                unlockedTotal: colSummary.topCatch.unlockedTotal,
+                unlockedCaptured: colSummary.topCatch.unlockedCaptured,
+                unlockedMissing: colSummary.topCatch.unlockedMissing,
+                unlockedPendingHunts: colSummary.topCatch.unlockedPendingHunts,
+                pct: colSummary.topCatch.pct,
+                milestone: tcMilestone,
+                ranking: tcRanking,
+                previousWeek: topCatchState.previousWeek,
+            },
+        };
+
         return {
             version: APP_VERSION,
             status,
@@ -4352,6 +4893,7 @@ export function createHeadlessController(options = {}) {
             browserProfileSetting: normalizedProfileSetting,
             browserProfiles: buildBrowserProfileOptions(),
             huntGuide: huntGuideStatus,
+            collection: collectionSnap,
             session: session ? {
                 nick: session.nick,
                 contaId: payload?.contaId ?? null,
@@ -4797,6 +5339,8 @@ export async function startGuiServer(options = {}) {
                 ok = controller.triggerAction('refresh-lives');
             } else if (action === 'reset-stats') {
                 ok = controller.triggerAction('reset-stats');
+            } else if (action === 'refresh-topcatch') {
+                ok = controller.triggerAction('refresh-topcatch');
             } else if (action === 'login-twitch') {
                 ok = controller.startLogin('twitch', { interactive: body.interactive === true });
             } else if (action === 'login-kick') {

@@ -212,6 +212,18 @@
               <button type="button" onclick="postAction('refresh-vote')" style="padding:4px 8px;font-size:11px;" title="Atualizar voto">↻</button>
             </div>
           </div>
+          <div style="margin-top:8px;padding-top:8px;border-top:1px solid #1e293b;display:flex;flex-direction:column;gap:6px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+              <strong style="font-size:12px;color:#cbd5e1;">Pokédex &amp; Top Catch</strong>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <span class="sub" id="tcTimerDash" style="color:#7dd3fc;">Sem dados</span>
+                <button type="button" onclick="postAction('refresh-topcatch')" style="padding:3px 8px;font-size:11px;" title="Atualizar Top Catch e ranking">↻</button>
+              </div>
+            </div>
+            <div class="sub" id="tcSummaryDash">Top Catch: aguardando sincronização...</div>
+            <div class="sub" id="dexSummaryDash">Pokédex: aguardando hunts liberadas...</div>
+            <div class="sub" id="colStatusDash" style="color:#c4b5fd;display:none;"></div>
+          </div>
         </div>
 
         <div class="card">
@@ -341,6 +353,21 @@
                 <option value="xp">XP/h</option>
                 <option value="ouro">Ouro/h</option>
                 <option value="shiny">Shiny/h</option>
+              </select>
+            </div>
+            <div class="field"><label for="cFarmObjective">Objetivo de colecao</label>
+              <select id="cFarmObjective">
+                <option value="off">Desligado (normal)</option>
+                <option value="pokedex">Completar Pokedex</option>
+                <option value="topcatch">Modo Top Catch</option>
+              </select>
+            </div>
+            <div class="field"><label for="cFarmObjectiveFocus">Trajeto colecao (/hunt)</label>
+              <select id="cFarmObjectiveFocus">
+                <option value="xp">XP/h (/hunt)</option>
+                <option value="ouro">Ouro/h (/hunt)</option>
+                <option value="shiny">Shiny/h (/hunt)</option>
+                <option value="fast">Mais rapido (menor nivel)</option>
               </select>
             </div>
             <div class="field"><label for="cLiveTargetHours">Meta por buff</label>
@@ -476,7 +503,7 @@
 
     document.getElementById('cfgPanel').addEventListener('change', () => { cfgDirty = true; });
     document.getElementById('cfgChips').addEventListener('change', () => { cfgDirty = true; });
-    for (const id of ['cEco', 'cBall', 'cShinyBall', 'cTargetBalls', 'cTargetPotions', 'cRestockPotion', 'cTargetRevives', 'cReserve', 'cLiveTargetHours', 'cLiveTier', 'cLiveMaxTw', 'cLiveMaxKk', 'cLiveCustomTw', 'cLiveCustomKk', 'cGuideMode', 'cGuideMetric']) {
+    for (const id of ['cEco', 'cBall', 'cShinyBall', 'cTargetBalls', 'cTargetPotions', 'cRestockPotion', 'cTargetRevives', 'cReserve', 'cLiveTargetHours', 'cLiveTier', 'cLiveMaxTw', 'cLiveMaxKk', 'cLiveCustomTw', 'cLiveCustomKk', 'cGuideMode', 'cGuideMetric', 'cFarmObjective', 'cFarmObjectiveFocus']) {
       document.getElementById(id).addEventListener('change', () => { cfgDirty = true; });
       document.getElementById(id).addEventListener('input', () => { cfgDirty = true; });
     }
@@ -681,6 +708,8 @@
         liveRewardTier: document.getElementById('cLiveTier').value,
         huntGuideMode: document.getElementById('cGuideMode').value,
         huntGuideMetric: document.getElementById('cGuideMetric').value,
+        farmObjective: document.getElementById('cFarmObjective').value,
+        farmObjectiveFocus: document.getElementById('cFarmObjectiveFocus').value,
         liveMaxTwitchSlots: Number(document.getElementById('cLiveMaxTw').value) || 4,
         liveMaxKickSlots: Number(document.getElementById('cLiveMaxKk').value) || 2,
         liveCustomTwitch: document.getElementById('cLiveCustomTw').value,
@@ -826,6 +855,49 @@
           voteLine.textContent = `Vote & Ganhe: ${vWhen} (${vData.noPar || 0}/${vData.votosPorDiamante || 2} p/ diamante · ${vData.votos || 0} votos)`;
           voteLine.style.color = vReady ? '#6ee7b7' : '';
           voteBtn.disabled = !vData.url;
+        }
+      }
+
+      const col = data.collection || {};
+      const tc = col.topCatch || {};
+      const dex = col.pokedex || {};
+      const tcTimerDash = document.getElementById('tcTimerDash');
+      if (tcTimerDash) {
+        if (tc.endMs) {
+          const remSec = Math.max(0, Math.floor((Number(tc.endMs) - nowDash) / 1000));
+          const dd = Math.floor(remSec / 86400);
+          const hh = Math.floor((remSec % 86400) / 3600);
+          const mm = Math.floor((remSec % 3600) / 60);
+          tcTimerDash.textContent = remSec > 0
+            ? (dd > 0 ? `Falta ${dd}d ${hh}h ${String(mm).padStart(2, '0')}m` : `Falta ${hh}h ${String(mm).padStart(2, '0')}m`)
+            : 'Virando semana...';
+        } else {
+          tcTimerDash.textContent = 'Sem dados';
+        }
+      }
+      const tcSumDash = document.getElementById('tcSummaryDash');
+      if (tcSumDash) {
+        const rk = tc.ranking;
+        const rkTxt = rk?.pos != null
+          ? `#${fmtNum(rk.pos)}${rk.prize ? ` (${rk.prize.diamantes} 💎)` : ''}`
+          : (rk?.top100Cutoff != null ? `Top 100: ${fmtNum(rk.top100Cutoff)}` : 'sem ranking');
+        const ms = tc.milestone;
+        const msTxt = ms ? (ms.completedAll ? 'Marcos: 600/600 ✓' : `Marco: ${fmtNum(ms.current)}/${fmtNum(ms.next)} (${ms.nextRewardLabel})`) : '';
+        tcSumDash.textContent = `Top Catch: ${fmtNum(tc.count || 0)} especies · ${rkTxt}${msTxt ? ` · ${msTxt}` : ''}`;
+      }
+      const dexSumDash = document.getElementById('dexSummaryDash');
+      if (dexSumDash) {
+        dexSumDash.textContent = Number(dex.unlockedTotal || 0) > 0
+          ? `Pokedex: ${fmtNum(dex.unlockedCaptured)}/${fmtNum(dex.unlockedTotal)} liberadas (${dex.pct || 0}%) · faltam ${fmtNum(dex.unlockedPendingHunts)} hunts`
+          : `Pokedex: ${fmtNum(dex.capturedTotal || 0)} registradas`;
+      }
+      const colStDash = document.getElementById('colStatusDash');
+      if (colStDash) {
+        if (col.mode && col.mode !== 'off' && col.statusText) {
+          colStDash.style.display = 'block';
+          colStDash.textContent = col.statusText;
+        } else {
+          colStDash.style.display = 'none';
         }
       }
 
@@ -1026,6 +1098,8 @@
         document.getElementById('cLiveTier').value = c.liveRewardTier || 'smart';
         document.getElementById('cGuideMode').value = c.huntGuideMode || 'off';
         document.getElementById('cGuideMetric').value = c.huntGuideMetric || 'xp';
+        document.getElementById('cFarmObjective').value = c.farmObjective || 'off';
+        document.getElementById('cFarmObjectiveFocus').value = c.farmObjectiveFocus || 'xp';
         document.getElementById('cLiveMaxTw').value = c.liveMaxTwitchSlots ?? 4;
         document.getElementById('cLiveMaxKk').value = c.liveMaxKickSlots ?? 2;
         document.getElementById('cLiveCustomTw').value = c.liveCustomTwitch ?? '';

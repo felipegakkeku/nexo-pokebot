@@ -344,6 +344,19 @@ export function createHeadlessHuntGuideEvaluator(options = {}) {
 
         const value = { xp: best.xpPokemonH, ouro: best.ouroH, shiny: best.shinyH }[metric];
         if (!Number.isFinite(value) || value <= 0) return null;
+        const ranked = pool
+            .filter((row) => row?.slug)
+            .map((row) => ({
+                slug: String(row.slug),
+                name: String(row.nome || row.slug),
+                level: Number(row.nivel || 0),
+                region: String(row.regiao || ''),
+                value: Number({ xp: row.xpPokemonH, ouro: row.ouroH, shiny: row.shinyH }[metric] || 0),
+                xpH: Number(row.xpPokemonH || 0),
+                goldH: Number(row.ouroH || 0),
+                shinyH: Number(row.shinyH || 0),
+                unsafe: Boolean(row.umHit || Number(row.mortesH || 0) >= 0.5),
+            }));
         return {
             slug: best.slug,
             name: best.nome,
@@ -353,6 +366,7 @@ export function createHeadlessHuntGuideEvaluator(options = {}) {
             region: best.regiao,
             value,
             unsafe: Boolean(best.umHit || Number(best.mortesH || 0) >= 0.5),
+            ranked,
             source: 'headless',
         };
     };
@@ -438,6 +452,19 @@ export async function readHuntGuideInPage(metric) {
     if (!best?.slug) return null;
     const value = { xp: best.xpPokemonH, ouro: best.ouroH, shiny: best.shinyH }[metric];
     if (!Number.isFinite(value) || value <= 0) return null;
+    const ranked = pool
+        .filter((row) => row?.slug)
+        .map((row) => ({
+            slug: String(row.slug),
+            name: String(row.nome || row.slug),
+            level: Number(row.nivel || 0),
+            region: String(row.regiao || ''),
+            value: Number({ xp: row.xpPokemonH, ouro: row.ouroH, shiny: row.shinyH }[metric] || 0),
+            xpH: Number(row.xpPokemonH || 0),
+            goldH: Number(row.ouroH || 0),
+            shinyH: Number(row.shinyH || 0),
+            unsafe: Boolean(row.umHit || Number(row.mortesH || 0) >= 0.5),
+        }));
     return {
         slug: best.slug,
         name: best.nome,
@@ -447,6 +474,7 @@ export async function readHuntGuideInPage(metric) {
         region: best.regiao,
         value,
         unsafe: Boolean(best.umHit || best.mortesH >= 0.5),
+        ranked,
     };
 }
 

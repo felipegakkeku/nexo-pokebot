@@ -1830,6 +1830,8 @@ function registerIpcHandlers() {
             ok = controller.triggerAction('refresh-lives');
         } else if (act === 'reset-stats') {
             ok = controller.triggerAction('reset-stats');
+        } else if (act === 'refresh-topcatch') {
+            ok = controller.triggerAction('refresh-topcatch');
         } else if (act === 'login-twitch') {
             ok = controller.startLogin('twitch', { interactive: payload.interactive === true });
         } else if (act === 'login-kick') {
