@@ -1089,9 +1089,9 @@ test('evaluateHeadlessTick: auto.set, mistico.bola, ball.throw (VIP/sem VIP), sh
     });
 
     const buys = actionsShopPrey.filter((a) => a.t === 'shop.buy');
+    // Pouco gold: a poção vem antes da bola (sem cura o farm morre).
     assert.deepEqual(buys, [
-        { t: 'shop.buy', kind: 'ball', id: 1, qty: 95 },
-        { t: 'shop.buy', kind: 'item', id: 200, qty: 10 },
+        { t: 'shop.buy', kind: 'item', id: 200, qty: 20 },
     ]);
     assert.deepEqual(actionsShopPrey.find((a) => a.t === 'prey.escolher'), {
         t: 'prey.escolher',
@@ -2019,9 +2019,9 @@ test('restock: escala limiar proporcional ao alvo, forca no botao manual, respei
         },
     });
     assert.deepEqual(forced, [
-        { t: 'shop.buy', kind: 'ball', id: 1, qty: 150 },
         { t: 'shop.buy', kind: 'item', id: 201, qty: 120 },
         { t: 'shop.buy', kind: 'item', id: 205, qty: 20 },
+        { t: 'shop.buy', kind: 'ball', id: 1, qty: 150 },
     ]);
 
     // Conta isolada: padrao minGoldReserve=0, restockRevive=true, limiar proporcional e aviso claro quando reserva bloqueia
@@ -2084,10 +2084,10 @@ test('restock: escala limiar proporcional ao alvo, forca no botao manual, respei
         assert.equal(sent.some((f) => f.t === 'shop.buy'), false);
         assert.ok(controller.getSnapshot().logs.some((l) => /reserva/i.test(l.text)));
 
-        // Zerando a reserva -> restock manual compra bolas/pocoes/revives imediatamente
+        // Zerando a reserva -> restock manual compra na hora, comecando pela pocao (pouco gold vai para a cura)
         controller.updateConfig({ minGoldReserve: 0 });
         assert.equal(controller.triggerAction('restock'), true);
-        assert.ok(sent.some((f) => f.t === 'shop.buy' && f.kind === 'ball' && f.id === 1));
+        assert.ok(sent.some((f) => f.t === 'shop.buy' && f.kind === 'item' && f.id === 200));
     } finally {
         controller.stop();
         rmSync(dir, { recursive: true, force: true });

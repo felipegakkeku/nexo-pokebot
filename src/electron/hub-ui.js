@@ -1030,6 +1030,7 @@
     const TIPS = {
         cCaidos: 'Joga a Pokébola em Pokémon caídos. O jogo só sorteia o shiny na hora do arremesso, então não dá para saber antes: toda bola jogada é uma chance, e um shiny que escapa vai embora com o corpo. Funciona também no Modo Economia do jogo, com 0% de GPU.',
         cNativeHeal: 'Liga a cura automática e o Revive do próprio jogo, com as poções marcadas mais abaixo.',
+        cPvpQueue: 'Mantém a conta na fila do PvP ranqueado: entra, e depois de cada partida (e da espera que o jogo pede entre elas) entra de novo. Funciona sem VIP. O placar da sessão aparece no registro.',
         cRestock: 'Compra bolas, poções e revives no mercado quando ficam abaixo dos alvos, sem passar da reserva mínima de gold.',
         cPass: 'Resgata a recompensa diária do passe assim que libera.',
         cPrey: 'Rola o Prey diário automaticamente.',
@@ -1044,7 +1045,7 @@
         cBall: 'Bola de todo arremesso. Como o shiny é sorteado no próprio arremesso, é esta bola que tenta segurar o shiny: bola melhor segura mais shinies e custa mais. "auto" escolhe pelo gold que você tem.',
         cTargetBalls: 'Quantas bolas manter na mochila. O restock completa até esse número.',
         cTargetPotions: 'Quantas poções manter. 0 desliga a compra de poções.',
-        cRestockPotion: 'Qual poção comprar no restock. Automático usa a primeira marcada no Auto-Heal.',
+        cRestockPotion: 'Qual poção comprar no restock. "Mais econômica" calcula o gold por HP que cada poção cura de verdade no Pokémon ativo e compra e usa a que rende mais: em Pokémon de muito HP a Small vira uma por segundo e sai mais cara que uma Hyper ou Ultimate. Automático usa a primeira marcada no Auto-Heal.',
         cReserve: 'O restock nunca deixa o gold abaixo deste valor.',
         cTargetRevives: 'Quantos revives manter. 0 desliga a compra.',
         cGuideMode: 'Acompanha a recomendação do /hunt: só avisa ou troca de hunt sozinho, sempre no tempo exato de saída de combate.',

@@ -25,6 +25,97 @@ export const DEFAULT_ITEM_PRICES = Object.freeze({
     70070: 2500,
 });
 
+// Cura de cada poção (HP fixo), conforme /assets/items.json do jogo.
+export const POTION_HEAL = Object.freeze({ 200: 60, 201: 150, 202: 400, 203: 1000, 204: 3000 });
+export const POTION_NAMES = Object.freeze({ 200: 'Small Potion', 201: 'Great Potion', 202: 'Ultra Potion', 203: 'Hyper Potion', 204: 'Ultimate Potion' });
+
+/**
+ * Escolhe a poção compravel com menor gold por HP curado de verdade no Pokemon ativo.
+ * O jogo so usa a poção quando a vida cai abaixo do limiar, entao faltam (100% - limiar) do HP maximo;
+ * o que a poção curar alem disso se perde. Poção que cura menos de 10% do HP nao acompanha o dano
+ * (o jogo passa a usar uma por segundo) e so entra se nenhuma outra servir.
+ * @param {object} state Estado do jogador (pokemons, activeId, automation.hpLimiar).
+ * @param {object} [catalog] Catalogo com itemPrices.
+ * @returns {{id:number,name:string,useful:number,goldPerHp:number,maxHp:number,ranked:Array<object>}|null}
+ */
+export function pickOptimizedPotion(state, catalog = {}) {
+    const active = (state?.pokemons || []).find((p) => p && p.id === state?.activeId);
+    const maxHp = Number(active?.maxHp ?? active?.hpMax ?? 0);
+    if (!(maxHp > 0)) return null;
+    let thr = Number(state?.automation?.hpLimiar);
+    if (!Number.isFinite(thr) || thr <= 0) thr = 0.3;
+    if (thr > 1) thr /= 100;
+    thr = Math.min(0.9, Math.max(0.1, thr));
+    const room = (1 - thr) * maxHp;
+    const ranked = BUYABLE_POTION_IDS.map((id) => {
+        const price = Number(catalog?.itemPrices?.[id] ?? DEFAULT_ITEM_PRICES[id] ?? 0);
+        const useful = Math.min(POTION_HEAL[id] || 0, room);
+        return { id, name: POTION_NAMES[id], price, useful, goldPerHp: useful > 0 && price > 0 ? price / useful : Infinity, keepsUp: useful >= maxHp * 0.1 };
+    }).filter((p) => Number.isFinite(p.goldPerHp));
+    if (ranked.length === 0) return null;
+    ranked.sort((a, b) => (Number(b.keepsUp) - Number(a.keepsUp)) || (a.goldPerHp - b.goldPerHp) || (b.useful - a.useful));
+    const best = ranked[0];
+    return { id: best.id, name: best.name, useful: best.useful, goldPerHp: best.goldPerHp, maxHp, ranked };
+}
+
+const PVP_RETRY_MS = 15_000;
+const PVP_AFTER_MATCH_MS = 5_000;
+
+/**
+ * Aplica uma mensagem `pvp` do servidor ao estado da fila e devolve o texto para o registro (ou null).
+ * @param {object} pvp Estado da fila (mutado): na, waitUntil, wins, losses.
+ * @param {object} m Mensagem { t: 'pvp', fila?, filaRecusa?, partida? }.
+ * @param {number} nowMs Agora.
+ * @returns {string|null}
+ */
+export function applyPvpMessage(pvp, m, nowMs = Date.now()) {
+    if (!pvp || !m) return null;
+    let note = null;
+    if (m.fila && typeof m.fila === 'object') {
+        const was = Boolean(pvp.na);
+        pvp.na = Boolean(m.fila.na);
+        if (m.fila.cooldownMs !== undefined) pvp.waitUntil = nowMs + Math.max(0, Number(m.fila.cooldownMs) || 0);
+        if (pvp.na && !was) note = `PvP: na fila${m.fila.tamanho ? ` (${m.fila.tamanho} na fila agora)` : ''}.`;
+    }
+    if (m.filaRecusa) {
+        pvp.na = false;
+        const rest = Number(m.filaRecusa.restaMs) || 0;
+        pvp.waitUntil = Math.max(Number(pvp.waitUntil || 0), nowMs + (rest > 0 ? rest : PVP_RETRY_MS));
+        note = `PvP: o jogo não deixou entrar na fila (${m.filaRecusa.msg || 'recusou'}).`;
+    }
+    if (m.partida && typeof m.partida === 'object') {
+        const p = m.partida;
+        pvp.na = false;
+        if (p.venci) pvp.wins = Number(pvp.wins || 0) + 1;
+        else pvp.losses = Number(pvp.losses || 0) + 1;
+        pvp.waitUntil = Math.max(Number(pvp.waitUntil || 0), nowMs + PVP_AFTER_MATCH_MS);
+        const rival = String((typeof p.oponente === 'object' ? p.oponente?.nick ?? p.oponente?.nome : p.oponente) ?? '?');
+        const delta = Number(p.delta) || 0;
+        note = `PvP: ${p.venci ? 'venceu' : 'perdeu'} contra ${rival} (${delta >= 0 ? '+' : ''}${delta}). Placar da sessão: ${pvp.wins || 0}V ${pvp.losses || 0}D.`;
+    }
+    return note;
+}
+
+/**
+ * Mantem a conta na fila do PvP ranqueado: pergunta o estado uma vez e entra de novo depois de cada partida,
+ * respeitando a espera que o jogo pede. E o mesmo pedido do botao da fila no painel de PvP do jogo.
+ * @param {object} pvp Estado da fila (mutado).
+ * @param {object} config Config (pvpQueue).
+ * @param {number} nowMs Agora.
+ * @returns {Array<object>} Acoes a enviar.
+ */
+export function evaluatePvpQueue(pvp, config, nowMs = Date.now()) {
+    if (!pvp || !config?.pvpQueue) return [];
+    if (!pvp.asked) {
+        pvp.asked = true;
+        pvp.lastTry = nowMs;
+        return [{ t: 'pvp.info', semLadder: 1, soCaixa: 1 }];
+    }
+    if (pvp.na || nowMs < Number(pvp.waitUntil || 0) || nowMs - Number(pvp.lastTry || 0) < PVP_RETRY_MS) return [];
+    pvp.lastTry = nowMs;
+    return [{ t: 'pvp.fila.entrar' }];
+}
+
 export const MYSTIC_BALL_PRIORITY = Object.freeze([5, 4, 3, 2, 1]);
 export const CAMPOS_AUTO_SET = Object.freeze([
     'autoBallAteCapturar',
@@ -490,13 +581,15 @@ export function pickHeadlessBallForCorpse(corpse, balls = {}, config = {}, playe
     if (corpse?.shiny) {
         const shinyBall = config?.shinyBall || 'best';
         order = SHINY_BALL_ORDERS[shinyBall] || SHINY_BALL_ORDERS.best;
-    } else if ((corpse?.level || 0) >= (config?.highLevelUltraThreshold ?? 50)) {
+    } else if (!config?.ballEconomy && (corpse?.level || 0) >= (config?.highLevelUltraThreshold ?? 50)) {
+        // Padrao: Ultra em todo caido de nivel alto, porque o shiny sai no arremesso e bola forte segura mais.
         order = NORMAL_BALL_ORDERS.ultra;
     } else {
         const pref = config?.preferredBall || 'auto';
         if (pref === 'auto' || !NORMAL_BALL_ORDERS[pref]) {
             const gold = Number(playerGold || 0);
-            if (gold >= 2_500_000) order = [4, 3, 2, 1];
+            if (config?.ballEconomy) order = gold >= 50_000 ? [2, 1, 3, 4] : [1, 2, 3, 4];
+            else if (gold >= 2_500_000) order = [4, 3, 2, 1];
             else if (gold >= 300_000) order = [3, 2, 1, 4];
             else if (gold >= 50_000) order = [2, 1, 3, 4];
             else order = [1, 2, 3, 4];
@@ -527,6 +620,7 @@ export function resolveRestockBallId(config = {}, playerGold = 0) {
     if (pref === 'ultra' || pref === 'beast') return 4;
 
     const gold = Number(playerGold || 0);
+    if (config?.ballEconomy) return gold >= 50_000 ? 2 : 1;
     if (gold >= 2_500_000) return 4;
     if (gold >= 300_000) return 3;
     if (gold >= 50_000) return 2;
@@ -571,7 +665,11 @@ export function normalizePotionIds(raw) {
  * @param {object} [config] Configuracao headless (restockPotionId e preferredPotionIds).
  * @returns {number} ID da pocao compravel (200..204).
  */
-export function resolveRestockPotionId(state = null, config = null) {
+export function resolveRestockPotionId(state = null, config = null, catalog = null) {
+    if (config?.potionOptimize) {
+        const best = pickOptimizedPotion(state, catalog || {});
+        if (best) return best.id;
+    }
     const explicit = Number(config?.restockPotionId || 0);
     if (BUYABLE_POTION_IDS.includes(explicit)) {
         return explicit;
@@ -624,10 +722,19 @@ export function evaluateHeadlessTick({
     const actions = [];
     const collectionMode = config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch';
 
-    const preferredPotionIds = normalizePotionIds(config.preferredPotionIds);
     const currentPotionIds = Array.isArray(state.automation?.potionIds)
         ? state.automation.potionIds.map((id) => Number(id))
         : [];
+    let preferredPotionIds = normalizePotionIds(config.preferredPotionIds);
+    tracker.potionChoice = null;
+    if (config.potionOptimize) {
+        const best = pickOptimizedPotion(state, catalog);
+        if (best) {
+            tracker.potionChoice = best;
+            const base = preferredPotionIds.length > 0 ? preferredPotionIds : currentPotionIds;
+            preferredPotionIds = [best.id, ...base.filter((id) => id !== best.id && POTION_IDS.includes(id))];
+        }
+    }
     const needsNativeHeal = Boolean(
         config.ensureNativeAutoHeal !== false &&
         state.automation &&
@@ -737,7 +844,7 @@ export function evaluateHeadlessTick({
 
         const potionTarget = Math.max(0, Math.floor(Number(config.targetPotions ?? 100)));
         if (config.restockSmallPotion !== false && potionTarget > 0) {
-            const potionId = resolveRestockPotionId(state, config);
+            const potionId = resolveRestockPotionId(state, config, catalog);
             checks.push({
                 kind: 'item',
                 id: potionId,
@@ -760,6 +867,9 @@ export function evaluateHeadlessTick({
             });
         }
 
+        // Com pouco gold, primeiro a cura (poção), depois o revive e por ultimo a bola: sem cura o farm morre.
+        const restockPriority = (item) => (item.kind === 'ball' ? 2 : item.id === ITEM_IDS.REVIVE ? 1 : 0);
+        checks.sort((a, b) => restockPriority(a) - restockPriority(b));
         let boughtAny = false;
         let neededAny = false;
         let blockedByGold = false;

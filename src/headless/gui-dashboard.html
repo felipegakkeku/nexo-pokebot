@@ -292,8 +292,10 @@
             <label class="chk"><input type="checkbox" id="cEconomyPingOnly" /> Modo Economia (So Ping)</label>
             <label class="chk"><input type="checkbox" id="cStandby" /> Standby Auto (4001)</label>
             <label class="chk"><input type="checkbox" id="cRestock" /> Auto-Restock</label>
+            <label class="chk" title="Pode deixar escapar shiny: o shiny e sorteado no arremesso e bola mais fraca segura menos."><input type="checkbox" id="cBallEconomy" /> Economizar Pokebolas (pode perder shiny)</label>
             <label class="chk"><input type="checkbox" id="cPass" /> Auto-Passe Diario</label>
             <label class="chk"><input type="checkbox" id="cPrey" /> Auto-Prey Diario</label>
+            <label class="chk"><input type="checkbox" id="cPvpQueue" /> Fila de PvP ranqueado</label>
             <label class="chk"><input type="checkbox" id="cNativeHeal" /> Auto-Cura/Revive Nativo</label>
             <label class="chk"><input type="checkbox" id="cLives" /> Auto-Lives (Twitch &amp; Kick)</label>
             <label class="chk"><input type="checkbox" id="cLiveSmart" /> Balancear buffs ate a meta</label>
@@ -321,6 +323,7 @@
             <div class="field"><label>Alvo Pocoes</label><input type="number" id="cTargetPotions" min="0" max="5000" /></div>
             <div class="field"><label for="cRestockPotion">Pocao Restock</label>
               <select id="cRestockPotion">
+                <option value="opt">Mais economica (gold por HP)</option>
                 <option value="0">Automatico (1a marcada)</option>
                 <option value="200">Small Potion</option>
                 <option value="201">Great Potion</option>
@@ -690,7 +693,10 @@
         economyMode: document.getElementById('cEco').value,
         preferredBall: document.getElementById('cBall').value,
         preferredPotionIds,
-        restockPotionId: Number(document.getElementById('cRestockPotion').value) || 0,
+        restockPotionId: document.getElementById('cRestockPotion').value === 'opt' ? 0 : (Number(document.getElementById('cRestockPotion').value) || 0),
+        potionOptimize: document.getElementById('cRestockPotion').value === 'opt',
+        ballEconomy: document.getElementById('cBallEconomy').checked,
+        pvpQueue: document.getElementById('cPvpQueue').checked,
         liveRewardType: liveTwitchRewards[0] || liveKickRewards[0] || 'xp',
         liveTwitchRewards,
         liveKickRewards,
@@ -1082,7 +1088,9 @@
         document.getElementById('cLiveTargetHours').value = String(c.liveTargetHours ?? 24);
         document.getElementById('cEco').value = c.economyMode || 'auto';
         document.getElementById('cBall').value = c.preferredBall || 'auto';
-        document.getElementById('cRestockPotion').value = String(c.restockPotionId || 0);
+        document.getElementById('cRestockPotion').value = c.potionOptimize ? 'opt' : String(c.restockPotionId || 0);
+        document.getElementById('cBallEconomy').checked = !!c.ballEconomy;
+        document.getElementById('cPvpQueue').checked = !!c.pvpQueue;
         document.getElementById('cLiveTier').value = c.liveRewardTier || 'smart';
         document.getElementById('cGuideMode').value = c.huntGuideMode || 'off';
         document.getElementById('cGuideMetric').value = c.huntGuideMetric || 'xp';

@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/felipegakkeku/nexo-pokebot/releases/latest"><img src="https://img.shields.io/badge/Release-v1.0.13-0ea5e9?style=flat-square" alt="Release v1.0.13" /></a>
+  <a href="https://github.com/felipegakkeku/nexo-pokebot/releases/latest"><img src="https://img.shields.io/badge/Release-v1.0.14-0ea5e9?style=flat-square" alt="Release v1.0.14" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/Licen%C3%A7a-MIT-65b7aa?style=flat-square" alt="Licença MIT" /></a>
   <img src="https://img.shields.io/badge/RAM-~400%20MB%20(4%20contas%20%2B%2040%20lives)-10b981?style=flat-square" alt="Consumo médio de 400 MB de RAM com 4 contas e 40 lives" />
   <img src="https://img.shields.io/badge/Ultra--Eco-~60%20MB%20RAM-22c55e?style=flat-square" alt="Modo Ultra-Eco 60 MB RAM" />
@@ -80,6 +80,8 @@ flowchart LR
 - **Explica o que está ligado**: cada opção da Automação tem uma dica ⓘ, e os modos que limitam alguma coisa (Economia do servidor, feed de campo indisponível) mostram um aviso com o que muda e um botão para restaurar.
 - **Mostra se a hunt compensa**: tempo por abate, captura por abate, bolas por captura, lucro líquido por hora e gasto com bolas e poções, por conta.
 - **Avisa o que importa**: shiny capturado, shiny que escapou (e de qual bola), drop raro, recompensa de live e erro, no sino do topo e com som opcional.
+- **Gasta melhor o gold**: a opção **Poção mais econômica** calcula o gold por HP que cada poção cura de verdade no Pokémon ativo e compra a que rende mais; com pouco gold, o restock compra cura antes de bola. A Ultra Ball fica em todo Pokémon de nível alto para segurar shiny, e quem preferir economizar pode ligar **Economizar Pokébolas** (a tela avisa que isso pode deixar escapar shiny).
+- **Cuida do resto sozinho**: recarrega o jogo embutido que travar na tela de carregamento e pode manter a conta na fila do PvP ranqueado, voltando depois de cada partida.
 - **Sugere para onde ir**: integra o `/hunt for PokeIdle` para ranquear hunts por XP/h, ouro/h ou shiny/h e pode trocar de hunt sozinho em modos de coleção (Completar Pokédex, Top Catch semanal).
 
 ## O que o Nexo PokeBot entrega pronto para uso
@@ -107,7 +109,7 @@ flowchart LR
 
 ### Opção 1: Pacote pronto para Windows (sem instalar Node.js)
 
-1. Baixe **`Nexo-PokeBot-v1.0.13.zip`** na página de [Releases](https://github.com/felipegakkeku/nexo-pokebot/releases/latest).
+1. Baixe **`Nexo-PokeBot-v1.0.14.zip`** na página de [Releases](https://github.com/felipegakkeku/nexo-pokebot/releases/latest).
 2. **Extraia todo o conteúdo** do ZIP para uma pasta local (ex.: `C:\Nexo-PokeBot`). Não abra o `.exe` direto de dentro do ZIP.
 3. Abra **`Nexo PokeBot.exe`**.
 4. Na primeira vez, clique em **Abrir jogo embutido** (ou na aba **Conexões**) para entrar em cada uma das suas contas (Contas 1 a 4), ou use o importador automático abaixo se já estiver logado em outro app. Depois de logado, use **Modo Eco** para farmar em segundo plano.
@@ -144,7 +146,7 @@ Todas as sessões, cookies e configurações ficam salvos localmente em arquivos
 - `src/desktop/`: launcher Windows (`PokeBotApp.cs`, `build-exe.mjs`), patch de ícone/metadados PE do runtime Electron (`brand-runtime.mjs`, `launch-hub.mjs`) e gerador do ZIP limpo (`build-friend-zip.mjs`).
 - `src/modules/`: módulos de regras de automação compartilhados (`live-rewards.js`, `capture.js`, `restock.js`, `boss-loot.js`, `prey.js`, `daily-pass.js`, entre outros).
 - `assets/` e `docs/`: ícone original multi-resolução (`nexo-pokebot-icon.png`, `nexo-pokebot.ico`) e QR Code Pix offline (`docs/pix-qr.png`).
-- `tests/`: suíte automatizada com `node:test` + `jsdom` (272 testes cobrindo protocolo, lives, perfis, Centro Médico, `/hunt` e build desktop).
+- `tests/`: suíte automatizada com `node:test` + `jsdom` (279 testes cobrindo protocolo, lives, perfis, Centro Médico, `/hunt` e build desktop).
 
 ## Referências e ecossistema PokeIdle
 
@@ -161,7 +163,7 @@ O **Nexo PokeBot** foi construído especificamente para a comunidade do **[PokeI
 
 ```powershell
 npm.cmd ci                  # instala dependências exatas do package-lock.json
-npm.cmd run check           # ESLint + build + 272 testes automatizados
+npm.cmd run check           # ESLint + build + 279 testes automatizados
 npm.cmd run brand:runtime   # aplica ícone e metadados PE no runtime Electron local
 npm.cmd run build:exe       # compila Nexo PokeBot.exe via csc.exe
 npm.cmd run package:friend  # gera release/Nexo-PokeBot-v1.0.zip limpo (sem dados pessoais)

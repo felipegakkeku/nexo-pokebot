@@ -25,6 +25,8 @@ import {
     isWildCampoMob,
     resolvePokemonSpriteDex,
     evaluateHeadlessTick,
+    evaluatePvpQueue,
+    applyPvpMessage,
     computeModeWarnings,
     chavePokedex,
     getTopCatchWeekWindow,
@@ -127,6 +129,9 @@ const EDITABLE_CONFIG_KEYS = new Set([
     'targetPotions',
     'preferredPotionIds',
     'restockPotionId',
+    'potionOptimize',
+    'ballEconomy',
+    'pvpQueue',
     'minRevives',
     'targetRevives',
     'restockRevive',
@@ -268,6 +273,9 @@ function buildConfig(prefs = {}, saved = {}, overrides = {}, isolatedAccount = f
         targetPotions: typeof p.targetPotions === 'number' ? p.targetPotions : 40,
         preferredPotionIds: Array.isArray(p.preferredPotionIds) ? normalizePotionIds(p.preferredPotionIds) : [],
         restockPotionId: Number(p.restockPotionId || 0),
+        potionOptimize: p.potionOptimize === true,
+        ballEconomy: p.ballEconomy === true,
+        pvpQueue: p.pvpQueue === true,
         minRevives: undefined,
         targetRevives: typeof p.targetRevives === 'number' ? p.targetRevives : 20,
         restockRevive: p.restockRevive ?? true,
@@ -373,6 +381,9 @@ function normalizeConfigPatch(current, patch = {}) {
         const pid = Number(patch.restockPotionId || 0);
         next.restockPotionId = BUYABLE_POTION_IDS.includes(pid) ? pid : 0;
     }
+    if (patch.potionOptimize !== undefined) next.potionOptimize = Boolean(patch.potionOptimize);
+    if (patch.ballEconomy !== undefined) next.ballEconomy = Boolean(patch.ballEconomy);
+    if (patch.pvpQueue !== undefined) next.pvpQueue = Boolean(patch.pvpQueue);
     if (patch.minPotions !== undefined) {
         const n = Number(patch.minPotions);
         if (Number.isFinite(n)) next.minPotions = next.targetPotions > 0 ? Math.max(1, Math.min(next.targetPotions, Math.round(n))) : 0;
@@ -3106,6 +3117,16 @@ export function createHeadlessController(options = {}) {
             desiredMissingKeys: getDesiredMissingKeysForTick(state),
         });
         sendActions(actions);
+        tracker.pvp ??= {};
+        const pvpActions = evaluatePvpQueue(tracker.pvp, config, nowFn());
+        if (pvpActions.length) sendActions(pvpActions);
+        const choice = tracker.potionChoice;
+        if (config.potionOptimize && choice && choice.id !== tracker.lastPotionChoiceId) {
+            tracker.lastPotionChoiceId = choice.id;
+            const fmtRate = (v) => String(Math.round(v * 100) / 100).replace('.', ',');
+            const worst = choice.ranked[choice.ranked.length - 1];
+            pushLog('info', `Poção mais econômica: ${choice.name} (${fmtRate(choice.goldPerHp)} gold por HP no Pokémon de ${Number(choice.maxHp).toLocaleString('pt-BR')} HP${worst && worst.id !== choice.id ? `; ${worst.name} sairia ${fmtRate(worst.goldPerHp)}` : ''}).`);
+        }
         const report = tracker.lastRestockReport;
         if (!forceRestock && report?.blockedByGold && nowFn() - (tracker.lastGoldReserveWarnAt || 0) >= 300_000) {
             tracker.lastGoldReserveWarnAt = nowFn();
@@ -3609,6 +3630,13 @@ export function createHeadlessController(options = {}) {
 
         if (m.t === 'batalha') {
             handleBattleEvents(m);
+            return;
+        }
+
+        if (m.t === 'pvp') {
+            tracker.pvp ??= {};
+            const note = applyPvpMessage(tracker.pvp, m, nowFn());
+            if (note && config.pvpQueue) pushLog(m.partida ? (m.partida.venci ? 'ok' : 'info') : (m.filaRecusa ? 'warn' : 'info'), note);
             return;
         }
 
@@ -4499,7 +4527,17 @@ export function createHeadlessController(options = {}) {
         const prevLiveEnabled = config.liveEnabled;
         const prevBrowserProfile = config.browserProfile;
         const prevPotionsKey = JSON.stringify(config.preferredPotionIds || []);
+        const prevPvpQueue = Boolean(config.pvpQueue);
         config = normalizeConfigPatch(config, patch);
+        if (prevPvpQueue !== Boolean(config.pvpQueue)) {
+            const wasInQueue = Boolean(tracker.pvp?.na);
+            tracker.pvp = {};
+            if (config.pvpQueue) pushLog('info', 'Fila de PvP ligada: a conta entra na fila e volta depois de cada partida.');
+            else {
+                if (wasInQueue) sendActions([{ t: 'pvp.fila.sair' }]);
+                pushLog('info', 'Fila de PvP desligada.');
+            }
+        }
         if (JSON.stringify(config.preferredPotionIds || []) !== prevPotionsKey) {
             tracker.lastAutoSetAt = 0;
         }

@@ -4,6 +4,14 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+## 1.0.14
+
+- **Poção mais econômica (restock otimizado)**: nova opção em **Poção para comprar**. Calcula o gold por HP que cada poção cura de verdade no Pokémon ativo (o que passa do HP que falta abaixo do limiar se perde) e compra e põe em 1º na fila do "Usar Poções" a que rende mais. Em Pokémon de muito HP a Small vira uma por segundo e sai mais cara que uma Hyper ou Ultimate; poção que cura menos de 10% do HP fica por último. O registro avisa quando a escolha muda.
+- **Economizar Pokébolas** (desligado por padrão): para de forçar Ultra Ball em Pokémon de nível alto e respeita a **Bola dos arremessos**; na Automática usa Great (ou Poké sem gold). A tela avisa que isso pode deixar escapar shiny, já que o shiny é sorteado no arremesso.
+- **Prioridade no restock**: com pouco gold, compra primeiro poção, depois revive e por último bola, para o farm não morrer por falta de cura.
+- **Vigia do jogo travado**: se o jogo embutido ficar preso na tela de carregamento por 60 s (ou a página não carregar), recarrega sozinho e espera mais a cada vez, até 5 min; da 2ª vez em diante recarrega sem cache. Não mexe com o aviso de conta aberta em outro lugar.
+- **Fila de PvP ranqueado** (Automação > Farm, desligada por padrão): entra na fila e volta depois de cada partida, respeitando a espera do jogo, mesmo sem VIP. Cada partida vai para o registro com o placar da sessão.
+
 ## 1.0.13
 
 - **Bola do shiny revista**: o PokeIdle sorteia o shiny na hora do arremesso (o brilho só aparece quando a bola sai e, se ela não fecha, o shiny vai embora com o corpo). Não existe marca de shiny no caído antes da bola, então a opção **Bola shiny** saiu do Hub, do painel web e do HUD do userscript. A bola que tenta segurar o shiny é a **Bola dos arremessos** (antes "Bola comum"): bola melhor segura mais shinies e custa mais. Os textos de versões anteriores que falavam em "detecção de Shiny antes do arremesso" e "Bola Shiny" não valem mais.

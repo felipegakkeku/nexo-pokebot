@@ -123,6 +123,56 @@ function buildSeedJs(seed) {
     })()`;
 }
 
+// Vigia do jogo travado: a pagina carregou mas o jogo ficou na tela de abertura (logo com a barra de carga)
+// sem conectar. Recarrega em 60 s, depois espera mais a cada vez (ate 5 min); da 2a vez em diante sem cache.
+// Nao recarrega com aviso de conta aberta em outro lugar ou aviso da conta (tomaria a sessao ou nao adiantaria).
+const STUCK_BASE_MS = 60_000;
+const STUCK_PROBE_JS = `(() => {
+  const shown = (id) => { const e = document.getElementById(id); return !!e && !e.classList.contains('hidden'); };
+  if (shown('sessao-tomada')) return 'aberta em outro lugar';
+  if (shown('alerta-conta')) return 'aviso da conta';
+  if (/just a moment|um momento/i.test(document.title)) return 'cloudflare';
+  for (const id of ['login', 'confirmar-email', 'escolher-nick', 'app']) {
+    const e = document.getElementById(id);
+    if (e && !e.classList.contains('hidden') && e.offsetParent !== null) return id;
+  }
+  const p = document.getElementById('carga-pct'), t = document.getElementById('carga-etapa');
+  if (!p && !t) return 'outra pagina';
+  return ('carga ' + (p ? p.textContent : '?') + '% ' + (t ? t.textContent : '')).trim();
+})()`;
+function markWebviewStuck(acc, wv, why, retry) {
+    wv.__openSince = null;
+    wv.__failedSince = null;
+    wv.__stuckReloads = (wv.__stuckReloads || 0) + 1;
+    showToast({ kind: 'warn', title: `Conta ${acc}: jogo travado no carregamento`, text: `${why}. Recarregando (${wv.__stuckReloads}ª vez).`, account: acc });
+    try { retry(); } catch { /* ignore */ }
+}
+async function checkStuckWebview(acc, wv) {
+    if (wv.__checking || webviews.get(acc) !== wv) return;
+    const wait = STUCK_BASE_MS * Math.min((wv.__stuckReloads || 0) + 1, 5);
+    const now = Date.now();
+    if (wv.__failedSince) {
+        if (now - wv.__failedSince >= wait / 2) markWebviewStuck(acc, wv, `A página não carregou em ${Math.round(wait / 2000)} s`, () => wv.reload());
+        return;
+    }
+    if (!wv.__openSince) return;
+    wv.__checking = true;
+    let state = '';
+    try { state = String(await wv.executeJavaScript(STUCK_PROBE_JS)); } catch { return; } finally { wv.__checking = false; }
+    if (!state.startsWith('carga')) {
+        wv.__openSince = null;
+        wv.__stuckReloads = 0;
+        return;
+    }
+    if (now - wv.__openSince >= wait) {
+        const clean = (wv.__stuckReloads || 0) >= 1;
+        markWebviewStuck(acc, wv, `O jogo não abriu em ${Math.round(wait / 1000)} s (${state})${clean ? ', sem cache' : ''}`, clean ? () => wv.reloadIgnoringCache() : () => wv.reload());
+    }
+}
+setInterval(() => {
+    for (const [acc, wv] of webviews) void checkStuckWebview(acc, wv);
+}, 5_000);
+
 const wvZoomObservers = new Map();
 function wvAutoZoomOn() {
     try { return localStorage.getItem('nexo.wvAutoZoom') !== '0'; } catch { return true; }
@@ -194,8 +244,14 @@ async function openEmbeddedForAccount(acc) {
         }
     });
 
+    wv.addEventListener('did-start-loading', () => { wv.__failedSince = null; });
+    wv.addEventListener('did-finish-load', () => { wv.__openSince = Date.now(); });
+    wv.addEventListener('did-fail-load', (ev) => {
+        if (ev.isMainFrame && ev.errorCode !== -3) wv.__failedSince = Date.now();
+    });
     wv.addEventListener('ipc-message', (ev) => {
         if (ev.channel === 'pb-ws-frame' && typeof ev.args?.[0] === 'string') {
+            if (wv.__openSince) { wv.__openSince = null; wv.__stuckReloads = 0; }
             window.pokeHub.sendWsFrame(acc, ev.args[0]);
         } else if (ev.channel === 'pb-session' && ev.args?.[0]) {
             window.pokeHub.syncWebviewSession(acc, ev.args[0]);
@@ -1214,7 +1270,10 @@ function readConfigForm() {
         targetBalls: Number($('cTargetBalls').value) || 50,
         targetPotions: Math.max(0, Number($('cTargetPotions').value) || 0),
         preferredPotionIds: readCheckedPotions(),
-        restockPotionId: Number($('cRestockPotion').value) || 0,
+        restockPotionId: $('cRestockPotion').value === 'opt' ? 0 : (Number($('cRestockPotion').value) || 0),
+        potionOptimize: $('cRestockPotion').value === 'opt',
+        ballEconomy: $('cBallEconomy').checked,
+        pvpQueue: $('cPvpQueue').checked,
         targetRevives,
         restockRevive: targetRevives > 0,
         minGoldReserve: Math.max(0, Number($('cReserve').value) || 0),
@@ -1686,7 +1745,9 @@ function renderActiveAccountPanel() {
         $('cBall').value = cfg.preferredBall || 'auto';
         $('cTargetBalls').value = cfg.targetBalls ?? 50;
         $('cTargetPotions').value = cfg.targetPotions ?? 40;
-        $('cRestockPotion').value = String(cfg.restockPotionId || 0);
+        $('cRestockPotion').value = cfg.potionOptimize ? 'opt' : String(cfg.restockPotionId || 0);
+        $('cBallEconomy').checked = Boolean(cfg.ballEconomy);
+        $('cPvpQueue').checked = Boolean(cfg.pvpQueue);
         $('cTargetRevives').value = cfg.restockRevive === false ? 0 : (cfg.targetRevives ?? 20);
         $('cReserve').value = cfg.minGoldReserve ?? 0;
         $('cGuideMode').value = cfg.huntGuideMode || 'off';
@@ -2815,7 +2876,7 @@ function renderUpdateUi(st) {
     const btnCheck = $('btnUpdateCheck');
     const brandVer = document.querySelector('.brand-ver');
 
-    const curVer = st.currentVersion || '1.0.13';
+    const curVer = st.currentVersion || '1.0.14';
     const shortCur = curVer.replace(/\.0$/, '');
     if (brandVer) brandVer.textContent = `v${shortCur}`;
     document.title = `Nexo PokeBot v${shortCur}`;
