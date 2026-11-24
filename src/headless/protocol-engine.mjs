@@ -126,13 +126,29 @@ export function createStateMerger() {
 }
 
 /**
+ * Verifica se uma entidade presente em `campo` / `campo.init` representa um Pokemon selvagem de hunt.
+ * Exclui treinadores (`tr`), pets de jogadores (`dn`), equipes PvP (`eq`), bonecos (`bn`),
+ * pets em treino na casa (`ti`) e NPCs do Centro Medico (`cura`, `tm`, `depot`).
+ * @param {object} mob Registro normalizado de mob do rastreador de campo.
+ * @returns {boolean} True apenas para mobs selvagens capturaveis.
+ */
+export function isWildCampoMob(mob) {
+    if (!mob || mob.slot == null) return false;
+    if (mob.ehTreinador || mob.ehBoneco || mob.emTreino || mob.ehNpc) return false;
+    if (mob.dono != null && mob.dono !== '') return false;
+    if (mob.equipe != null && mob.equipe !== '') return false;
+    return true;
+}
+
+/**
  * Cria um rastreador dos mobs e caidos presentes no campo atual.
- * @returns {object} Controlador com applyCampoInit, applyCampo, getFallenCorpses, getMobs e reset.
+ * @returns {object} Controlador com applyCampoInit, applyCampo, applyBattleEvent, getFallenCorpses, getMobs, getScene e reset.
  */
 export function createFieldTracker() {
     const mobs = new Map();
     const recentBattleSlots = [];
     let serverNow = Date.now();
+    let scene = { slug: null, centro: false, casa: false, pracaTag: null };
 
     const pruneRecentSlots = (ts) => {
         for (let i = recentBattleSlots.length - 1; i >= 0; i--) {
@@ -162,7 +178,7 @@ export function createFieldTracker() {
         return null;
     };
 
-    const applyCampo = (m, nowMs) => {
+    const mergeCampoDelta = (m, nowMs) => {
         serverNow = Number(m?.ts || nowMs || serverNow);
         for (const b of m?.mobs ?? []) {
             if (!b || b.s == null) continue;
@@ -176,6 +192,11 @@ export function createFieldTracker() {
                 shiny: b.sh !== undefined ? Boolean(b.sh) : (isNewName ? false : Boolean(prev.shiny)),
                 morto: b.x !== undefined ? Boolean(b.x) : Boolean(prev.morto),
                 ehTreinador: b.tr !== undefined ? Boolean(b.tr) : (isNewName ? false : Boolean(prev.ehTreinador)),
+                dono: b.dn !== undefined ? b.dn : (isNewName ? null : (prev.dono ?? null)),
+                equipe: b.eq !== undefined ? b.eq : (isNewName ? null : (prev.equipe ?? null)),
+                ehBoneco: b.bn !== undefined ? Boolean(b.bn) : (isNewName ? false : Boolean(prev.ehBoneco)),
+                emTreino: b.ti !== undefined ? true : (isNewName ? false : Boolean(prev.emTreino)),
+                ehNpc: (b.cura || b.tm || b.depot) ? true : (isNewName ? false : Boolean(prev.ehNpc)),
                 hp: b.hp !== undefined ? b.hp : prev.hp,
                 maxHp: b.mhp !== undefined ? b.mhp : prev.maxHp,
                 expiraEm: b.xr !== undefined ? serverNow + Number(b.xr) : (b.x === false ? undefined : prev.expiraEm),
@@ -186,12 +207,31 @@ export function createFieldTracker() {
         }
     };
 
+    const applyCampo = (m, nowMs) => {
+        const msgPracaTag = m?.sl ?? null;
+        if (scene.slug != null && msgPracaTag !== scene.pracaTag) {
+            return;
+        }
+        if (scene.slug == null && msgPracaTag != null) {
+            scene.pracaTag = msgPracaTag;
+            scene.centro = true;
+        }
+        mergeCampoDelta(m, nowMs);
+    };
+
     const applyCampoInit = (m, nowMs) => {
         mobs.clear();
         recentBattleSlots.length = 0;
+        const pracaTag = m?.sl ?? null;
+        scene = {
+            slug: m?.slug ?? null,
+            centro: Boolean(m?.centro || pracaTag != null),
+            casa: Boolean(m?.casa),
+            pracaTag,
+        };
         serverNow = Number(m?.ts || nowMs || Date.now());
         if (m?.mobs || m?.fora) {
-            applyCampo(m, nowMs);
+            mergeCampoDelta(m, nowMs);
         }
     };
 
@@ -220,6 +260,11 @@ export function createFieldTracker() {
                 shiny: e.shiny !== undefined ? Boolean(e.shiny) : Boolean(prev.shiny),
                 morto: true,
                 ehTreinador: false,
+                dono: null,
+                equipe: null,
+                ehBoneco: false,
+                emTreino: false,
+                ehNpc: false,
                 expiraEm: ts + Number(e.xr || 25_000),
             });
             return true;
@@ -235,10 +280,11 @@ export function createFieldTracker() {
     };
 
     const getFallenCorpses = (nowMs = serverNow, prioritizeExpiring = true) => {
+        if (scene.centro || scene.casa || scene.pracaTag != null) return [];
         const list = [];
         for (const e of mobs.values()) {
             const resta = (e.expiraEm ?? 0) - nowMs;
-            if (e.morto && !e.ehTreinador && resta > 0) {
+            if (e.morto && isWildCampoMob(e) && resta > 0) {
                 list.push({
                     slot: e.slot,
                     nome: e.nome || '',
@@ -262,12 +308,17 @@ export function createFieldTracker() {
     };
 
     const getMobs = () => [...mobs.values()];
+    const getScene = () => ({
+        ...scene,
+        isWild: !scene.centro && !scene.casa && scene.pracaTag == null,
+    });
     const reset = () => {
         mobs.clear();
         recentBattleSlots.length = 0;
+        scene = { slug: null, centro: false, casa: false, pracaTag: null };
     };
 
-    return { applyCampoInit, applyCampo, applyBattleEvent, getFallenCorpses, getMobs, reset };
+    return { applyCampoInit, applyCampo, applyBattleEvent, getFallenCorpses, getMobs, getScene, reset };
 }
 
 /**

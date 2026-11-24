@@ -1249,7 +1249,7 @@ let soundCfg = loadSoundCfg();
 
 function defaultSoundCfg() {
     const events = {};
-    for (const ev of SOUND_EVENTS) events[ev] = { ...ALERT_DEFAULTS[ev], url: '', file: '', title: '' };
+    for (const ev of SOUND_EVENTS) events[ev] = { ...ALERT_DEFAULTS[ev], volume: 1, url: '', file: '', title: '' };
     return { enabled: true, volume: 0.8, events };
 }
 
@@ -1258,7 +1258,14 @@ function loadSoundCfg() {
     try {
         const raw = JSON.parse(readFileSync(SOUND_CFG_PATH, 'utf8'));
         const out = { ...base, ...raw, events: { ...base.events } };
-        for (const ev of SOUND_EVENTS) out.events[ev] = { ...base.events[ev], ...(raw?.events?.[ev] || {}) };
+        for (const ev of SOUND_EVENTS) {
+            const merged = { ...base.events[ev], ...(raw?.events?.[ev] || {}) };
+            const rawEvVol = merged.volume;
+            merged.volume = rawEvVol != null && Number.isFinite(Number(rawEvVol))
+                ? Math.min(1, Math.max(0, Number(rawEvVol)))
+                : 1;
+            out.events[ev] = merged;
+        }
         out.volume = Math.min(1, Math.max(0, Number(out.volume ?? 0.8)));
         out.enabled = out.enabled !== false;
         return out;
@@ -1282,6 +1289,9 @@ function publicSoundCfg() {
             enabled: e.enabled !== false,
             toast: e.toast !== false,
             os: e.os !== false,
+            volume: e.volume != null && Number.isFinite(Number(e.volume))
+                ? Math.min(1, Math.max(0, Number(e.volume)))
+                : 1,
             url: e.url || '',
             title: e.title || '',
             custom: Boolean(e.file && existsSync(join(SOUND_DIR, e.file))),
@@ -1897,6 +1907,12 @@ function registerIpcHandlers() {
         if (patch.volume != null && Number.isFinite(Number(patch.volume))) soundCfg.volume = Math.min(1, Math.max(0, Number(patch.volume)));
         if (patch.event && SOUND_EVENTS.includes(patch.event) && typeof patch.eventEnabled === 'boolean') {
             soundCfg.events[patch.event] = { ...(soundCfg.events[patch.event] || {}), enabled: patch.eventEnabled };
+        }
+        if (patch.event && SOUND_EVENTS.includes(patch.event) && patch.eventVolume != null && Number.isFinite(Number(patch.eventVolume))) {
+            soundCfg.events[patch.event] = {
+                ...(soundCfg.events[patch.event] || {}),
+                volume: Math.min(1, Math.max(0, Number(patch.eventVolume))),
+            };
         }
         if (patch.event && SOUND_EVENTS.includes(patch.event) && ['toast', 'os'].includes(patch.channel) && typeof patch.value === 'boolean') {
             soundCfg.events[patch.event] = { ...(soundCfg.events[patch.event] || {}), [patch.channel]: patch.value };

@@ -2,6 +2,14 @@
 
 Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova versão (o workflow usa o texto da seção como nota da Release).
 
+## 1.0.8
+
+Correção de falso positivo no alerta **"Shiny visto e não capturado"** e controle de **volume individual por alerta**:
+
+- **Filtro completo de entidades não selvagens no campo (`src/headless/protocol-engine.mjs`, `src/headless/gui-server.mjs`)**: Pokémon pertencentes a outros jogadores no Centro Médico / Praça (`b.dn`), pets em treino na Casa (`b.ti`), Pokémon de PvP (`b.eq`), bonecos de treino (`b.bn`), NPCs (`cura`/`tm`/`depot`), Boss Arena e Arena Mística agora são ignorados na captura, no contador de Shinies vistos e no alerta de Shiny perdido, evitando falsos alertas como pets de nível alto de outros treinadores.
+- **Proteção contra frames atrasados da Praça e sincronização de `shiniesSeen`**: deltas `campo` com tag de sala (`m.sl`) de outra cena são descartados (igual ao `deltaDaCenaAtual` do jogo), o campo é limpo ao receber um novo `welcome` e `shiniesSeen` passa a usar exatamente a mesma lista validada de Shinies selvagens que o rastreador de Shiny perdido.
+- **Volume individual por alerta (`src/electron/main.mjs`, `renderer.html`, `renderer.js`, `styles.css`)**: cada um dos 6 alertas (Shiny perdido, Shiny capturado, Drop raro, Erro, Caixinha +50 e Voto) agora tem seu próprio controle deslizante de volume (`0%` a `100%`) com botão **Testar** ao lado, combinado com o **Volume geral** e salvo em `.pokebot-sounds/sounds.json`.
+
 ## 1.0.7
 
 Interface nova do Hub, pensada para acompanhar as 4 contas de relance, e alerta de shiny visto e não capturado:

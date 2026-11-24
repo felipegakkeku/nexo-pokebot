@@ -34,6 +34,7 @@ import {
     computePassStatus,
     createStateMerger,
     createFieldTracker,
+    isWildCampoMob,
     pickHeadlessBallForCorpse,
     resolveRestockBallId,
     resolveRestockPotionId,
@@ -3131,6 +3132,221 @@ test('garantia de captura e avisos: AoE multi-kill, VIP preserva campo, watchdog
             const snapWarn = controller.getSnapshot({ includeHunts: false });
             assert.ok(snapWarn.modeWarnings.some((w) => w.code === 'server-economy-no-shiny'));
             assert.ok(snapWarn.logs.some((l) => l.kind === 'warn' && /Shiny/i.test(l.text)));
+        } finally {
+            controller.stop();
+        }
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('shiny-miss e shiniesSeen: ignora pets de jogadores (dn), treino na casa (ti), PvP (eq), NPCs, Centro/Casa e deltas atrasados da Praca', async () => {
+    // 1) isWildCampoMob exclui todas as entidades nao selvagens
+    assert.equal(isWildCampoMob({ slot: 1, nome: 'Shedinja', shiny: true }), true);
+    assert.equal(isWildCampoMob({ slot: 2, nome: 'Machamp', level: 1902, shiny: true, dono: 'OutroTreinador' }), false);
+    assert.equal(isWildCampoMob({ slot: 3, nome: 'Machamp', level: 1902, shiny: true, emTreino: true }), false);
+    assert.equal(isWildCampoMob({ slot: 4, nome: 'Machamp', level: 1902, shiny: true, equipe: 'A' }), false);
+    assert.equal(isWildCampoMob({ slot: 5, nome: 'Treinador', shiny: true, ehTreinador: true }), false);
+    assert.equal(isWildCampoMob({ slot: 6, nome: 'Boneco', shiny: true, ehBoneco: true }), false);
+    assert.equal(isWildCampoMob({ slot: 7, nome: 'Enfermeira', shiny: true, ehNpc: true }), false);
+
+    // 2) createFieldTracker descarta corpos em Centro/Casa e ignora delta atrasado da Praca (m.sl) apos voltar pra hunt
+    const f = createFieldTracker();
+    f.applyCampoInit({
+        slug: 'centro_medico',
+        centro: true,
+        sl: 3,
+        ts: 10_000,
+        mobs: [
+            { s: 10, n: 'Machamp', nv: 1902, sh: true, dn: 'TopPlayer', x: true, xr: 20_000 },
+            { s: 11, n: 'Nurse', cura: true },
+        ],
+    }, 10_000);
+    assert.equal(f.getScene().isWild, false);
+    assert.deepEqual(f.getFallenCorpses(10_500), []);
+
+    f.applyCampoInit({
+        slug: 'shedinja_hoenn',
+        ts: 11_000,
+        mobs: [{ s: 1, n: 'Shedinja', nv: 100, sh: false, x: false }],
+    }, 11_000);
+    assert.equal(f.getScene().isWild, true);
+    // Delta atrasado da Praca (sl: 3) com Machamp Nv 1902 shiny deve ser descartado
+    f.applyCampo({
+        sl: 3,
+        ts: 11_100,
+        mobs: [{ s: 10, n: 'Machamp', nv: 1902, sh: true }],
+    }, 11_100);
+    assert.equal(f.getMobs().some((m) => m.nome === 'Machamp'), false);
+
+    // 3) Controlador completo: visitar Centro/Casa com Shiny Machamp Nv 1902 e voltar para hunt gera ZERO shiniesSeen e ZERO shiny-miss;
+    //    ja um Shedinja Shiny selvagem que some sem captura registra shiniesSeen=1 e shiniesMissed=1.
+    const dir = makeTempDir('pokebot-shiny-filter-');
+    let fakeNow = 1_000_000;
+    let sock = null;
+    try {
+        const controller = createHeadlessController({
+            cwd: dir,
+            configPath: join(dir, '.pokebot-headless-config.json'),
+            disableBrowserProfileSync: true,
+            disableHeadlessHuntGuide: true,
+            disableVotePolling: true,
+            nowFn: () => fakeNow,
+            initialConfig: {
+                caidosEnabled: false,
+                restockEnabled: false,
+                dailyPassEnabled: false,
+                preyEnabled: false,
+                liveEnabled: false,
+                ensureNativeAutoHeal: false,
+            },
+            liveRunner: async () => {},
+            liveDisposer: () => {},
+            resolveSession: () => ({
+                nick: 'FilterTester',
+                token: makeFakeJwt({ nick: 'FilterTester', exp: Date.now() + 3_600_000 }),
+                dispositivo: 'uuid-sf',
+                prefs: {},
+                payload: { nick: 'FilterTester', exp: Date.now() + 3_600_000 },
+                source: 'mock',
+            }),
+            wsFactory: () => {
+                sock = { readyState: 1, send() {}, close() { this.readyState = 3; } };
+                queueMicrotask(() => {
+                    sock.onopen?.();
+                    sock.onmessage?.({
+                        data: JSON.stringify({
+                            t: 'welcome',
+                            hunts: [{ slug: 'shedinja_hoenn', nome: 'Shedinja', nivel: 100 }],
+                            estado: {
+                                cheio: true,
+                                nick: 'FilterTester',
+                                level: 500,
+                                gold: 100_000,
+                                huntSlug: 'shedinja_hoenn',
+                                noCentro: false,
+                                balls: { 4: 20 },
+                                items: {},
+                                automation: {},
+                                pokemons: [{ id: 1, level: 500 }],
+                            },
+                        }),
+                    });
+                });
+                return sock;
+            },
+        });
+        try {
+            controller.start();
+            await new Promise((r) => setTimeout(r, 30));
+
+            // Entra no Centro Medico com Shiny Machamp Nv 1902 de outro jogador (dn)
+            sock.onmessage?.({
+                data: JSON.stringify({
+                    t: 'campo.init',
+                    slug: 'centro',
+                    centro: true,
+                    sl: 2,
+                    ts: fakeNow,
+                    mobs: [
+                        { s: 50, n: 'OutroPlayer', tr: true },
+                        { s: 51, n: 'Machamp', nv: 1902, sh: true, dn: 'OutroPlayer' },
+                    ],
+                }),
+            });
+            sock.onmessage?.({
+                data: JSON.stringify({
+                    t: 'campo',
+                    sl: 2,
+                    ts: fakeNow + 500,
+                    mobs: [{ s: 51, c: 5, r: 5 }],
+                }),
+            });
+
+            // Entra na Casa com Shiny Machamp Nv 1902 em treino (ti)
+            fakeNow += 2_000;
+            sock.onmessage?.({
+                data: JSON.stringify({
+                    t: 'campo.init',
+                    slug: 'casa',
+                    casa: true,
+                    ts: fakeNow,
+                    mobs: [
+                        { s: 60, n: 'Machamp', nv: 1902, sh: true, ti: 0 },
+                        { s: 61, n: 'Boneco', bn: true, bi: 0 },
+                    ],
+                }),
+            });
+
+            // Volta para a hunt (Shedinja) e avanca 20s -> nenhum falso alerta de Machamp!
+            fakeNow += 20_000;
+            sock.onmessage?.({
+                data: JSON.stringify({
+                    t: 'campo.init',
+                    slug: 'shedinja_hoenn',
+                    ts: fakeNow,
+                    mobs: [{ s: 1, n: 'Shedinja', nv: 100, sh: false }],
+                }),
+            });
+            // Mesmo se um pet com dn ou eq aparecer em delta solto na hunt, continua ignorado
+            sock.onmessage?.({
+                data: JSON.stringify({
+                    t: 'campo',
+                    ts: fakeNow + 500,
+                    mobs: [
+                        { s: 99, n: 'Machamp', nv: 1902, sh: true, dn: 'Alguem' },
+                        { s: 98, n: 'Machamp', nv: 1902, sh: true, eq: 'B' },
+                    ],
+                }),
+            });
+            fakeNow += 20_000;
+            sock.onmessage?.({
+                data: JSON.stringify({
+                    t: 'campo',
+                    ts: fakeNow,
+                    fora: [99, 98],
+                    mobs: [],
+                }),
+            });
+            fakeNow += 20_000;
+            sock.onmessage?.({
+                data: JSON.stringify({ t: 'campo', ts: fakeNow, mobs: [] }),
+            });
+
+            const snapClean = controller.getSnapshot({ includeHunts: false });
+            assert.equal(snapClean.stats.shiniesSeen, 0);
+            assert.equal(snapClean.stats.shiniesMissed, 0);
+            assert.equal(snapClean.missedShinies.length, 0);
+            assert.equal(snapClean.logs.some((l) => l.kind === 'shiny-miss'), false);
+
+            // Agora um Shedinja Shiny SELVAGEM nasce na hunt e some sem captura -> deve alertar corretamente!
+            fakeNow += 1_000;
+            sock.onmessage?.({
+                data: JSON.stringify({
+                    t: 'campo',
+                    ts: fakeNow,
+                    mobs: [{ s: 3, n: 'Shedinja', nv: 100, sh: true, x: false }],
+                }),
+            });
+            fakeNow += 2_000;
+            sock.onmessage?.({
+                data: JSON.stringify({
+                    t: 'campo',
+                    ts: fakeNow,
+                    fora: [3],
+                    mobs: [],
+                }),
+            });
+            fakeNow += 15_000;
+            sock.onmessage?.({
+                data: JSON.stringify({ t: 'campo', ts: fakeNow, mobs: [] }),
+            });
+
+            const snapReal = controller.getSnapshot({ includeHunts: false });
+            assert.equal(snapReal.stats.shiniesSeen, 1);
+            assert.equal(snapReal.stats.shiniesMissed, 1);
+            assert.equal(snapReal.missedShinies[0]?.name, 'Shedinja');
+            assert.ok(snapReal.logs.some((l) => l.kind === 'shiny-miss' && /Shedinja \(Nv 100\)/.test(l.text)));
         } finally {
             controller.stop();
         }

@@ -22,6 +22,7 @@ import {
     normalizePotionIds,
     createStateMerger,
     createFieldTracker,
+    isWildCampoMob,
     evaluateHeadlessTick,
     computeModeWarnings,
 } from './protocol-engine.mjs';
@@ -45,6 +46,13 @@ import { createHeadlessHuntGuideEvaluator, describeHuntGuide, readHuntGuideInPag
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(HERE, '..', '..');
+const APP_VERSION = (() => {
+    try {
+        return String(JSON.parse(readFileSync(resolve(REPO_ROOT, 'package.json'), 'utf8')).version || '1.0.8');
+    } catch {
+        return '1.0.8';
+    }
+})();
 const DEFAULT_DASHBOARD_PATH = resolve(HERE, 'gui-dashboard.html');
 const DEFAULT_ICON_PNG_PATH = resolve(REPO_ROOT, 'assets', 'nexo-pokebot-icon.png');
 
@@ -2411,35 +2419,74 @@ export function createHeadlessController(options = {}) {
         pushLog('shiny-miss', `Shiny visto e não capturado: ${name}${pending.level ? ` (Nv ${pending.level})` : ''}`);
     };
 
-    const resolveShinyCapture = (name) => {
+    const isNonWildScene = (state, msg = null) => {
+        const sc = field.getScene?.();
+        return Boolean(
+            msg?.centro ||
+            msg?.casa ||
+            msg?.sl != null ||
+            sc?.centro ||
+            sc?.casa ||
+            sc?.pracaTag != null ||
+            state?.noCentro === true ||
+            state?.casa?.dentro === true ||
+            state?.boss?.arena
+        );
+    };
+
+    const resolveShinyCapture = (name, slot = null) => {
+        if (slot != null && pendingShinies.has(slot)) {
+            pendingShinies.delete(slot);
+            return;
+        }
         let best = null;
-        for (const [slot, p] of pendingShinies) {
+        for (const [s, p] of pendingShinies) {
             const sameName = name && p.name && p.name === name;
             const score = (sameName ? 2 : 0) + (p.goneAt ? 1 : 0);
             if (!best || score > best.score || (score === best.score && p.seenAt < best.p.seenAt)) {
-                best = { slot, p, score };
+                best = { slot: s, p, score };
             }
         }
         if (best) pendingShinies.delete(best.slot);
     };
 
     const scanShinyField = (ts) => {
+        const st = merger.getState();
+        const nonWild = isNonWildScene(st);
+        const mysticSlot = st?.mistico?.slot ?? null;
+        const bossSlot = st?.boss?.arena?.slot ?? null;
         const live = new Map();
-        for (const mob of field.getMobs?.() ?? []) {
-            if (!mob || mob.slot == null || !mob.shiny || mob.ehTreinador) continue;
-            if (mob.morto && !(Number(mob.expiraEm || 0) > ts)) continue;
-            live.set(mob.slot, mob);
+        if (!nonWild) {
+            for (const mob of field.getMobs?.() ?? []) {
+                if (!isWildCampoMob(mob) || !mob.shiny) continue;
+                if (mysticSlot != null && mob.slot === mysticSlot) continue;
+                if (bossSlot != null && mob.slot === bossSlot) continue;
+                if (mob.morto && !(Number(mob.expiraEm || 0) > ts)) continue;
+                live.set(mob.slot, mob);
+            }
         }
+        const activeSlotKeys = new Set();
         for (const [slot, mob] of live) {
+            const slotKey = `slot:${slot}`;
+            activeSlotKeys.add(slotKey);
             const p = pendingShinies.get(slot);
             if (!p || (p.name && mob.nome && p.name !== mob.nome)) {
                 if (p) recordMissedShiny(p, ts);
                 pendingShinies.set(slot, { seenAt: ts, name: mob.nome || '', level: mob.level ?? null, goneAt: 0 });
+                seenShinySlots.add(slotKey);
+                stats.shiniesSeen += 1;
             } else {
                 p.goneAt = 0;
                 if (!p.name && mob.nome) p.name = mob.nome;
                 if (p.level == null && mob.level != null) p.level = mob.level;
+                if (!seenShinySlots.has(slotKey)) {
+                    seenShinySlots.add(slotKey);
+                    stats.shiniesSeen += 1;
+                }
             }
+        }
+        for (const oldKey of [...seenShinySlots]) {
+            if (!activeSlotKeys.has(oldKey)) seenShinySlots.delete(oldKey);
         }
         for (const [slot, p] of [...pendingShinies]) {
             if (live.has(slot)) continue;
@@ -2784,7 +2831,7 @@ export function createHeadlessController(options = {}) {
                 const bId = Number(e.ballId || 1);
                 lastBallThrown = bId;
                 stats.spentGold += Number(catalog.ballPrices?.[bId] ?? DEFAULT_BALL_PRICES[bId] ?? 0);
-                if (e.shiny) {
+                if (e.shiny && !isNonWildScene(merger.getState())) {
                     if (e.slot != null) {
                         const p = pendingShinies.get(e.slot)
                             || { seenAt: ts, name: e.nome || '', level: e.level ?? e.nivel ?? null, goneAt: 0 };
@@ -2801,7 +2848,7 @@ export function createHeadlessController(options = {}) {
                 stats.captures += 1;
                 const isShiny = Boolean(e.pokemon?.shiny);
                 if (isShiny) {
-                    resolveShinyCapture(e.pokemon?.nome || e.pokemon?.name || '');
+                    resolveShinyCapture(e.pokemon?.nome || e.pokemon?.name || '', e.slot ?? null);
                     stats.shiniesCaptured += 1;
                     if (stats.shiniesSeen < stats.shiniesCaptured) {
                         stats.shiniesSeen = stats.shiniesCaptured;
@@ -2934,6 +2981,8 @@ export function createHeadlessController(options = {}) {
             status = isBridge ? 'bridge' : 'connected';
             lastError = null;
             lastWelcome = m;
+            field.reset();
+            seenShinySlots.clear();
             liveBridge.ingestWsMessage(m);
             ingestWelcomeCatalog(m, catalog);
             if (m.estado) merger.merge(m.estado);
@@ -3008,6 +3057,7 @@ export function createHeadlessController(options = {}) {
             battleKillsWithoutCampo = 0;
             campoFeedDegraded = false;
             field.applyCampoInit(m, nowFn());
+            scanShinyField(nowFn());
             if (pendingHuntSlug) schedulePendingHuntFlush();
             return;
         }
@@ -3019,23 +3069,6 @@ export function createHeadlessController(options = {}) {
             battleKillsWithoutCampo = 0;
             campoFeedDegraded = false;
             field.applyCampo(m, nowFn());
-            if (Array.isArray(m.mobs)) {
-                const activeSlots = new Set();
-                for (const mob of m.mobs) {
-                    if (!mob || mob.s == null) continue;
-                    const slotKey = `slot:${mob.s}`;
-                    if (mob.sh === true) {
-                        activeSlots.add(slotKey);
-                        if (!seenShinySlots.has(slotKey)) {
-                            seenShinySlots.add(slotKey);
-                            stats.shiniesSeen += 1;
-                        }
-                    }
-                }
-                for (const oldKey of [...seenShinySlots]) {
-                    if (!activeSlots.has(oldKey)) seenShinySlots.delete(oldKey);
-                }
-            }
             scanShinyField(nowFn());
             if (pendingHuntSlug) schedulePendingHuntFlush();
             runTickForState(merger.getState());
@@ -4231,7 +4264,7 @@ export function createHeadlessController(options = {}) {
         });
 
         return {
-            version: '1.0.4',
+            version: APP_VERSION,
             status,
             mode: connectionMode,
             lastError,

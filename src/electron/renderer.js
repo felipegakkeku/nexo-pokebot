@@ -722,9 +722,10 @@ function renderSoundCard() {
     const en = document.getElementById('sndEnabled');
     const vol = document.getElementById('sndVolume');
     const volVal = document.getElementById('sndVolumeVal');
+    const masterVol = Math.min(1, Math.max(0, Number(cfg.volume ?? 0.8)));
     if (en) en.checked = cfg.enabled !== false;
-    if (vol && document.activeElement !== vol) vol.value = String(Math.round((cfg.volume ?? 0.8) * 100));
-    if (volVal) volVal.textContent = `${Math.round((cfg.volume ?? 0.8) * 100)}%`;
+    if (vol && document.activeElement !== vol) vol.value = String(Math.round(masterVol * 100));
+    if (volVal) volVal.textContent = `${Math.round(masterVol * 100)}%`;
     card?.classList.toggle('is-off', cfg.enabled === false);
     for (const [event, ev] of Object.entries(cfg.events || {})) {
         const tg = document.querySelector(`[data-snd-toggle="${event}"]`);
@@ -733,6 +734,16 @@ function renderSoundCard() {
             const box = document.querySelector(`[data-alert-ch="${ch}"][data-alert-ev="${event}"]`);
             if (box) box.checked = ev[ch] !== false;
         }
+        const evVol = Math.min(1, Math.max(0, Number(ev.volume ?? 1)));
+        const evPct = Math.round(evVol * 100);
+        const effPct = Math.round(masterVol * evVol * 100);
+        const evVolInput = document.querySelector(`[data-snd-vol="${event}"]`);
+        const evVolVal = document.querySelector(`[data-snd-vol-val="${event}"]`);
+        const evVolRow = document.querySelector(`[data-snd-vol-row="${event}"]`);
+        if (evVolInput && document.activeElement !== evVolInput) evVolInput.value = String(evPct);
+        if (evVolInput) evVolInput.title = `Volume deste alerta: ${evPct}% (efetivo: ${effPct}% com geral em ${Math.round(masterVol * 100)}%)`;
+        if (evVolVal) evVolVal.textContent = `${evPct}%`;
+        if (evVolRow) evVolRow.classList.toggle('is-muted', ev.enabled === false);
         const cur = document.querySelector(`[data-snd-current="${event}"]`);
         if (cur) {
             cur.textContent = ev.custom ? (ev.title || 'Som escolhido') : 'Som padrão';
@@ -754,6 +765,7 @@ const DEFAULT_BEEPS = {
     vote: [587, 784],
 };
 function playDefaultBeep(volume, event = 'shinyMiss') {
+    if (volume <= 0) return;
     try {
         soundCtx = soundCtx || new AudioContext();
         const ctx = soundCtx;
@@ -782,7 +794,10 @@ async function playSoundEvent(event, { force = false } = {}) {
     if (!cfg) return false;
     const ev = cfg.events?.[event];
     if (!force && (cfg.enabled === false || ev?.enabled === false)) return false;
-    const volume = Math.min(1, Math.max(0, Number(cfg.volume ?? 0.8)));
+    const masterVol = Math.min(1, Math.max(0, Number(cfg.volume ?? 0.8)));
+    const eventVol = Math.min(1, Math.max(0, Number(ev?.volume ?? 1)));
+    const volume = Math.min(1, Math.max(0, masterVol * eventVol));
+    if (volume <= 0) return false;
     if (ev?.custom) {
         let src = soundDataCache.get(event);
         if (!src) {
@@ -822,7 +837,26 @@ async function initSoundControls() {
         clearTimeout(volTimer);
         volTimer = setTimeout(async () => {
             soundCfg = await window.pokeHub.setSoundConfig({ volume: v });
+            renderSoundCard();
         }, 300);
+    });
+    const evVolTimers = new Map();
+    document.querySelectorAll('[data-snd-vol]').forEach((slider) => {
+        slider.addEventListener('input', () => {
+            const event = slider.dataset.sndVol;
+            const v = Math.min(1, Math.max(0, Number(slider.value) / 100));
+            const pct = Math.round(v * 100);
+            const valEl = document.querySelector(`[data-snd-vol-val="${event}"]`);
+            if (valEl) valEl.textContent = `${pct}%`;
+            const masterVol = Math.min(1, Math.max(0, Number(soundCfg?.volume ?? 0.8)));
+            slider.title = `Volume deste alerta: ${pct}% (efetivo: ${Math.round(masterVol * v * 100)}% com geral em ${Math.round(masterVol * 100)}%)`;
+            if (soundCfg?.events?.[event]) soundCfg.events[event].volume = v;
+            clearTimeout(evVolTimers.get(event));
+            evVolTimers.set(event, setTimeout(async () => {
+                soundCfg = await window.pokeHub.setSoundConfig({ event, eventVolume: v });
+                renderSoundCard();
+            }, 250));
+        });
     });
     document.querySelectorAll('[data-snd-toggle]').forEach((tg) => {
         tg.addEventListener('change', async () => {
@@ -2400,7 +2434,7 @@ function renderUpdateUi(st) {
     const btnCheck = $('btnUpdateCheck');
     const brandVer = document.querySelector('.brand-ver');
 
-    const curVer = st.currentVersion || '1.0.7';
+    const curVer = st.currentVersion || '1.0.8';
     const shortCur = curVer.replace(/\.0$/, '');
     if (brandVer) brandVer.textContent = `v${shortCur}`;
     document.title = `Nexo PokeBot v${shortCur}`;

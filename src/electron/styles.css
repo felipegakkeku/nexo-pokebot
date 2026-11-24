@@ -2185,6 +2185,11 @@ select:focus, input:focus, textarea:focus {
 .sound-current { font-size: var(--fs-sm); color: var(--muted); background: color-mix(in srgb, var(--muted) 10%, transparent); border: 1px solid var(--border); border-radius: var(--r-pill); padding: 2px 9px; max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sound-current.custom { color: var(--shiny); border-color: color-mix(in srgb, var(--shiny) 40%, transparent); background: color-mix(in srgb, var(--shiny) 8%, transparent); }
 .sound-event-sub { font-size: var(--fs-sm); color: var(--dim); margin: 4px 0 8px 23px; }
+.sound-event-vol { display: flex; align-items: center; gap: 8px; margin: 0 0 8px 23px; font-size: var(--fs-xs, 11.5px); color: var(--muted); }
+.sound-event-vol.is-muted { opacity: 0.45; }
+.sound-event-vol-lbl { min-width: 44px; font-weight: 600; }
+.sound-event-vol input[type="range"] { flex: 1; max-width: 150px; accent-color: var(--green); cursor: pointer; }
+.sound-event-vol-val { min-width: 34px; text-align: right; color: var(--text); font-variant-numeric: tabular-nums; font-weight: 600; }
 .sound-link-row { display: flex; gap: 6px; align-items: center; }
 .sound-link-row input[type="text"] { flex: 1; min-width: 0; }
 .sound-link-row .btn { flex: none; }

@@ -14,7 +14,7 @@
       <div class="brand">
         <img src="../../assets/nexo-pokebot-icon.png" width="28" height="28" alt="Nexo PokeBot" class="brand-icon" />
         <span class="brand-title">Nexo PokeBot</span>
-        <span class="brand-ver">v1.0.7</span>
+        <span class="brand-ver">v1.0.8</span>
       </div>
 
       <nav class="account-tabs" id="accountTabs" aria-label="Contas">
@@ -77,7 +77,7 @@
           <div class="update-popover hidden" id="updatePopover" role="dialog" aria-label="Atualização do Nexo PokeBot">
             <div class="update-pop-head">
               <span class="update-pop-title" id="updatePopTitle">Atualizações</span>
-              <span class="update-ver-tag" id="updatePopVer">v1.0.7</span>
+              <span class="update-ver-tag" id="updatePopVer">v1.0.8</span>
             </div>
             <div class="update-pop-desc" id="updatePopDesc">Verificando Releases do GitHub...</div>
             <div class="update-progress hidden" id="updateProgWrap">
@@ -463,8 +463,8 @@
               </div>
               <div class="sound-top">
                 <label class="toggle-item"><input type="checkbox" id="sndEnabled" /> Tocar sons de alerta</label>
-                <label class="sound-volume" for="sndVolume">
-                  <span>Volume</span>
+                <label class="sound-volume" for="sndVolume" title="Volume geral (escala todos os alertas)">
+                  <span>Volume geral</span>
                   <input type="range" id="sndVolume" min="0" max="100" step="5" />
                   <span id="sndVolumeVal">80%</span>
                 </label>
@@ -479,6 +479,12 @@
                   </span>
                 </div>
                 <div class="sound-event-sub">Um shiny apareceu no campo e sumiu sem captura (fugiu, o corpo expirou ou a bola falhou).</div>
+                <div class="sound-event-vol" data-snd-vol-row="shinyMiss">
+                  <span class="sound-event-vol-lbl">Volume</span>
+                  <input type="range" min="0" max="100" step="5" value="100" data-snd-vol="shinyMiss" aria-label="Volume do alerta: Shiny visto e não capturado" />
+                  <span class="sound-event-vol-val" data-snd-vol-val="shinyMiss">100%</span>
+                  <button type="button" class="btn sm" data-snd-act="test" data-snd-event="shinyMiss" data-icon="volume" title="Testar com este volume">Testar</button>
+                </div>
                 <details class="sound-more">
                   <summary><span class="sound-current" data-snd-current="shinyMiss">Som padrão</span> · trocar som</summary>
                   <div class="sound-link-row">
@@ -500,6 +506,12 @@
                   </span>
                 </div>
                 <div class="sound-event-sub">Uma das contas capturou um shiny.</div>
+                <div class="sound-event-vol" data-snd-vol-row="shinyCaught">
+                  <span class="sound-event-vol-lbl">Volume</span>
+                  <input type="range" min="0" max="100" step="5" value="100" data-snd-vol="shinyCaught" aria-label="Volume do alerta: Shiny capturado" />
+                  <span class="sound-event-vol-val" data-snd-vol-val="shinyCaught">100%</span>
+                  <button type="button" class="btn sm" data-snd-act="test" data-snd-event="shinyCaught" data-icon="volume" title="Testar com este volume">Testar</button>
+                </div>
                 <details class="sound-more">
                   <summary><span class="sound-current" data-snd-current="shinyCaught">Som padrão</span> · trocar som</summary>
                   <div class="sound-link-row">
@@ -521,6 +533,12 @@
                   </span>
                 </div>
                 <div class="sound-event-sub">Item raro caiu (Outland, ovo shiny, boss e parecidos).</div>
+                <div class="sound-event-vol" data-snd-vol-row="rareDrop">
+                  <span class="sound-event-vol-lbl">Volume</span>
+                  <input type="range" min="0" max="100" step="5" value="100" data-snd-vol="rareDrop" aria-label="Volume do alerta: Drop raro" />
+                  <span class="sound-event-vol-val" data-snd-vol-val="rareDrop">100%</span>
+                  <button type="button" class="btn sm" data-snd-act="test" data-snd-event="rareDrop" data-icon="volume" title="Testar com este volume">Testar</button>
+                </div>
                 <details class="sound-more">
                   <summary><span class="sound-current" data-snd-current="rareDrop">Som padrão</span> · trocar som</summary>
                   <div class="sound-link-row">
@@ -542,6 +560,12 @@
                   </span>
                 </div>
                 <div class="sound-event-sub">Falha de sessão, desconexão ou erro do bot.</div>
+                <div class="sound-event-vol" data-snd-vol-row="error">
+                  <span class="sound-event-vol-lbl">Volume</span>
+                  <input type="range" min="0" max="100" step="5" value="100" data-snd-vol="error" aria-label="Volume do alerta: Erro na conta" />
+                  <span class="sound-event-vol-val" data-snd-vol-val="error">100%</span>
+                  <button type="button" class="btn sm" data-snd-act="test" data-snd-event="error" data-icon="volume" title="Testar com este volume">Testar</button>
+                </div>
                 <details class="sound-more">
                   <summary><span class="sound-current" data-snd-current="error">Som padrão</span> · trocar som</summary>
                   <div class="sound-link-row">
@@ -563,6 +587,12 @@
                   </span>
                 </div>
                 <div class="sound-event-sub">Caixinha da Twitch liberada para resgatar.</div>
+                <div class="sound-event-vol" data-snd-vol-row="chest">
+                  <span class="sound-event-vol-lbl">Volume</span>
+                  <input type="range" min="0" max="100" step="5" value="100" data-snd-vol="chest" aria-label="Volume do alerta: Caixinha +50 na live" />
+                  <span class="sound-event-vol-val" data-snd-vol-val="chest">100%</span>
+                  <button type="button" class="btn sm" data-snd-act="test" data-snd-event="chest" data-icon="volume" title="Testar com este volume">Testar</button>
+                </div>
                 <details class="sound-more">
                   <summary><span class="sound-current" data-snd-current="chest">Som padrão</span> · trocar som</summary>
                   <div class="sound-link-row">
@@ -584,6 +614,12 @@
                   </span>
                 </div>
                 <div class="sound-event-sub">O Vote & Ganhe do IdleHub.io liberou.</div>
+                <div class="sound-event-vol" data-snd-vol-row="vote">
+                  <span class="sound-event-vol-lbl">Volume</span>
+                  <input type="range" min="0" max="100" step="5" value="100" data-snd-vol="vote" aria-label="Volume do alerta: Voto diário liberado" />
+                  <span class="sound-event-vol-val" data-snd-vol-val="vote">100%</span>
+                  <button type="button" class="btn sm" data-snd-act="test" data-snd-event="vote" data-icon="volume" title="Testar com este volume">Testar</button>
+                </div>
                 <details class="sound-more">
                   <summary><span class="sound-current" data-snd-current="vote">Som padrão</span> · trocar som</summary>
                   <div class="sound-link-row">

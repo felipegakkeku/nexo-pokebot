@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/felipegakkeku/nexo-pokebot/releases/latest"><img src="https://img.shields.io/badge/Release-v1.0.7-0ea5e9?style=flat-square" alt="Release v1.0.7" /></a>
+  <a href="https://github.com/felipegakkeku/nexo-pokebot/releases/latest"><img src="https://img.shields.io/badge/Release-v1.0.8-0ea5e9?style=flat-square" alt="Release v1.0.8" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/Licen%C3%A7a-MIT-65b7aa?style=flat-square" alt="Licença MIT" /></a>
   <img src="https://img.shields.io/badge/RAM-~400%20MB%20(4%20contas%20%2B%2040%20lives)-10b981?style=flat-square" alt="Consumo médio de 400 MB de RAM com 4 contas e 40 lives" />
   <img src="https://img.shields.io/badge/Ultra--Eco-~60%20MB%20RAM-22c55e?style=flat-square" alt="Modo Ultra-Eco 60 MB RAM" />
@@ -80,7 +80,7 @@ flowchart LR
 
 ### Opção 1: Pacote pronto para Windows (sem instalar Node.js)
 
-1. Baixe **`Nexo-PokeBot-v1.0.7.zip`** na página de [Releases](https://github.com/felipegakkeku/nexo-pokebot/releases/latest).
+1. Baixe **`Nexo-PokeBot-v1.0.8.zip`** na página de [Releases](https://github.com/felipegakkeku/nexo-pokebot/releases/latest).
 2. **Extraia todo o conteúdo** do ZIP para uma pasta local (ex.: `C:\Nexo-PokeBot`). Não abra o `.exe` direto de dentro do ZIP.
 3. Abra **`Nexo PokeBot.exe`**.
 4. Na primeira vez, clique em **Abrir jogo embutido** (ou na aba **Conexões**) para entrar em cada uma das suas contas (Contas 1 a 4), ou use o importador automático abaixo se já estiver logado em outro app. Depois de logado, use **Modo Eco** para farmar em segundo plano.
