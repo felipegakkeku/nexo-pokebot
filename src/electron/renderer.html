@@ -285,9 +285,11 @@
             <div class="card" data-card="buffs" id="ovBuffsCard">
               <div class="card-head-row">
                 <h3>Buffs das lives</h3>
+                <div class="bview-seg" role="radiogroup" aria-label="Como mostrar os buffs"><button type="button" data-bview-pick="flat" role="radio">Flat</button><button type="button" data-bview-pick="detalhe" role="radio">Detalhado</button></div>
                 <button type="button" class="btn sm" id="btnOvGoLives" title="Abrir a aba Lives com canais e o gestor de buffs">Ver lives</button>
               </div>
               <div class="lb-box" id="ovBuffs"><span class="hint-text">Conecte a conta para ver os buffs.</span></div>
+              <div class="pbuffs-host" id="ovBuffsFlat"></div>
             </div>
 
             <div class="card collection-card" id="collectionCard" data-card="collection">
@@ -953,7 +955,9 @@
                 <div><strong id="liveRedeemed">—</strong><span>Resgates</span></div>
               </div>
               <div class="hunt-note" id="livesHead"></div>
+              <div class="bview-row"><div class="bview-seg" role="radiogroup" aria-label="Como mostrar os buffs"><button type="button" data-bview-pick="flat" role="radio">Flat</button><button type="button" data-bview-pick="detalhe" role="radio">Detalhado</button></div></div>
               <div class="buff-manager" id="buffManager"></div>
+              <div class="pbuffs-host" id="buffFlat"></div>
             </div>
             <div class="card" data-card="channels">
               <h3>Canais e chat</h3>

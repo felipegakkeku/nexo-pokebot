@@ -2692,7 +2692,8 @@ body.hud-dragging { cursor: grabbing; user-select: none; }
 .pcard-spark .ico { width: 12px; height: 12px; }
 .pcard-spark .spark { height: 22px; margin: 0; }
 .pcard-buffs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-.pbuff { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-xs); }
+.pbuff { display: flex; flex-direction: column; gap: 3px; font-size: var(--fs-xs); min-width: 0; }
+.pbuff small { color: var(--muted); font-size: var(--fs-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .pbuff b { color: var(--dim); font-weight: 700; }
 .pbuff i { display: block; height: 5px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--muted) 15%, transparent); overflow: hidden; }
 .pbuff u { display: block; height: 100%; text-decoration: none; border-radius: inherit; transition: width 0.5s ease; }
@@ -3589,3 +3590,18 @@ body:has(.dock-col[data-panel="activity"]) #activityDock { display: none; }
   .sl-side .sl-buffs.lb-box .lb-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 :root[data-ev-height] .sl-bottom .sl-side { max-height: none; }
+
+/* Buffs: Flat (barras dos Painéis) ou Detalhado (gestor completo) */
+.bview-seg { display: inline-flex; gap: 2px; padding: 2px; border-radius: var(--r-pill); border: 1px solid var(--border); margin-left: auto; }
+.bview-seg button { font: inherit; font-size: var(--fs-xs); padding: 2px 10px; border: 0; border-radius: var(--r-pill); background: transparent; color: var(--dim); cursor: pointer; }
+.bview-seg button:hover { color: var(--text); }
+.bview-seg button[aria-checked="true"] { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--text-strong); }
+.card-head-row .bview-seg + .btn { margin-left: 6px; }
+.bview-row { display: flex; justify-content: flex-end; margin: 8px 0 4px; }
+.pbuffs-wide { gap: 10px 14px; }
+.pbuffs-wide .pbuff i { height: 7px; }
+.pbuffs-wide .pbuff b { color: var(--text-soft); font-weight: 600; }
+.pbuffs-host .lb-foot { margin-top: 8px; }
+:root[data-buff-view="flat"] :is(#ovBuffs, #buffManager) { display: none; }
+:root:not([data-buff-view="flat"]) :is(#ovBuffsFlat, #buffFlat) { display: none; }
+@container card (max-width: 340px) { .pbuffs-wide { grid-template-columns: minmax(0, 1fr); } }

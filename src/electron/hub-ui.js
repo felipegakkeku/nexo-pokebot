@@ -237,20 +237,28 @@
           <ul class="sl-events"></ul>
         </div>
         <div class="sl-col sl-side">
-          <div class="sl-ev-head"><h4>${IC('tv')}Buffs das lives</h4><div class="sl-ev-filter" role="group" aria-label="Como mostrar os buffs"><button type="button" data-buff-view="resumo" aria-pressed="false">Resumo</button><button type="button" data-buff-view="detalhe" aria-pressed="false">Detalhes</button></div></div>
+          <div class="sl-ev-head"><h4>${IC('tv')}Buffs das lives</h4><div class="bview-seg" role="radiogroup" aria-label="Como mostrar os buffs"><button type="button" data-bview-pick="flat" role="radio">Flat</button><button type="button" data-bview-pick="detalhe" role="radio">Detalhado</button></div></div>
           <div class="sl-buffs"></div>
           <h4>${IC('package')}Drops da sessão</h4>
           <div class="sl-drops"></div>
         </div>
       </div>`;
-    let buffView = LS.get('nexo.stageBuffView', 'resumo') === 'detalhe' ? 'detalhe' : 'resumo';
+    // Flat ou detalhado: a mesma escolha vale para Visão geral, aba Lives e tela grande.
+    let buffView = LS.get('nexo.buffView', 'flat') === 'detalhe' ? 'detalhe' : 'flat';
+    document.documentElement.dataset.buffView = buffView;
     document.addEventListener('click', (ev) => {
-        const b = ev.target.closest?.('[data-buff-view]');
+        const b = ev.target.closest?.('[data-bview-pick]');
         if (!b) return;
-        buffView = b.dataset.buffView === 'detalhe' ? 'detalhe' : 'resumo';
-        LS.set('nexo.stageBuffView', buffView);
+        buffView = b.dataset.bviewPick === 'detalhe' ? 'detalhe' : 'flat';
+        LS.set('nexo.buffView', buffView);
+        document.documentElement.dataset.buffView = buffView;
+        syncBuffViewButtons();
+        renderOverviewExtras();
         for (const acc of ACCOUNTS) renderStageLive(acc);
     });
+    function syncBuffViewButtons(scope = document) {
+        scope.querySelectorAll('[data-bview-pick]').forEach((b) => b.setAttribute('aria-checked', b.dataset.bviewPick === buffView ? 'true' : 'false'));
+    }
     const MISS_BALL_LABELS = { 1: 'Poke Ball', 2: 'Great Ball', 3: 'Super Ball', 4: 'Ultra Ball', 5: 'Beast Ball' };
     function recentEvents(acc, n) {
         const logs = snapshots[acc]?.logs || [];
@@ -335,15 +343,15 @@
         set('shiny', `${Number(st.shiniesCaptured || 0)}<small> / ${Number(st.shiniesSeen || 0)}</small>`);
         set('shinySub', Number(st.shiniesMissed || 0) ? `${st.shiniesMissed} escaparam` : `${fmtCompact(st.captures)} capturas`);
         host.querySelectorAll('button[data-ev-size]:empty').forEach((b) => { b.textContent = EV_SIZES.find((x) => x[0] === evSize)[1]; });
-        host.querySelectorAll('[data-buff-view]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.buffView === buffView ? 'true' : 'false'));
+        syncBuffViewButtons(host);
         const bbox = q('.sl-buffs');
         const bHtml = buffView === 'detalhe'
             ? buffManagerHtml(s.lives, { head: false })
-            : buffsHtml(acc, true);
+            : flatBuffsHtml(acc, { foot: true });
         const bSig = `${buffView}|${bHtml}`;
         if (bbox.dataset.sig !== bSig) {
             bbox.dataset.sig = bSig;
-            bbox.className = `sl-buffs ${buffView === 'detalhe' ? 'buff-manager' : 'lb-box'}`;
+            bbox.className = `sl-buffs ${buffView === 'detalhe' ? 'buff-manager' : 'pbuffs-host'}`;
             bbox.innerHTML = bHtml || '<span class="hint-text">Sem dados das lives ainda.</span>';
         }
         const drops = (s.drops?.featured || []).filter((d) => d.qty > 0).slice(0, 10);
@@ -1539,7 +1547,6 @@
                 const gameBtn = card.querySelector('[data-pc-act="game"]');
                 if (gameBtn && !gameBtn.dataset.icon) { gameBtn.dataset.icon = 'gamepad'; window.nexoIcons?.hydrate(card); }
             }
-            const s = snapshots[acc] || {};
             const list = hist[acc];
             const spark = extra.querySelector('.pcard-spark');
             const sparkSig = `${list.length}|${list[list.length - 1]?.t || 0}`;
@@ -1547,30 +1554,7 @@
                 spark.dataset.sig = sparkSig;
                 spark.innerHTML = `<span>${IC('zap')}XP/h</span>${sparkSvg(list.map((p) => p.xpRate), 'xp')}<span>${IC('coins')}Lucro/h</span>${sparkSvg(list.map((p) => p.goldRate), 'gold')}`;
             }
-            const lv = s.lives || {};
-            const bonus = lv.activeBonuses || {};
-            const target = Math.max(30, Number(lv.targetHours || 24) * 60);
-            const twList = Array.isArray(lv.twitchRewards) ? lv.twitchRewards : [lv.rewardType || 'xp'];
-            const kkList = Array.isArray(lv.kickRewards) ? lv.kickRewards : [lv.rewardType || 'xp'];
-            const fmtMinShort = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${Math.round(m % 60)}m` : `${Math.round(m)}m`);
-            const buffs = BUFF_KINDS.map(([k, label]) => {
-                const twOn = Boolean(lv.hasTwitchToken) && twList.includes(k);
-                const kkOn = Boolean(lv.hasKickToken) && kkList.includes(k);
-                const twMin = Number(bonus.twitch?.[k] || 0);
-                const kkMin = Number(bonus.kick?.[k] || 0);
-                let pct = 0;
-                if (twOn && kkOn) {
-                    pct = Math.min(100, ((Math.min(twMin, target) + Math.min(kkMin, target)) / (2 * target)) * 100);
-                } else if (twOn) {
-                    pct = Math.min(100, (twMin / target) * 100);
-                } else if (kkOn) {
-                    pct = Math.min(100, (kkMin / target) * 100);
-                } else {
-                    pct = Math.min(100, (Math.max(twMin, kkMin) / target) * 100);
-                }
-                const tip = `${label}: Kick ${fmtMinShort(kkMin)} + Twitch ${fmtMinShort(twMin)} (meta individual: ${fmtMinShort(target)} cada)`;
-                return `<span class="pbuff ${k}" title="${esc(tip)}"><b>${label}</b><i><u style="width:${pct.toFixed(0)}%"></u></i></span>`;
-            }).join('');
+            const buffs = flatBuffsHtml(acc);
             const bbox = extra.querySelector('.pcard-buffs');
             if (bbox.innerHTML !== buffs) bbox.innerHTML = buffs;
             const evs = recentEvents(acc, 6);
@@ -1675,6 +1659,42 @@
         if (v >= 1440) return `${Math.floor(v / 1440)}d ${Math.floor((v % 1440) / 60)}h`;
         return v >= 60 ? `${Math.floor(v / 60)}h ${String(v % 60).padStart(2, '0')}m` : `${v}m`;
     };
+    /** Barras flat dos buffs (uma por tipo, Kick + Twitch juntas) com o tempo de cada plataforma. */
+    function flatBuffsHtml(acc, { foot = false } = {}) {
+        const lv = snapshots[acc]?.lives;
+        if (!lv) return '';
+        const bonus = lv.activeBonuses || {};
+        const target = Math.max(30, Number(lv.targetHours || 24) * 60);
+        const twList = Array.isArray(lv.twitchRewards) ? lv.twitchRewards : [lv.rewardType || 'xp'];
+        const kkList = Array.isArray(lv.kickRewards) ? lv.kickRewards : [lv.rewardType || 'xp'];
+        const fmtMinShort = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${Math.round(m % 60)}m` : `${Math.round(m)}m`);
+        const rows = BUFF_KINDS.map(([k, label]) => {
+            const twOn = Boolean(lv.hasTwitchToken) && twList.includes(k);
+            const kkOn = Boolean(lv.hasKickToken) && kkList.includes(k);
+            const twMin = Number(bonus.twitch?.[k] || 0);
+            const kkMin = Number(bonus.kick?.[k] || 0);
+            let pct;
+            if (twOn && kkOn) pct = ((Math.min(twMin, target) + Math.min(kkMin, target)) / (2 * target)) * 100;
+            else if (twOn) pct = (twMin / target) * 100;
+            else if (kkOn) pct = (kkMin / target) * 100;
+            else pct = (Math.max(twMin, kkMin) / target) * 100;
+            pct = Math.min(100, pct);
+            const parts = [];
+            if (kkOn || kkMin > 0) parts.push(`Kick ${kkMin > 0 ? fmtMinShort(kkMin) : '-'}`);
+            if (twOn || twMin > 0) parts.push(`Twitch ${twMin > 0 ? fmtMinShort(twMin) : '-'}`);
+            const val = parts.length ? parts.join(' · ') : 'não coleta';
+            const tip = `${label}: Kick ${fmtMinShort(kkMin)} + Twitch ${fmtMinShort(twMin)} (meta individual: ${fmtMinShort(target)} cada)`;
+            return `<span class="pbuff ${k}" title="${esc(tip)}"><b>${label}</b><i><u style="width:${pct.toFixed(0)}%"></u></i><small>${escapeHtml(val)}</small></span>`;
+        }).join('');
+        if (!foot) return rows;
+        const next = [];
+        for (const [p, pl] of [['kick', 'Kick'], ['twitch', 'Twitch']]) {
+            const k = lv.smartStatus?.[p]?.nextKind;
+            if (lv.smartBalance && k) next.push(`${LB_KIND_LABEL[k] || k} na ${pl}`);
+        }
+        const f = [lv.enabled ? 'Coleta ligada' : 'Coleta desligada', `meta ${fmtMinShort(target)}`, next.length ? `próximo: ${next.join(', ')}` : ''].filter(Boolean).join(' · ');
+        return `<div class="pcard-buffs pbuffs-wide">${rows}</div><div class="lb-foot">${escapeHtml(f)}</div>`;
+    }
     function buffsHtml(acc, compact = false) {
         const lv = snapshots[acc]?.lives;
         if (!lv) return '';
@@ -1718,6 +1738,12 @@
             const html = buffsHtml(activeAccount) || '<span class="hint-text">Conecte a conta para ver os buffs.</span>';
             if (box.dataset.sig !== html) { box.dataset.sig = html; box.innerHTML = html; }
         }
+        const flatHtml = flatBuffsHtml(activeAccount, { foot: true }) || '<span class="hint-text">Conecte a conta para ver os buffs.</span>';
+        for (const id of ['ovBuffsFlat', 'buffFlat']) {
+            const fb = $(id);
+            if (fb && fb.dataset.sig !== flatHtml) { fb.dataset.sig = flatHtml; fb.innerHTML = flatHtml; }
+        }
+        syncBuffViewButtons();
         const pill = $('colModePill');
         if (pill) {
             const mode = s.collection?.mode || s.config?.farmObjective || 'off';
