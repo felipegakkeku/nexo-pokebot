@@ -4,6 +4,13 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+## 1.0.24
+
+- **Novo logo**: Pokébola azul flat com o N personalizado, sem o brilho e o relevo 3D. O ícone do app, da janela e do atalho foram atualizados.
+- **Download de atualização não trava mais**: se a conexão parar, o Hub retoma de onde estava (até 5 tentativas) em vez de ficar parado em 13%. Se não der, mostra a mensagem de erro.
+- **Avisos do Windows**: aviso quando a atualização do main está pronta para aplicar e quando o download de uma Release falha.
+- **Últimos eventos com altura ajustável**: botão no cabeçalho alterna entre automática, baixa, média e alta.
+- **Fonte uniforme**: botões e controles que ainda usavam a fonte antiga agora seguem a do Hub.
 ## 1.0.23
 
 - **Hub acompanha o main sem esperar Release**: a cada 15 minutos (e ao abrir) o Hub confere commits novos no GitHub, baixa em segundo plano e mostra "Atualização pronta: N mudanças". Aplica ao reiniciar ou pelo botão "Reiniciar e aplicar". Mudanças de dependências continuam só pelas Releases.

@@ -233,7 +233,7 @@
       </div>
       <div class="sl-bottom">
         <div class="sl-col">
-          <div class="sl-ev-head"><h4>${IC('activity')}Últimos eventos</h4><div class="sl-ev-filter" role="group" aria-label="O que aparece aqui">${EV_FILTERS.map((f) => `<button type="button" data-ev-f="${f.id}" aria-pressed="false">${f.label}</button>`).join('')}</div></div>
+          <div class="sl-ev-head"><h4>${IC('activity')}Últimos eventos</h4><div class="sl-ev-filter" role="group" aria-label="O que aparece aqui">${EV_FILTERS.map((f) => `<button type="button" data-ev-f="${f.id}" aria-pressed="false">${f.label}</button>`).join('')}<button type="button" class="ev-size" data-ev-size title="Altura do card (clique para alternar)"></button></div></div>
           <ul class="sl-events"></ul>
         </div>
       </div>`;
@@ -247,6 +247,22 @@
         }
         return out;
     }
+    // Altura do card: auto (preenche) / compacto / médio / alto. Fica salvo.
+    const EV_SIZES = [['auto', 'Altura: auto'], ['s', 'Altura: baixa'], ['m', 'Altura: média'], ['l', 'Altura: alta']];
+    let evSize = LS.get('nexo.stageEvSize', 'auto');
+    if (!EV_SIZES.some((x) => x[0] === evSize)) evSize = 'auto';
+    function applyEvSize() {
+        document.documentElement.dataset.evSize = evSize;
+        const label = EV_SIZES.find((x) => x[0] === evSize)[1];
+        document.querySelectorAll('[data-ev-size]').forEach((b) => { b.textContent = label; });
+    }
+    applyEvSize();
+    document.addEventListener('click', (ev) => {
+        if (!ev.target.closest?.('[data-ev-size]')) return;
+        evSize = EV_SIZES[(EV_SIZES.findIndex((x) => x[0] === evSize) + 1) % EV_SIZES.length][0];
+        LS.set('nexo.stageEvSize', evSize);
+        applyEvSize();
+    });
     document.addEventListener('click', (ev) => {
         const b = ev.target.closest?.('[data-ev-f]');
         if (!b) return;
@@ -304,6 +320,7 @@
         set('killsSub', `${String(st.killsPerMin || 0).replace('.', ',')}/min · ${st.avgKillSec ? `${String(st.avgKillSec).replace('.', ',')}s cada` : '-'}`);
         set('shiny', `${Number(st.shiniesCaptured || 0)}<small> / ${Number(st.shiniesSeen || 0)}</small>`);
         set('shinySub', Number(st.shiniesMissed || 0) ? `${st.shiniesMissed} escaparam` : `${fmtCompact(st.captures)} capturas`);
+        host.querySelectorAll('[data-ev-size]:empty').forEach((b) => { b.textContent = EV_SIZES.find((x) => x[0] === evSize)[1]; });
         const evs = recentEvents(acc, 40);
         const evSig = evs.map((e) => e.id).join(',') + Math.floor(Date.now() / 30_000);
         const ul = q('.sl-events');

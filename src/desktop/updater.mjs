@@ -392,6 +392,8 @@ export function buildWindowsApplyScript({
 
 /**
  * Baixa um arquivo com callback de progresso.
+ * Se a conexao ficar parada (sem bytes por `stallMs`), aborta e retoma de onde parou (Range),
+ * ate `retries` vezes, em vez de ficar travada para sempre.
  * @param {string} url URL HTTPS do arquivo.
  * @param {string} destPath Caminho de destino.
  * @param {object} [options] Opcoes de download.
@@ -399,18 +401,11 @@ export function buildWindowsApplyScript({
 export async function downloadFileWithProgress(url, destPath, options = {}) {
     const fetchImpl = options.fetchImpl || fetch;
     const onProgress = typeof options.onProgress === 'function' ? options.onProgress : () => {};
-    const res = await fetchImpl(url, {
-        redirect: 'follow',
-        headers: { 'User-Agent': 'Nexo-PokeBot-Updater' },
-        signal: options.signal,
-    });
-    if (!res.ok) {
-        throw new Error(`Falha ao baixar atualizacao (HTTP ${res.status}).`);
-    }
-    const totalBytes = Number(res.headers?.get?.('content-length') || options.expectedSize || 0);
+    const stallMs = Number(options.stallMs) > 0 ? Number(options.stallMs) : 30_000;
+    const retries = Number.isInteger(options.retries) ? options.retries : 5;
     mkdirSync(dirname(destPath), { recursive: true });
-    const out = createWriteStream(destPath);
     let downloadedBytes = 0;
+    let totalBytes = Number(options.expectedSize || 0);
     let lastEmit = 0;
 
     const emitProgress = (force = false) => {
@@ -421,36 +416,81 @@ export async function downloadFileWithProgress(url, destPath, options = {}) {
         onProgress({ phase: 'downloading', downloadedBytes, totalBytes, percent });
     };
 
-    try {
-        if (res.body && typeof res.body.getReader === 'function') {
-            const reader = res.body.getReader();
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                const chunk = Buffer.from(value);
-                downloadedBytes += chunk.length;
-                if (!out.write(chunk)) {
-                    await new Promise((resDrain) => out.once('drain', resDrain));
-                }
-                emitProgress(false);
-            }
-        } else {
-            const buf = Buffer.from(await res.arrayBuffer());
-            downloadedBytes = buf.length;
-            out.write(buf);
+    for (let attempt = 0; ; attempt++) {
+        const ctrl = new AbortController();
+        const onUserAbort = () => ctrl.abort();
+        if (options.signal) {
+            if (options.signal.aborted) throw new Error('Download cancelado.');
+            options.signal.addEventListener('abort', onUserAbort, { once: true });
         }
-        await new Promise((resEnd, rejEnd) => {
-            out.once('error', rejEnd);
-            out.end(resEnd);
-        });
-        emitProgress(true);
-        return { downloadedBytes, totalBytes: totalBytes || downloadedBytes };
-    } catch (err) {
-        try { out.destroy(); } catch { /* ignore */ }
-        throw err;
+        let stalled = false;
+        let timer = null;
+        const arm = () => {
+            clearTimeout(timer);
+            timer = setTimeout(() => { stalled = true; ctrl.abort(); }, stallMs);
+        };
+        let out = null;
+        try {
+            arm();
+            const headers = { 'User-Agent': 'Nexo-PokeBot-Updater' };
+            if (downloadedBytes > 0) headers.Range = `bytes=${downloadedBytes}-`;
+            const res = await fetchImpl(url, { redirect: 'follow', headers, signal: ctrl.signal });
+            if (!res.ok) throw new Error(`Falha ao baixar atualizacao (HTTP ${res.status}).`);
+            const resumed = downloadedBytes > 0 && res.status === 206;
+            if (downloadedBytes > 0 && !resumed) downloadedBytes = 0; // servidor ignorou o Range: recomeca
+            const len = Number(res.headers?.get?.('content-length') || 0);
+            if (resumed) {
+                const m = /\/(\d+)\s*$/.exec(res.headers?.get?.('content-range') || '');
+                if (m) totalBytes = Number(m[1]);
+            } else if (len > 0) {
+                totalBytes = len;
+            }
+            out = createWriteStream(destPath, { flags: resumed ? 'a' : 'w' });
+            if (res.body && typeof res.body.getReader === 'function') {
+                const reader = res.body.getReader();
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    arm();
+                    const chunk = Buffer.from(value);
+                    downloadedBytes += chunk.length;
+                    if (!out.write(chunk)) {
+                        await new Promise((resDrain) => out.once('drain', resDrain));
+                    }
+                    emitProgress(false);
+                }
+            } else {
+                const buf = Buffer.from(await res.arrayBuffer());
+                downloadedBytes += buf.length;
+                out.write(buf);
+            }
+            clearTimeout(timer);
+            await new Promise((resEnd, rejEnd) => {
+                out.once('error', rejEnd);
+                out.end(resEnd);
+            });
+            if (totalBytes > 0 && downloadedBytes < totalBytes) {
+                throw new Error('Download incompleto (conexao encerrada antes do fim).');
+            }
+            emitProgress(true);
+            return { downloadedBytes, totalBytes: totalBytes || downloadedBytes };
+        } catch (err) {
+            clearTimeout(timer);
+            if (out) {
+                await new Promise((r) => out.end(r)).catch(() => {});
+            }
+            if (options.signal?.aborted) throw new Error('Download cancelado.');
+            const retryable = stalled || /incompleto|terminated|fetch failed|aborted|ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket/i.test(`${err?.message} ${err?.cause?.code || ''}`);
+            if (!retryable || attempt >= retries) {
+                throw stalled ? new Error('Download parou de responder. Verifique a conexao e tente de novo.') : err;
+            }
+            await new Promise((r) => setTimeout(r, Math.min(4000, 500 * (attempt + 1))));
+        } finally {
+            clearTimeout(timer);
+            options.signal?.removeEventListener?.('abort', onUserAbort);
+        }
     }
 }
-
 async function extractZipWindows(zipPath, extractDir, execFileImpl = execFileAsync) {
     mkdirSync(extractDir, { recursive: true });
     try {

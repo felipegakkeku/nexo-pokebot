@@ -137,6 +137,26 @@ function notifyUpdateAvailable(version, key = version, rebuild = false) {
     }
 }
 
+// Aviso nativo extra do updater (uma vez por chave; fica quieto se o Hub já está em foco)
+const nativeNoticeKeys = new Set();
+function notifyUpdateEvent(key, title, body) {
+    if (nativeNoticeKeys.has(key)) return;
+    nativeNoticeKeys.add(key);
+    if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && mainWindow.isFocused()) return;
+    try {
+        if (!Notification.isSupported()) return;
+        const icon = getAppIcon();
+        const n = new Notification({ title, body, ...(icon ? { icon } : {}) });
+        n.on('click', () => {
+            showMainWindow();
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('hub:update-open');
+        });
+        n.show();
+    } catch {
+        // notificacao e opcional
+    }
+}
+
 function patchUpdateState(patch) {
     updateState = { ...updateState, ...patch };
     broadcastUpdateState();
@@ -240,6 +260,13 @@ async function runMainSync({ signal } = {}) {
             waitPids: [process.pid],
         });
         patchUpdateState({ mainReady: staged.ok ? mainReadyFromState() : null, mainBlocked: staged.ok ? '' : (staged.reason || '') });
+        if (staged.ok && !signal) {
+            const ready = mainReadyFromState();
+            if (ready) {
+                const n = ready.aheadBy;
+                notifyUpdateEvent(`main-${ready.sha}`, 'Atualização pronta', `${n > 1 ? `${n} mudanças baixadas` : 'Mudanças baixadas'}. Reinicie o Nexo PokeBot para aplicar.`);
+            }
+        }
         return staged.ok ? staged : null;
     } catch {
         return null;
@@ -324,6 +351,7 @@ async function runUpdateInstall() {
     } catch (err) {
         const msg = err?.message || String(err);
         patchUpdateState({ status: 'error', error: msg });
+        notifyUpdateEvent(`fail-${Date.now()}`, 'Falha ao baixar a atualização', `${msg} Abra o Hub para tentar de novo.`);
         return { ok: false, error: msg };
     } finally {
         updateBusy = false;
