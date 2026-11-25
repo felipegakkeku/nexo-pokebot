@@ -1,3 +1,11 @@
 {
-  "avisos": []
+  "avisos": [
+    {
+      "id": "teste-2026-11-25",
+      "titulo": "Teste de avisos",
+      "texto": "Se você está vendo isto, os avisos do Nexo PokeBot estão funcionando.",
+      "tipo": "ok",
+      "ate": "2026-11-26"
+    }
+  ]
 }
