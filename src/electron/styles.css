@@ -2572,7 +2572,7 @@ kbd {
 .sl-kpi .spark { height: 22px; margin-top: 2px; }
 .sl-kpi.gold.neg b { color: var(--err-text); }
 .sl-kpi.shiny b { color: var(--shiny-text); }
-.sl-bottom { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 120px; }
+.sl-bottom { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(280px, 1fr); gap: 10px; flex: 1 1 auto; min-height: 220px; align-items: stretch; }
 .sl-bottom .sl-col { overflow-y: auto; flex: 1 1 auto; }
 .sl-col { padding: 10px 12px; border-radius: var(--r-lg); background: color-mix(in srgb, var(--card) 70%, transparent); border: 1px solid var(--border); min-width: 0; }
 .sl-col h4 { margin: 0 0 7px; display: flex; align-items: center; gap: 6px; font-size: var(--fs-xs); letter-spacing: 0.4px; color: var(--dim); }
@@ -3577,3 +3577,15 @@ body:has(.dock-col[data-panel="activity"]) #activityDock { display: none; }
 :root[data-ev-height="m"] .sl-bottom .sl-col { flex: 0 0 auto; max-height: 300px; }
 :root[data-ev-height="l"] .sl-bottom { flex: 0 0 auto; min-height: 0; }
 :root[data-ev-height="l"] .sl-bottom .sl-col { flex: 0 0 auto; max-height: 480px; }
+
+/* tela grande: buffs das lives e drops ao lado dos eventos */
+.sl-side h4 { margin: 10px 0 6px; }
+.sl-side .sl-ev-head h4 { margin: 0; }
+.sl-side .sl-buffs.lb-box .lb-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sl-side .sl-buffs.buff-manager { display: flex; flex-direction: column; gap: 8px; }
+.sl-side .sl-buffs.buff-manager .bm-plat:first-child { border-top: 0; padding-top: 0; }
+@container (max-width: 760px) {
+  .sl-bottom { grid-template-columns: minmax(0, 1fr); }
+  .sl-side .sl-buffs.lb-box .lb-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+:root[data-ev-height] .sl-bottom .sl-side { max-height: none; }

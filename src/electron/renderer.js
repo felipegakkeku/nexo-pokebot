@@ -2343,9 +2343,9 @@ const BUFF_KINDS = [['xp', 'XP', '#60a5fa'], ['captura', 'Captura', '#34d399'], 
 let lastBuffSig = '';
 
 // Gestor inteligente: uma barra por buff mostrando quanto tempo falta em relacao a meta
-function renderBuffManager(lv) {
-    const box = $('buffManager');
-    if (!box) return;
+/** HTML do gestor de buffs; `head:false` tira o título e a legenda (versão da tela grande). */
+function buffManagerHtml(lv, { head = true } = {}) {
+    if (!lv) return '';
     const smartOn = Boolean(lv.smartBalance);
     const targetH = Number(lv.targetHours || 24);
     const guardMin = Number(lv.guardThresholdMin || 30);
@@ -2355,7 +2355,7 @@ function renderBuffManager(lv) {
     ];
     const html = [];
     const syncOn = Boolean(lv.syncPlatforms);
-    html.push(`<div class="bm-head"><div class="bm-title"><b>Gestor inteligente de buffs</b><span>${smartOn
+    if (head) html.push(`<div class="bm-head"><div class="bm-title"><b>Gestor inteligente de buffs</b><span>${smartOn
         ? (syncOn
             ? `Meta de <b>${targetH}h</b> na Kick e <b>${targetH}h</b> na Twitch (sincronizadas): completa cada buff nas duas plataformas antes de avançar para o próximo.`
             : `Meta independente de <b>${targetH}h</b> por buff na Kick e <b>${targetH}h</b> na Twitch: cada plataforma completa os próprios buffs na ordem (XP, Captura, Shiny) sem travar a outra.`)
@@ -2400,8 +2400,14 @@ function renderBuffManager(lv) {
         }
         html.push('</div>');
     }
-    html.push('<div class="bm-legend"><span class="lg full">na meta</span><span class="lg mid">guardando</span><span class="lg low">acabando</span><span class="lg empty">sem buff</span></div>');
-    const sig = html.join('');
+    if (head) html.push('<div class="bm-legend"><span class="lg full">na meta</span><span class="lg mid">guardando</span><span class="lg low">acabando</span><span class="lg empty">sem buff</span></div>');
+    return html.join('');
+}
+
+function renderBuffManager(lv) {
+    const box = $('buffManager');
+    if (!box) return;
+    const sig = buffManagerHtml(lv);
     if (sig === lastBuffSig) return;
     lastBuffSig = sig;
     box.innerHTML = sig;

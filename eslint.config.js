@@ -49,7 +49,7 @@ export default [
                     'resolvePokemonSpriteDex', 'setPokemonSpriteImg',
                     'selectAccount', 'setViewMode', 'setSubtab', 'sendAction', 'claimTwitchChest', 'isAccountMuted',
                     'setAccountMuted', 'renderActiveAccountPanel', 'renderAll', 'saveConfig', 'readConfigForm',
-                    'applyConfigTo', 'applyGridLayout', 'renderGridToolbar', 'requestLivesRefresh',
+                    'applyConfigTo', 'applyGridLayout', 'renderGridToolbar', 'requestLivesRefresh', 'buffManagerHtml',
                 ].map((name) => [name, 'readonly'])),
             },
         },

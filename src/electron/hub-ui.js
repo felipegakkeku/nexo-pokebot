@@ -236,7 +236,21 @@
           <div class="sl-ev-head"><h4>${IC('activity')}Últimos eventos</h4><div class="sl-ev-filter" role="group" aria-label="O que aparece aqui">${EV_FILTERS.map((f) => `<button type="button" data-ev-f="${f.id}" aria-pressed="false">${f.label}</button>`).join('')}<button type="button" class="ev-size" data-ev-size title="Altura do card (clique para alternar)"></button></div></div>
           <ul class="sl-events"></ul>
         </div>
+        <div class="sl-col sl-side">
+          <div class="sl-ev-head"><h4>${IC('tv')}Buffs das lives</h4><div class="sl-ev-filter" role="group" aria-label="Como mostrar os buffs"><button type="button" data-buff-view="resumo" aria-pressed="false">Resumo</button><button type="button" data-buff-view="detalhe" aria-pressed="false">Detalhes</button></div></div>
+          <div class="sl-buffs"></div>
+          <h4>${IC('package')}Drops da sessão</h4>
+          <div class="sl-drops"></div>
+        </div>
       </div>`;
+    let buffView = LS.get('nexo.stageBuffView', 'resumo') === 'detalhe' ? 'detalhe' : 'resumo';
+    document.addEventListener('click', (ev) => {
+        const b = ev.target.closest?.('[data-buff-view]');
+        if (!b) return;
+        buffView = b.dataset.buffView === 'detalhe' ? 'detalhe' : 'resumo';
+        LS.set('nexo.stageBuffView', buffView);
+        for (const acc of ACCOUNTS) renderStageLive(acc);
+    });
     const MISS_BALL_LABELS = { 1: 'Poke Ball', 2: 'Great Ball', 3: 'Super Ball', 4: 'Ultra Ball', 5: 'Beast Ball' };
     function recentEvents(acc, n) {
         const logs = snapshots[acc]?.logs || [];
@@ -321,6 +335,26 @@
         set('shiny', `${Number(st.shiniesCaptured || 0)}<small> / ${Number(st.shiniesSeen || 0)}</small>`);
         set('shinySub', Number(st.shiniesMissed || 0) ? `${st.shiniesMissed} escaparam` : `${fmtCompact(st.captures)} capturas`);
         host.querySelectorAll('button[data-ev-size]:empty').forEach((b) => { b.textContent = EV_SIZES.find((x) => x[0] === evSize)[1]; });
+        host.querySelectorAll('[data-buff-view]').forEach((b) => b.setAttribute('aria-pressed', b.dataset.buffView === buffView ? 'true' : 'false'));
+        const bbox = q('.sl-buffs');
+        const bHtml = buffView === 'detalhe'
+            ? buffManagerHtml(s.lives, { head: false })
+            : buffsHtml(acc, true);
+        const bSig = `${buffView}|${bHtml}`;
+        if (bbox.dataset.sig !== bSig) {
+            bbox.dataset.sig = bSig;
+            bbox.className = `sl-buffs ${buffView === 'detalhe' ? 'buff-manager' : 'lb-box'}`;
+            bbox.innerHTML = bHtml || '<span class="hint-text">Sem dados das lives ainda.</span>';
+        }
+        const drops = (s.drops?.featured || []).filter((d) => d.qty > 0).slice(0, 10);
+        const dropSig = drops.map((d) => `${d.key}:${d.qty}`).join(',') || '-';
+        const dbox = q('.sl-drops');
+        if (dbox.dataset.sig !== dropSig) {
+            dbox.dataset.sig = dropSig;
+            dbox.innerHTML = drops.length
+                ? drops.map((d) => `<span class="sl-drop${d.rare ? ' rare' : ''}" title="${esc(d.name)}: ${d.qty} na sessão (${String(d.perHour).replace('.', ',')}/h)">${IC(d.rare ? 'gift' : 'package')}<span>${escapeHtml(d.name)}</span><b>${fmtNum(d.qty)}</b></span>`).join('')
+                : '<span class="hint-text">Nenhum drop ainda nesta sessão.</span>';
+        }
         const evs = recentEvents(acc, 40);
         const evSig = evs.map((e) => e.id).join(',') + Math.floor(Date.now() / 30_000);
         const ul = q('.sl-events');
