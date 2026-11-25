@@ -10,6 +10,7 @@ import { createPerfSampler } from './perf-meter.mjs';
 import { ensureHuntExtension } from '../headless/hunt-ext-install.mjs';
 import { createHeadlessHuntGuideEvaluator, findHuntExtensionDir } from '../headless/hunt-guide.mjs';
 import { loadAppIconBuffer } from '../desktop/build-exe.mjs';
+import { checkMainAhead, discardStagedMain, markMainApplyAttempt, readMainSyncState, stageMainCommit, stagedMainReady } from '../desktop/main-sync.mjs';
 import {
     checkForUpdate,
     compareSemver,
@@ -68,6 +69,9 @@ let updateState = {
     checkedAt: 0,
     error: null,
     justUpdatedFrom: '', // preenchido no boot quando a atualizacao anterior foi aplicada
+    justUpdatedChannel: '', // 'main' quando o boot aplicou commits do main
+    mainReady: null, // commit do main baixado e pronto: { sha, aheadBy, lastMessage, version }
+    mainBlocked: '', // motivo de o main esperar a Release (ex.: dependência nova)
     failedTarget: '', // versao que o ultimo update tentou aplicar e nao conseguiu
     logPath: join(tmpdir(), 'nexo-pokebot-last-update.log'),
 };
@@ -95,6 +99,7 @@ function verifyPendingUpdateMarker() {
     const commitOk = !targetCommit || sameCommit(readInstalledBuild(ROOT).commit, targetCommit);
     if (compareSemver(installedVersion, target) >= 0 && commitOk) {
         updateState.justUpdatedFrom = String(marker?.from || '');
+        updateState.justUpdatedChannel = String(marker?.channel || '');
     } else {
         updateState.failedTarget = target;
         updateState.status = 'error';
@@ -178,8 +183,93 @@ async function runUpdateCheck() {
     }
 }
 
+// ===== Sincronização com o main =====
+const MAIN_SYNC_INTERVAL_MS = 15 * 60 * 1000;
+let mainSyncTimer = null;
+let mainSyncBusy = false;
+
+/** Aplica o commit do main já baixado: fecha o Hub, troca os arquivos e reabre. */
+async function applyStagedMain() {
+    const st = stagedMainReady(ROOT);
+    if (!st) return false;
+    markMainApplyAttempt(ROOT);
+    try {
+        writeFileSync(UPDATE_MARKER_PATH, JSON.stringify({
+            from: installedVersion,
+            to: st.version || installedVersion,
+            toCommit: st.sha,
+            channel: 'main',
+            at: Date.now(),
+        }), 'utf8');
+    } catch { /* sem marcador o update segue igual */ }
+    patchUpdateState({ status: 'applying', percent: 100 });
+    await launchApplyUpdateScript(st.scriptPath);
+    setTimeout(() => {
+        isQuitting = true;
+        app.quit();
+    }, 300);
+    return true;
+}
+
+function mainReadyFromState() {
+    const st = stagedMainReady(ROOT);
+    return st ? { sha: st.sha, aheadBy: Number(st.aheadBy || 0), lastMessage: st.lastMessage || '', version: st.version || installedVersion } : null;
+}
+
+/** Confere o main e, se estiver à frente, baixa em segundo plano; aplica só ao reiniciar. */
+async function runMainSync({ signal } = {}) {
+    if (mainSyncBusy || updateState.isGitRepo) return null;
+    mainSyncBusy = true;
+    try {
+        const res = await checkMainAhead({ rootDir: ROOT, fetchImpl: (u, o) => net.fetch(u, o) });
+        if (!res.ok || !res.ahead) {
+            if (res.ok && !res.ahead && res.reason !== 'sem-commit') {
+                const old = readMainSyncState(ROOT);
+                if (old.sha && !stagedMainReady(ROOT)) discardStagedMain(ROOT);
+            }
+            patchUpdateState({ mainReady: mainReadyFromState() });
+            return null;
+        }
+        const staged = await stageMainCommit({
+            rootDir: ROOT,
+            sha: res.headSha,
+            aheadBy: res.aheadBy,
+            lastMessage: res.lastMessage,
+            fetchImpl: (u, o) => net.fetch(u, o),
+            signal,
+            waitPids: [process.pid],
+        });
+        patchUpdateState({ mainReady: staged.ok ? mainReadyFromState() : null, mainBlocked: staged.ok ? '' : (staged.reason || '') });
+        return staged.ok ? staged : null;
+    } catch {
+        return null;
+    } finally {
+        mainSyncBusy = false;
+    }
+}
+
+/**
+ * Antes de abrir: aplica o que já estiver baixado; se não houver, confere o main rapidinho (até 12 s)
+ * e aplica na hora. Sem internet ou GitHub lento, abre normal e segue em segundo plano.
+ * @returns {Promise<boolean>} true quando o Hub vai fechar para aplicar.
+ */
+async function bootMainSync() {
+    if (updateState.isGitRepo || updateState.failedTarget) return false;
+    try {
+        if (stagedMainReady(ROOT)) return await applyStagedMain();
+        const staged = await runMainSync({ signal: AbortSignal.timeout(12_000) });
+        if (staged?.ok) return await applyStagedMain();
+    } catch { /* abre normal */ }
+    return false;
+}
+
 async function runUpdateInstall() {
     if (updateBusy) return { ok: false, error: 'Atualizacao ja esta em andamento.' };
+    // Sem Release nova, mas com o main baixado: reinicia aplicando.
+    if (!latestReleaseInfo?.hasUpdate && stagedMainReady(ROOT)) {
+        const ok = await applyStagedMain();
+        return ok ? { ok: true, version: installedVersion } : { ok: false, error: 'Não consegui aplicar as últimas mudanças.' };
+    }
     if (!latestReleaseInfo?.hasUpdate || !latestReleaseInfo?.asset?.downloadUrl) {
         await runUpdateCheck();
     }
@@ -2219,6 +2309,7 @@ app.on('before-quit', (ev) => {
     actionPopups.clear();
     if (updateBootTimer) clearTimeout(updateBootTimer);
     if (updateCheckTimer) clearInterval(updateCheckTimer);
+    if (mainSyncTimer) clearInterval(mainSyncTimer);
     try { sharedHuntGuide?.dispose?.(); } catch { /* ignore */ }
     Promise.allSettled(closing).finally(() => app.exit(0));
 });
@@ -2231,6 +2322,9 @@ registerWebviewSecurity();
 registerIpcHandlers();
 
 app.whenReady().then(async () => {
+    // Fica igual ao main antes de abrir as contas (assim ninguém cai no meio do farm).
+    if (await bootMainSync()) return;
+    updateState.mainReady = mainReadyFromState();
     await Promise.all(ACCOUNT_IDS.map((acc) => startAccountServer(acc)));
     await loadHuntExtensionIntoPartitions();
     // Garante o /hunt mesmo para quem nunca instalou a extensão no navegador (roda em segundo plano).
@@ -2252,6 +2346,8 @@ app.whenReady().then(async () => {
         void runUpdateCheck();
     }, UPDATE_CHECK_INTERVAL_MS);
     updateCheckTimer.unref?.();
+    mainSyncTimer = setInterval(() => void runMainSync(), MAIN_SYNC_INTERVAL_MS);
+    mainSyncTimer.unref?.();
 }).catch((err) => {
     console.error('[Nexo PokeBot] Falha ao iniciar:', err);
     isQuitting = true;

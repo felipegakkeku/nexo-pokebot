@@ -75,6 +75,33 @@ export function readInstalledBuild(rootDir = DEFAULT_APP_ROOT) {
     }
 }
 
+/**
+ * Compara dois commits no GitHub. status: ahead (head à frente), behind, identical ou diverged.
+ * @returns {Promise<{status:string, aheadBy:number, behindBy:number, headSha:string, lastMessage:string}|null>}
+ */
+export async function compareCommits({ repo = DEFAULT_UPDATE_REPO, base, head, fetchImpl = fetch, signal, version = '' } = {}) {
+    if (!base || !head) return null;
+    try {
+        const res = await fetchImpl(`https://api.github.com/repos/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`, {
+            headers: { Accept: 'application/vnd.github+json', 'User-Agent': `Nexo-PokeBot/${version || 'updater'}` },
+            signal,
+        });
+        if (!res?.ok) return null;
+        const j = await res.json();
+        const commits = Array.isArray(j?.commits) ? j.commits : [];
+        const last = commits[commits.length - 1];
+        return {
+            status: String(j?.status || ''),
+            aheadBy: Number(j?.ahead_by) || 0,
+            behindBy: Number(j?.behind_by) || 0,
+            headSha: String(last?.sha || '').toLowerCase(),
+            lastMessage: String(last?.commit?.message || '').split('\n')[0].slice(0, 140),
+        };
+    } catch {
+        return null;
+    }
+}
+
 /** Mesmo commit? Aceita um dos lados abreviado. */
 export function sameCommit(a, b) {
     const x = String(a || '').toLowerCase();
@@ -153,7 +180,12 @@ export async function checkForUpdate(options = {}) {
                 // sem o commit da tag, vale só a versão
             }
         }
-        const rebuild = cmp === 0 && Boolean(latestCommit) && !sameCommit(latestCommit, installedCommit);
+        let rebuild = cmp === 0 && Boolean(latestCommit) && !sameCommit(latestCommit, installedCommit);
+        if (rebuild) {
+            // Quem segue o main pode estar à frente da tag: aí a "correção" seria voltar no tempo.
+            const rel = await compareCommits({ repo, base: installedCommit, head: latestCommit, fetchImpl, signal: ac.signal, version: currentVersion });
+            if (rel && rel.status !== 'ahead' && rel.status !== 'diverged') rebuild = false;
+        }
         const hasUpdate = cmp > 0 || rebuild;
         const releaseUrl = typeof release?.html_url === 'string' && /^https:\/\//i.test(release.html_url)
             ? release.html_url
@@ -226,7 +258,10 @@ export function buildWindowsApplyScript({
     waitPids = [],
     tempRoot,
     logPath = join(tmpdir(), 'nexo-pokebot-last-update.log'),
+    mirrorDirs = ['src', 'assets', 'docs', 'dist', 'node_modules\\electron\\dist'],
+    copyDirs = [],
 }) {
+    const psList = (arr) => arr.map((d) => `"${String(d).replace(/"/g, '')}"`).join(', ');
     const pidList = (Array.isArray(waitPids) ? waitPids : [])
         .map((p) => Number.parseInt(String(p), 10))
         .filter((p) => Number.isFinite(p) && p > 0);
@@ -290,7 +325,7 @@ export function buildWindowsApplyScript({
         '    }',
         '',
         '    # 3. Atualiza somente subpastas de codigo/runtime (JAMAIS faz /MIR na raiz para preservar .pokebot-*)',
-        '    foreach ($sub in @("src", "assets", "docs", "dist", "node_modules\\electron\\dist")) {',
+        `    foreach ($sub in @(${psList(mirrorDirs)})) {`,
         '        $sDir = Join-Path $stageRoot $sub',
         '        if (Test-Path -LiteralPath $sDir) {',
         '            $dDir = Join-Path $appDir $sub',
@@ -301,6 +336,20 @@ export function buildWindowsApplyScript({
         '        }',
         '    }',
         '',
+        ...(copyDirs.length ? [
+            '    # 3b. Pastas que recebem arquivos novos sem apagar os que só existem no pacote da Release',
+            `    foreach ($sub in @(${psList(copyDirs)})) {`,
+            '        $sDir = Join-Path $stageRoot $sub',
+            '        if (Test-Path -LiteralPath $sDir) {',
+            '            $dDir = Join-Path $appDir $sub',
+            '            New-Item -ItemType Directory -Path $dDir -Force | Out-Null',
+            '            $null = robocopy $sDir $dDir /E /R:6 /W:1 /NFL /NDL /NJH /NJS /NC /NS',
+            '            if ($LASTEXITCODE -ge 8) { throw "Falha ao atualizar pasta $sub (robocopy exit $LASTEXITCODE)" }',
+            '            Write-Log "Atualizado (sem apagar): $sub"',
+            '        }',
+            '    }',
+            '',
+        ] : []),
         '    # 4. Atualiza arquivos soltos da raiz (bloqueando qualquer nome .pokebot-*, .git*, .env*)',
         '    Get-ChildItem -LiteralPath $stageRoot -File -Force | ForEach-Object {',
         '        if ($_.Name -match "^\\.pokebot-|^\\.git|^\\.env") { return }',
@@ -442,6 +491,7 @@ export async function downloadAndStageUpdate(options = {}) {
         onProgress({ phase: 'extracting', percent: 100 });
         await extractZipWindows(zipPath, extractDir, options.execFileImpl);
         const stageRoot = findExtractedAppRoot(extractDir);
+        if (typeof options.prepareStage === 'function') await options.prepareStage(stageRoot);
         const launchExe = join(rootDir, 'Nexo PokeBot.exe');
         const scriptPath = join(tempRoot, 'apply-update.ps1');
         const scriptContent = buildWindowsApplyScript({
@@ -450,6 +500,7 @@ export async function downloadAndStageUpdate(options = {}) {
             launchExe,
             waitPids: options.waitPids || [process.pid],
             tempRoot,
+            ...(options.applyOptions || {}),
         });
         // UTF-8 com BOM para Windows PowerShell 5.1 interpretar acentos corretamente
         writeFileSync(scriptPath, `\uFEFF${scriptContent}`, 'utf8');

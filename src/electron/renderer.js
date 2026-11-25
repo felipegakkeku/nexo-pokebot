@@ -3571,10 +3571,20 @@ function renderUpdateBanner(st) {
         sub.textContent = st.isGitRepo
             ? 'Pasta de desenvolvimento: atualize com git pull.'
             : `Você está na v${shortVer(st.currentVersion)}${size}. Atualiza em 1 clique sem perder as contas.`;
+    } else if (st.mainReady && !st.isGitRepo && readUpdateSnooze() !== `main:${st.mainReady.sha}`) {
+        mode = 'main';
+        const n = Number(st.mainReady.aheadBy || 0);
+        setText(title, `Atualização pronta${n ? `: ${n} mudança${n > 1 ? 's' : ''}` : ''}`);
+        setText(sub, `Entra sozinha na próxima vez que o Hub abrir.${st.mainReady.lastMessage ? ` Última: ${st.mainReady.lastMessage}` : ''}`);
     } else if (st.justUpdatedFrom && !updateDoneBannerDismissed) {
         mode = 'done';
-        setText(title, `Atualizado para v${shortVer(st.currentVersion)}`);
-        setText(sub, `Antes: v${shortVer(st.justUpdatedFrom)}. Veja o que mudou em Novidades.`);
+        if (st.justUpdatedChannel === 'main') {
+            setText(title, 'Hub sincronizado com as últimas mudanças');
+            setText(sub, `v${shortVer(st.currentVersion)} com os commits mais novos do GitHub.`);
+        } else {
+            setText(title, `Atualizado para v${shortVer(st.currentVersion)}`);
+            setText(sub, `Antes: v${shortVer(st.justUpdatedFrom)}. Veja o que mudou em Novidades.`);
+        }
     }
 
     bar.classList.toggle('hidden', !mode);
@@ -3582,9 +3592,9 @@ function renderUpdateBanner(st) {
     bar.classList.toggle('done', mode === 'done');
     if (!mode) return;
     setText(icon, mode === 'error' ? '!' : mode === 'done' ? '✓' : '⬇');
-    btnInstall.classList.toggle('hidden', !(canInstall && (mode === 'available' || mode === 'error')));
-    setText(btnInstall, mode === 'error' ? 'Tentar de novo' : 'Atualizar agora');
-    btnNotes.classList.toggle('hidden', busy);
+    btnInstall.classList.toggle('hidden', !((canInstall && (mode === 'available' || mode === 'error')) || mode === 'main'));
+    setText(btnInstall, mode === 'error' ? 'Tentar de novo' : mode === 'main' ? 'Reiniciar e aplicar' : 'Atualizar agora');
+    btnNotes.classList.toggle('hidden', busy || mode === 'main');
     btnLater.classList.toggle('hidden', busy);
     setText(btnLater, mode === 'done' ? 'Fechar' : 'Depois');
 }
@@ -3895,6 +3905,7 @@ function wireEvents() {
         $('btnBannerLater')?.addEventListener('click', () => {
             const st = currentUpdateState || {};
             if (st.hasUpdate) writeUpdateSnooze(st.updateId || st.latestVersion);
+            else if (st.mainReady?.sha) writeUpdateSnooze(`main:${st.mainReady.sha}`);
             updateDoneBannerDismissed = true;
             renderUpdateBanner(st);
         });
