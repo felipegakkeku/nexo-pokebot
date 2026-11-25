@@ -1101,7 +1101,7 @@
             grid: { layout: gridState.layout, order: [...(gridState.order || [])], hidden: [...(gridState.hidden || [])], max: gridState.max || 0, splitX: gridState.splitX, splitY: gridState.splitY },
             dockCols: [...dockCols], dockWeights: [...dockWeights],
             activityPinned, dockWidth, hudPos,
-            cards: { hidden: [...cardState.hidden], collapsed: [...cardState.collapsed], order: { ...cardState.order } }, paneW,
+            cards: { hidden: [...cardState.hidden], collapsed: [...cardState.collapsed], resumo: [...cardState.resumo], order: { ...cardState.order } }, paneW,
         };
     }
     function applyLayout(l) {
@@ -1772,9 +1772,11 @@
                 if (/^tab-[a-z]+$/.test(panel)) { const k = clean(keys); if (k.length) order[panel] = k; }
             }
         }
-        cardState = { hidden: clean(cardState.hidden), collapsed: clean(cardState.collapsed), order };
+        cardState = { hidden: clean(cardState.hidden), collapsed: clean(cardState.collapsed), resumo: clean(cardState.resumo), order };
     }
     const DEFAULT_ORDER = {};
+    // Cards com versão resumida: o CSS esconde o que é detalhe em .card.is-resumo.
+    const RESUMO_CARDS = new Set(['poke', 'collection', 'perf', 'drops', 'inv', 'routines', 'prefs', 'trainer', 'advisor', 'alerts', 'conn', 'liveStats', 'channels', 'shinyFeed']);
     const panelCards = (panel) => [...panel.querySelectorAll(':scope > .card[data-card]')];
     // Reposiciona os cards na ordem salva usando os lugares que eles já ocupam:
     // barras e avisos que não são card ficam onde estão.
@@ -1860,7 +1862,10 @@
             const name = CARD_LABEL[card.dataset.card] || 'card';
             const tools = document.createElement('span');
             tools.className = 'card-tools';
-            tools.innerHTML = `<button type="button" class="icon-btn card-tool card-grip" data-card-act="drag" title="Arraste para mudar a ordem dos cards" aria-label="Mover ${esc(name)}">${IC('grip')}</button>`
+            const dense = RESUMO_CARDS.has(card.dataset.card)
+                ? `<button type="button" class="icon-btn card-tool card-dense" data-card-act="dense" aria-label="Resumo ou detalhado: ${esc(name)}">${IC('layout')}</button>`
+                : '';
+            tools.innerHTML = dense + `<button type="button" class="icon-btn card-tool card-grip" data-card-act="drag" title="Arraste para mudar a ordem dos cards" aria-label="Mover ${esc(name)}">${IC('grip')}</button>`
                 + `<button type="button" class="icon-btn card-tool" data-card-act="collapse" title="Recolher ou abrir (clique no título também)" aria-label="Recolher ${esc(name)}">${IC('chevron')}</button>`
                 + `<button type="button" class="icon-btn card-tool" data-card-act="hide" title="Fechar este card. Ele volta pelo rodapé da aba." aria-label="Fechar ${esc(name)}">${IC('x')}</button>`;
             head.append(tools);
@@ -1878,8 +1883,16 @@
         applyCardOrder();
         const hidden = new Set(cardState.hidden);
         const collapsed = new Set(cardState.collapsed);
+        const resumo = new Set(cardState.resumo);
         document.querySelectorAll('.card[data-card]').forEach((card) => {
             const k = card.dataset.card;
+            const short = RESUMO_CARDS.has(k) && resumo.has(k);
+            card.classList.toggle('is-resumo', short);
+            const dense = card.querySelector('[data-card-act="dense"]');
+            if (dense) {
+                dense.setAttribute('aria-pressed', String(short));
+                dense.title = short ? 'Versão resumida. Clique para ver a detalhada' : 'Versão detalhada. Clique para resumir';
+            }
             card.classList.toggle('card-off', hidden.has(k));
             card.classList.toggle('is-collapsed', collapsed.has(k));
             card.querySelector('[data-card-act="collapse"]')?.setAttribute('aria-expanded', String(!collapsed.has(k)));
@@ -1913,6 +1926,7 @@
         const k = card.dataset.card;
         if (act?.dataset.cardAct === 'hide') { toggleCardKey('hidden', k, true); return; }
         if (act?.dataset.cardAct === 'drag') return;
+        if (act?.dataset.cardAct === 'dense') { toggleCardKey('resumo', k, !cardState.resumo.includes(k)); return; }
         const onTitle = !act && ev.target.closest('.card-head-row > h3');
         if (act?.dataset.cardAct === 'collapse' || onTitle) toggleCardKey('collapsed', k, !cardState.collapsed.includes(k));
     }

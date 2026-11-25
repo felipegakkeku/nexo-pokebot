@@ -3117,6 +3117,26 @@ body.minihud-body { background: color-mix(in srgb, var(--bg-deep) 94%, transpare
 .card.is-collapsed > :not(.card-head-row) { display: none !important; }
 .card.is-collapsed > .card-head-row { margin-bottom: 0; }
 .card.is-collapsed { padding-top: 9px; padding-bottom: 9px; }
+/* Versão resumida por card: fica o número principal, sai o detalhe */
+.card-tool.card-dense[aria-pressed="true"] { color: var(--accent); }
+.card.is-resumo .toggle-sub:not(.warn),
+.card.is-resumo .sound-event-sub,
+.card.is-resumo .adv-intro,
+.card.is-resumo .hint-text:not(.save-state):not(.adv-warn),
+.card.is-resumo .hunt-guide-badge,
+.card.is-resumo .tc-stat small,
+.card.is-resumo .tc-milestone,
+.card.is-resumo .col-dex-line,
+.card.is-resumo .kpis .sub,
+.card.is-resumo .eff-grid,
+.card.is-resumo .drop-filter-bar,
+.card.is-resumo .recent-drops,
+.card.is-resumo .conn-tools,
+.card.is-resumo #livesHead { display: none !important; }
+.card.is-resumo .toggle-item.with-sub { padding-top: 4px; padding-bottom: 4px; }
+.card.is-resumo .shiny-feed > li:nth-child(n+6),
+.card[data-card="advisor"].is-resumo .adv-list > li:nth-child(n+4),
+.card[data-card="inv"].is-resumo .inv-grid > :nth-child(n+9) { display: none; }
 .card.card-off { display: none !important; }
 .cards-restore { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: var(--radius); font-size: var(--fs-sm); color: var(--muted); }
 .cards-restore > span { display: inline-flex; align-items: center; gap: 5px; margin-right: 2px; }
