@@ -1242,7 +1242,29 @@
         if (fromHidden) suppressToastsUntil = Date.now() + 4000; // o resumo já mostra o que aconteceu
         setTimeout(() => showAwaySummary(since, base), 1600);
     }
+    // O que o resumo destaca: cada pessoa escolhe (lives vêm desligadas, são muitas e repetitivas).
+    const AWAY_CATS = [
+        ['farm', 'Farm por conta'],
+        ['shiny', 'Shinies'],
+        ['market', 'Compras e vendas'],
+        ['drops', 'Drops e marcos'],
+        ['live', 'Lives (Twitch e Kick)'],
+        ['error', 'Erros'],
+    ];
+    const AWAY_DEFAULT = { farm: true, shiny: true, market: true, drops: true, live: false, error: true };
+    const awayCats = () => ({ ...AWAY_DEFAULT, ...LS.get('nexo.awayCats', {}) });
+    const AWAY_MARKET_RE = /^(?:Sniper|Mercado|Consultor|Destino dos drops)\b/i;
+    const AWAY_LIVE_RE = /^(?:Lives:|Twitch\b|Kick\b)|caixinha|ba[úu] \+\d+/i;
+    function awayCatOf(e) {
+        const txt = String(e.text || e.title || '');
+        if (AWAY_MARKET_RE.test(txt)) return 'market';
+        if (e.event === 'chest' || e.kind === 'live' || AWAY_LIVE_RE.test(txt)) return 'live';
+        if (e.kind === 'error') return 'error';
+        if (e.kind === 'reward') return 'drops';
+        return e.event ? 'drops' : '';
+    }
     function showAwaySummary(since, base) {
+        const cats = awayCats();
         const rows = [];
         const highlights = [];
         for (const acc of ACCOUNTS) {
@@ -1256,20 +1278,21 @@
             };
             if (d.kills < 0 || d.xp < 0) continue; // sessão foi zerada no meio
             if (!d.kills && !d.xp && !d.caps) continue;
-            rows.push(`<tr><th>${acc} · ${escapeHtml(nickOf(acc))}</th><td>${fmtCompact(d.xp)}</td><td class="${d.gold < 0 ? 'neg' : 'pos'}">${signed(d.gold)}</td><td>${fmtCompact(d.kills)}</td><td>${fmtCompact(d.caps)}</td></tr>`);
-            for (const o of s.ownShinies || []) if (Number(o.ts) > since) {
+            if (cats.farm) rows.push(`<tr><th>${acc} · ${escapeHtml(nickOf(acc))}</th><td>${fmtCompact(d.xp)}</td><td class="${d.gold < 0 ? 'neg' : 'pos'}">${signed(d.gold)}</td><td>${fmtCompact(d.kills)}</td><td>${fmtCompact(d.caps)}</td></tr>`);
+            if (cats.shiny) for (const o of s.ownShinies || []) if (Number(o.ts) > since) {
                 const dex = resolvePokemonSpriteDex(o.speciesId, o.name, o.spriteDex);
                 const url = pokemonSpriteUrl(o.speciesId, true, dex, o.name);
                 highlights.push({ ts: o.ts, cls: 'shiny', icon: 'star', html: `${url ? `<img src="${url}" data-sprite-dex="${dex}" data-sprite-shiny="1" alt="" />` : ''}<span><b>${escapeHtml(o.name)}</b> capturado · Conta ${acc}</span>` });
             }
-            for (const m of s.missedShinies || []) if (Number(m.ts) > since) highlights.push({ ts: m.ts, cls: 'miss', icon: 'alert', html: `<span><b>${escapeHtml(m.name || 'Shiny')}</b> escapou · Conta ${acc}</span>` });
+            if (cats.shiny) for (const m of s.missedShinies || []) if (Number(m.ts) > since) highlights.push({ ts: m.ts, cls: 'miss', icon: 'alert', html: `<span><b>${escapeHtml(m.name || 'Shiny')}</b> escapou · Conta ${acc}</span>` });
         }
         for (const e of eventLog) {
             if (e.ts <= since || e.event === 'shinyCaught' || e.event === 'shinyMiss') continue;
-            if (!['reward', 'error'].includes(e.kind) && !e.event) continue;
+            const cat = awayCatOf(e);
+            if (!cat || !cats[cat]) continue;
             highlights.push({ ts: e.ts, cls: e.kind, icon: KIND_ICON[e.kind] || 'info', html: `<span>${escapeHtml(e.text || e.title)}${e.account ? ` · Conta ${e.account}` : ''}</span>` });
         }
-        if (!rows.length && !highlights.length) return;
+        if (!rows.length && !highlights.length && !$('hubOverlay')?.classList.contains('ov-away')) return;
         highlights.sort((a, b) => b.ts - a.ts);
         const mins = Math.round((Date.now() - since) / 60_000);
         const dur = mins >= 120 ? `${Math.floor(mins / 60)} h ${mins % 60} min` : `${mins} min`;
@@ -1278,7 +1301,12 @@
             <button type="button" class="icon-btn" data-ov-close aria-label="Fechar">${IC('x')}</button></header>
           ${rows.length ? `<table class="away-table"><thead><tr><th>Conta</th><th>XP</th><th>Lucro</th><th>Abates</th><th>Capturas</th></tr></thead><tbody>${rows.join('')}</tbody></table>` : ''}
           ${highlights.length ? `<ul class="away-list">${highlights.slice(0, 12).map((h) => `<li class="${h.cls}">${IC(h.icon)}${h.html}<time>${relTime(h.ts)}</time></li>`).join('')}</ul>` : '<p class="hint-text">Nenhum evento especial no período.</p>'}
+          <div class="away-cats" role="group" aria-label="O que destacar no resumo"><span>Destacar:</span>${AWAY_CATS.map(([k, label]) => `<label class="pill-chk"><input type="checkbox" data-away-cat="${k}"${cats[k] ? ' checked' : ''} /> ${label}</label>`).join('')}</div>
           <footer class="ov-foot"><button type="button" class="btn primary" data-ov-close>Beleza</button></footer>`);
+        $('hubOverlay')?.querySelectorAll('[data-away-cat]').forEach((chk) => chk.addEventListener('change', () => {
+            LS.set('nexo.awayCats', { ...awayCats(), [chk.dataset.awayCat]: chk.checked });
+            showAwaySummary(since, base);
+        }));
     }
 
     // ===== sobreposições (atalhos e resumo) =====
@@ -1631,6 +1659,7 @@
         poke: 'Pokémon ativo', buffs: 'Buffs das lives', collection: 'Pokédex e Top Catch', perf: 'Desempenho',
         drops: 'Drops', inv: 'Mochila', quick: 'Ações rápidas', hunt: 'Hunt e objetivo', routines: 'Rotinas',
         prefs: 'Preferências', trainer: 'Treinador (Exp. Share e Casas)', sniper: 'Sniper do Mercado',
+        advisor: 'Consultor de Economia',
         alerts: 'Alertas', conn: 'Contas vinculadas', liveStats: 'Recompensas da conta',
         channels: 'Canais e chat', shinyFeed: 'Shinies do servidor',
     };

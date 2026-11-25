@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startGuiServer } from '../headless/gui-server.mjs';
+import { createPerfSampler } from './perf-meter.mjs';
 import { createHeadlessHuntGuideEvaluator, findHuntExtensionDir } from '../headless/hunt-guide.mjs';
 import { loadAppIconBuffer } from '../desktop/build-exe.mjs';
 import {
@@ -332,12 +333,25 @@ async function loadHuntExtensionIntoPartitions() {
     return extDir;
 }
 
+const perf = createPerfSampler({
+    getMetrics: () => {
+        try { return app.getAppMetrics(); } catch { return []; }
+    },
+    getHubPid: () => {
+        try { return mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents.getOSProcessId() : 0; } catch { return 0; }
+    },
+});
+
 function getAllSnapshots() {
+    return perf.measureSnapshots(buildAllSnapshots);
+}
+
+function buildAllSnapshots() {
     const out = {};
     for (const acc of ACCOUNT_IDS) {
         const entry = servers.get(acc);
         if (!entry) continue;
-        const snap = entry.instance.controller.getSnapshot({ includeHunts: false });
+        const snap = entry.instance.controller.getSnapshot({ includeHunts: false, advisorLists: false });
         out[acc] = {
             ...snap,
             account: acc,
@@ -695,10 +709,10 @@ async function openEmbeddedVotePopup(acc) {
     const entry = servers.get(acc);
     if (!entry) return false;
     const { controller } = entry.instance;
-    let snap = controller.getSnapshot({ includeHunts: false });
+    let snap = controller.getSnapshot({ includeHunts: false, advisorLists: false });
     if (!snap?.vote?.url) {
         await controller.refreshVoteStatus({ force: true });
-        snap = controller.getSnapshot({ includeHunts: false });
+        snap = controller.getSnapshot({ includeHunts: false, advisorLists: false });
     }
     const targetUrl = snap?.vote?.url;
     if (!targetUrl || !/^https?:\/\//i.test(targetUrl)) return false;
@@ -912,7 +926,7 @@ function nextAutoChestCandidate() {
     for (const acc of ACCOUNT_IDS) {
         const entry = servers.get(acc);
         if (!entry) continue;
-        const snap = entry.instance.controller.getSnapshot({ includeHunts: false });
+        const snap = entry.instance.controller.getSnapshot({ includeHunts: false, advisorLists: false });
         if (snap?.config?.liveAutoClaimChest === false || snap?.config?.liveEnabled === false || snap?.config?.liveWatchTwitch === false) continue;
         for (const [channel, st] of Object.entries(snap?.lives?.twitch || {})) {
             if (!st?.manualChest) continue;
@@ -1150,7 +1164,7 @@ function liveWatchCandidates() {
         const ctrl = entry.instance.controller;
         const creds = ctrl.getLiveCredentials?.() || {};
         if (!creds.twitchToken) continue;
-        const snap = ctrl.getSnapshot({ includeHunts: false });
+        const snap = ctrl.getSnapshot({ includeHunts: false, advisorLists: false });
         const cfg = snap?.config || {};
         if (cfg.liveEnabled === false) continue;
         const wantWatch = cfg.liveStreakWatch !== false && cfg.liveWatchTwitch !== false;
@@ -1788,6 +1802,22 @@ function stopLiveWatchJobs() {
 
 function registerIpcHandlers() {
     ipcMain.handle('hub:get-all-snapshots', () => getAllSnapshots());
+    ipcMain.handle('hub:get-perf', () => perf.read());
+    ipcMain.handle('hub:inspect-shiny', (_ev, { account, entry } = {}) => {
+        // O shiny pode ser de qualquer conta do Hub: a que tem o Pokémon responde; senão, a conta ativa.
+        let fallback = null;
+        for (const acc of ACCOUNT_IDS) {
+            const ctrl = servers.get(acc)?.instance?.controller;
+            if (!ctrl?.inspectShiny) continue;
+            try {
+                const res = ctrl.inspectShiny(entry || {});
+                if (res?.found) return res;
+                if (res?.mine || (!fallback && acc === Number(account))) fallback = res;
+            } catch { /* conta sem estado ainda */ }
+        }
+        return fallback;
+    });
+    ipcMain.handle('hub:get-advisor', (_ev, { account } = {}) => servers.get(Number(account))?.instance?.controller?.getAdvisor?.() || null);
 
     ipcMain.handle('hub:get-hunts', (_ev, { account } = {}) => {
         const preferred = servers.get(Number(account));

@@ -1,5 +1,9 @@
 // Controlador stateful de farm headless e servidor HTTP/API para Dashboard Web e App Desktop.
 import { createServer } from 'node:http';
+import { fetchSpeciesCatalog, getSharedMarketBase, SPECIES_CACHE_VERSION } from './market-base.mjs';
+import { adviseItems, advisePokemons, buildSpeciesIndex, estimatePokemonPrice, isLegendary, notaOf } from './economy-advisor.mjs';
+import { planFinalEvolution } from './evolution-plan.mjs';
+import { DROP_DEFAULTS, decideDrop, frameForDecision, marketRulesOf, netOfListing, normalizeDropPatch } from './drop-router.mjs';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
@@ -82,7 +86,7 @@ const DEFAULT_ICON_PNG_PATH = resolve(REPO_ROOT, 'assets', 'nexo-pokebot-icon.pn
 // Campos do Pokemon que viram a "ficha" do shiny na HUD. O protocolo do jogo nao
 // e documentado, entao guarda os valores simples que vierem (e objetos rasos de
 // numeros, como IVs/stats) e ignora o que ja aparece no cabecalho do cartao.
-const POKEMON_DETAIL_SKIP = new Set(['nome', 'name', 'speciesId', 'level', 'nivel', 'shiny', 'id', 'uid', '_id']);
+const POKEMON_DETAIL_SKIP = new Set(['nome', 'name', 'speciesId', 'level', 'nivel', 'shiny', 'id', 'uid', '_id', 'looktype', 'lookType', 'outfit']);
 export function extractPokemonDetails(pokemon) {
     const out = [];
     if (!pokemon || typeof pokemon !== 'object') return out;
@@ -195,6 +199,8 @@ const EDITABLE_CONFIG_KEYS = new Set([
     'sniperMinGoldReserve',
     'sniperMinOrbsReserve',
     'sniperRules',
+    'advisorEnabled',
+    ...Object.keys(DROP_DEFAULTS),
     'browserProfile',
 ]);
 
@@ -415,6 +421,8 @@ function buildConfig(prefs = {}, saved = {}, overrides = {}, isolatedAccount = f
         sniperMinGoldReserve: Math.max(0, Math.floor(Number(p.sniperMinGoldReserve ?? 0) || 0)),
         sniperMinOrbsReserve: Math.max(0, Math.floor(Number(p.sniperMinOrbsReserve ?? 0) || 0)),
         sniperRules: Array.isArray(p.sniperRules) ? p.sniperRules : [],
+        advisorEnabled: p.advisorEnabled ?? true,
+        ...normalizeDropPatch(p, { ...DROP_DEFAULTS }),
         browserProfile: '',
     };
 
@@ -663,6 +671,8 @@ function normalizeConfigPatch(current, patch = {}) {
         next.trainerQueue = cleaned;
     }
     if (patch.sniperEnabled !== undefined) next.sniperEnabled = Boolean(patch.sniperEnabled);
+    if (patch.advisorEnabled !== undefined) next.advisorEnabled = Boolean(patch.advisorEnabled);
+    normalizeDropPatch(patch, next);
     if (patch.sniperIntervalSec !== undefined) {
         const n = Number(patch.sniperIntervalSec);
         if (Number.isFinite(n)) next.sniperIntervalSec = Math.max(10, Math.min(300, Math.round(n)));
@@ -2607,6 +2617,505 @@ export function createHeadlessController(options = {}) {
     const sniperRecentHits = [];
     let sniperTimer = null;
     const sniperRetentionTimers = new Map();
+    // Compra no Mercado da Comunidade entra num sorteio: só conta como comprada quando o resultado chega.
+    const sniperPending = new Map();
+    sniperTracker.pendingListings = new Set();
+    let sniperPendingTimer = null;
+    const SNIPER_PENDING_MS = 90_000;
+    const sniperHitLabel = (p) => (p.kind === 'pokemon'
+        ? `${p.shiny ? '★ ' : ''}${p.itemName || 'Pokémon'} Nv ${p.level || 1}`
+        : `${p.itemName || `Item #${p.itemId}`} x${p.qty}`);
+    const sniperPriceLabel = (p) => `${Number(p.price || 0).toLocaleString('pt-BR')} ${p.currency === 'orb' ? 'gemas' : 'gold'}`;
+    const sniperPendingQtyByRule = () => {
+        const out = new Map();
+        for (const { purchase } of sniperPending.values()) {
+            out.set(purchase.ruleId, (out.get(purchase.ruleId) || 0) + Number(purchase.qty || 0));
+        }
+        return out;
+    };
+    const sniperRulesWithPending = () => {
+        const pend = sniperPendingQtyByRule();
+        return (config.sniperRules || []).map((r) => {
+            const q = pend.get(r.id) || 0;
+            return q > 0 ? { ...r, boughtQty: Number(r.boughtQty || 0) + q } : r;
+        });
+    };
+    const settleSniperPending = (key, outcome, ev = {}) => {
+        const entry = sniperPending.get(key);
+        if (!entry) return false;
+        sniperPending.delete(key);
+        sniperTracker.pendingListings.delete(key);
+        const p = entry.purchase;
+        p.pending = false;
+        const label = sniperHitLabel(p);
+        if (outcome === 'won') {
+            const wonQty = Math.max(1, Math.floor(Number(ev.qtd) || 0) || Number(p.qty || 1));
+            p.qty = wonQty;
+            p.bought = true;
+            p.status = 'comprado';
+            const updatedRules = (config.sniperRules || []).map((r) => (
+                r.id === p.ruleId ? { ...r, boughtQty: Number(r.boughtQty || 0) + wonQty } : r
+            ));
+            config = normalizeConfigPatch(config, { sniperRules: updatedRules });
+            persistConfig(configPath, config);
+            pushLog('reward', `Sniper comprou: ${sniperHitLabel(p)} por ${sniperPriceLabel(p)} (${p.seller}).`);
+        } else if (outcome === 'lost') {
+            p.status = 'perdeu';
+            pushLog('warn', `Sniper perdeu o sorteio de ${label} (${sniperPriceLabel(p)}). Nada foi cobrado.`);
+        } else if (outcome === 'failed') {
+            p.status = 'falhou';
+            const motivo = ev.msg || ev.chave || '';
+            pushLog('warn', `Sniper não conseguiu comprar ${label}${motivo ? `: ${motivo}` : ''}.`);
+        } else {
+            p.status = 'sem-resposta';
+            pushLog('info', `Sniper ficou sem o resultado da compra de ${label}. Não contei como comprado.`);
+        }
+        return true;
+    };
+    const sweepSniperPending = () => {
+        const now = getSyncedNowMs();
+        for (const [key, entry] of [...sniperPending]) {
+            if (now >= entry.expireAt) settleSniperPending(key, 'timeout');
+        }
+        if (!sniperPending.size && sniperPendingTimer) {
+            clearInterval(sniperPendingTimer);
+            sniperPendingTimer = null;
+        }
+    };
+    const registerSniperPending = (purchases) => {
+        const now = getSyncedNowMs();
+        for (const purchase of purchases) {
+            const key = String(purchase.listingId);
+            sniperPending.set(key, { purchase, expireAt: now + SNIPER_PENDING_MS, announced: false });
+            sniperTracker.pendingListings.add(key);
+        }
+        if (sniperPending.size && !sniperPendingTimer) {
+            sniperPendingTimer = setInterval(sweepSniperPending, 5_000);
+            sniperPendingTimer.unref?.();
+        }
+    };
+    const marketMoney = (valor, moeda) => `${Number(valor || 0).toLocaleString('pt-BR')} ${moeda === 'orb' ? 'gemas' : 'gold'}`;
+    const handleSniperMarketEvent = (kind, e) => {
+        if (kind === 'marketVendido') {
+            pushLog('reward', `Mercado: vendeu ${e.descricao || 'um anúncio'} por ${marketMoney(e.valor, e.moeda)}.`);
+            return;
+        }
+        const key = e?.id != null ? String(e.id) : '';
+        if (!key || !sniperPending.has(key)) {
+            if (kind === 'marketComprado' && e?.descricao) pushLog('reward', `Mercado: comprou ${e.descricao}.`);
+            return;
+        }
+        if (kind === 'marketComprado') {
+            settleSniperPending(key, 'won', e);
+            return;
+        }
+        if (e.fase === 'entrou') {
+            const entry = sniperPending.get(key);
+            entry.purchase.status = 'sorteio';
+            const ate = Number(e.sorteioAte || e.fechaEm || 0);
+            if (ate > 0) entry.expireAt = Math.max(entry.expireAt, ate + 30_000);
+            if (!entry.announced) {
+                entry.announced = true;
+                pushLog('info', `Sniper entrou no sorteio de ${sniperHitLabel(entry.purchase)}. Aguardando o resultado.`);
+            }
+            return;
+        }
+        if (e.fase === 'fim') settleSniperPending(key, e.ok ? 'won' : (e.perdeu ? 'lost' : 'failed'), e);
+    };
+    const sendSniperActions = (actions) => sendActions(actions.map((a) => (
+        a.t === 'market.comprar' ? { ...a, sorteioUi: 1 } : a
+    )));
+
+    // ===== Consultor de economia: base local de vendas + catálogo do jogo =====
+    const ADVISOR_SYNC_MS = 20 * 60_000;
+    const ADVISOR_MAX_PAGES = 12;
+    const ADVISOR_SPECIES_TTL_MS = 24 * 3_600_000;
+    const marketBase = options.marketBase || getSharedMarketBase({ cwd, nowFn });
+    let marketBaseLoaded = false;
+    let advisorSpecies = null;
+    let advisorItemNames = {};
+    let advisorSpeciesLoading = false;
+    let advisorTimer = null;
+    let advisorSync = null; // { queue: [{tipo}], tipo, pagina, seq, waitTimer }
+    let advisorSeq = 0;
+    let advisorCache = { at: 0, key: '', value: null };
+    const advisorOn = () => config.advisorEnabled !== false && !config.economyPingOnly;
+    const ensureMarketBase = () => {
+        if (marketBaseLoaded) return;
+        marketBaseLoaded = true;
+        try { marketBase.load(); } catch { /* base corrompida: começa vazia */ }
+    };
+    const annotateSaleNotas = () => {
+        if (!advisorSpecies) return;
+        marketBase.annotateNotas((sale) => {
+            const esp = advisorSpecies.byId.get(sale.sp);
+            if (!esp || sale.iv == null) return null;
+            return notaOf({ iv: sale.iv, quality: sale.q, potencia: sale.pot, shiny: Boolean(sale.sh), refino: sale.rf }, esp, advisorSpecies.ancestorsOf(sale.sp));
+        });
+    };
+    const applySpeciesCatalog = (cat) => {
+        if (!cat?.creatures?.length) return false;
+        advisorSpecies = buildSpeciesIndex(cat.creatures);
+        advisorItemNames = cat.itemNames || {};
+        annotateSaleNotas();
+        return true;
+    };
+    const ensureSpeciesCatalog = async () => {
+        if (advisorSpeciesLoading) return;
+        const cached = marketBase.readSpeciesCache();
+        if (!advisorSpecies && cached) applySpeciesCatalog(cached);
+        if (cached && cached.v === SPECIES_CACHE_VERSION && nowFn() - (Number(cached.em) || 0) < ADVISOR_SPECIES_TTL_MS) return;
+        const fetchImpl = options.fetch || globalThis.fetch;
+        if (typeof fetchImpl !== 'function') return;
+        advisorSpeciesLoading = true;
+        try {
+            const cat = await fetchSpeciesCatalog((url) => fetchImpl(url, { signal: AbortSignal.timeout(20_000) }));
+            if (cat.creatures.length > 100) {
+                marketBase.writeSpeciesCache(cat);
+                applySpeciesCatalog(cat);
+            }
+        } catch {
+            // tenta de novo no próximo ciclo
+        } finally {
+            advisorSpeciesLoading = false;
+        }
+    };
+    const finishAdvisorSync = () => {
+        if (advisorSync?.waitTimer) clearTimeout(advisorSync.waitTimer);
+        advisorSync = null;
+        marketBase.markSynced(cwd);
+        marketBase.save();
+    };
+    const requestAdvisorPage = () => {
+        if (!advisorSync || disposed) return;
+        const online = status === 'connected' || status === 'bridge';
+        if (!online) { finishAdvisorSync(); return; }
+        if (advisorSync.waitTimer) clearTimeout(advisorSync.waitTimer);
+        advisorSync.seq = ++advisorSeq;
+        sendFrame({ t: 'market.historicoGlobal', pagina: advisorSync.pagina, seq: advisorSync.seq, tipo: advisorSync.tipo });
+        // Sem resposta em 15s: passa para o próximo tipo.
+        advisorSync.waitTimer = setTimeout(() => advanceAdvisorSync(false), 15_000);
+        advisorSync.waitTimer.unref?.();
+    };
+    const advanceAdvisorSync = (nextPage) => {
+        if (!advisorSync) return;
+        if (nextPage && advisorSync.pagina + 1 < ADVISOR_MAX_PAGES) {
+            advisorSync.pagina += 1;
+        } else {
+            const next = advisorSync.queue.shift();
+            if (!next) { finishAdvisorSync(); return; }
+            advisorSync.tipo = next;
+            advisorSync.pagina = 0;
+        }
+        const t = setTimeout(requestAdvisorPage, 1_500);
+        t.unref?.();
+        advisorSync.waitTimer = t;
+    };
+    const startAdvisorSync = ({ force = false } = {}) => {
+        if (disposed || advisorSync || !advisorOn()) return false;
+        if (!(status === 'connected' || status === 'bridge')) return false;
+        ensureMarketBase();
+        if (!force && marketBase.syncedRecently(ADVISOR_SYNC_MS)) return false;
+        marketBase.markSynced(cwd);
+        marketBase.save();
+        sendFrame({ t: 'market.medias' });
+        advisorSync = { queue: ['item'], tipo: 'pokemon', pagina: 0, seq: 0, waitTimer: null };
+        requestAdvisorPage();
+        return true;
+    };
+    const handleAdvisorMarket = (m) => {
+        if (m.aba === 'medias') {
+            ensureMarketBase();
+            marketBase.setMedias(m.medias || {}, m.dias);
+            marketBase.save();
+            return true;
+        }
+        if (m.aba !== 'historicoGlobal') return false;
+        ensureMarketBase();
+        // Também guarda o que a pessoa abre no jogo embutido: venda vista é dado a mais na base.
+        const added = marketBase.ingestHistory(m.linhas || []);
+        if (added) annotateSaleNotas();
+        if (!advisorSync || (m.seq != null && Number(m.seq) !== advisorSync.seq)) {
+            if (added) marketBase.save();
+            return true;
+        }
+        // Página só com vendas já guardadas: o resto também já está na base.
+        advanceAdvisorSync(Boolean(m.temMais) && added > 0);
+        return true;
+    };
+    const scheduleAdvisor = () => {
+        if (advisorTimer || options.disableAdvisor) return;
+        const tick = () => {
+            advisorTimer = setTimeout(tick, 60_000);
+            advisorTimer.unref?.();
+            if (disposed || !advisorOn()) return;
+            ensureMarketBase();
+            void ensureSpeciesCatalog();
+            startAdvisorSync();
+        };
+        advisorTimer = setTimeout(tick, 20_000);
+        advisorTimer.unref?.();
+        if (!dropTimer) {
+            dropTimer = setInterval(() => { try { runDropRouting(); } catch (e) { pushLog('error', `Destino dos drops: ${e?.message || e}`); } }, DROP_TICK_MS);
+            dropTimer.unref?.();
+        }
+    };
+    const clearAdvisorTimers = () => {
+        if (advisorTimer) { clearTimeout(advisorTimer); advisorTimer = null; }
+        if (dropTimer) { clearInterval(dropTimer); dropTimer = null; }
+        if (dropPumpTimer) { clearTimeout(dropPumpTimer); dropPumpTimer = null; }
+        dropQueue = [];
+        if (advisorSync?.waitTimer) clearTimeout(advisorSync.waitTimer);
+        advisorSync = null;
+    };
+    const stonePriceOf = (itemId) => {
+        const v = Number(marketBase.getMedias()?.itens?.[itemId]?.gold?.media);
+        return Number.isFinite(v) && v > 0 ? v : null;
+    };
+    const planCache = new Map();
+    const planOf = (pk) => {
+        if (!advisorSpecies || !pk) return null;
+        const k = `${pk.id}|${pk.speciesId}|${pk.level}|${pk.quality}|${pk.potencia}|${advisorSpecies.size}|${marketBase.version}`;
+        if (planCache.has(k)) return planCache.get(k);
+        if (planCache.size > 4000) planCache.clear();
+        const plan = planFinalEvolution(pk, advisorSpecies, { pedras: lastWelcome?.pedrasEvolucao || {}, stonePrice: stonePriceOf });
+        planCache.set(k, plan);
+        return plan;
+    };
+    const advisorNetOf = () => {
+        const rules = marketRulesOf(lastWelcome);
+        const dias = Math.max(rules.diasMin, Math.min(rules.diasMax, Number(config.dropListDays) || 1));
+        return (price) => netOfListing(price, dias, rules);
+    };
+    const advisorBusyIds = (state) => {
+        const busyIds = new Set();
+        if (state?.activeId != null) busyIds.add(String(state.activeId));
+        for (const pk of state?.pokemons || []) if (Number(pk?.heldItemId) === XP_SHARE_HELD_ID) busyIds.add(String(pk.id));
+        for (const q of config.trainerQueue || []) if (q?.pokemonId != null) busyIds.add(String(q.pokemonId));
+        for (const casa of state?.casa?.lista || []) for (const id of casa?.postos || []) if (id != null) busyIds.add(String(id));
+        return busyIds;
+    };
+
+    // ===== Destino dos drops: decide o que fazer com cada Pokémon novo que cai no depot =====
+    const DROP_TICK_MS = 15_000;
+    const DROP_STEP_MS = 2_500;
+    let dropTimer = null;
+    let dropPumpTimer = null;
+    let dropBaseline = null; // maior id já visto quando o destino começou a olhar
+    const dropDecisions = new Map();
+    let dropRecent = [];
+    let dropQueue = [];
+    let dropListTimes = [];
+    const dropOn = () => advisorOn() && config.dropRouteEnabled === true;
+    const DROP_VERB = { guardar: 'guardou na coleção', anunciar: 'anunciou no mercado', vender: 'vendeu no depot' };
+    const pumpDropQueue = () => {
+        if (dropPumpTimer || !dropQueue.length || disposed) return;
+        const { entry, d } = dropQueue.shift();
+        const st = merger.getState();
+        const still = (st?.pokemons || []).find((pk) => String(pk?.id) === entry.id);
+        const canRun = still && getPokemonLocation(still, st) === 'depot' && dropOn() && config.dropRouteMode === 'auto';
+        const frame = canRun ? frameForDecision(entry.id, d) : null;
+        if (frame && sendFrame(frame)) {
+            entry.done = true;
+            if (d.action === 'anunciar') dropListTimes.push(nowFn());
+            pushLog('info', `Destino dos drops: ${DROP_VERB[d.action]} ${entry.name} Nv ${entry.level}. ${d.reason}`);
+        } else {
+            entry.skipped = true;
+        }
+        dropPumpTimer = setTimeout(() => { dropPumpTimer = null; pumpDropQueue(); }, DROP_STEP_MS);
+        dropPumpTimer.unref?.();
+    };
+    const runDropRouting = () => {
+        if (!dropOn()) { dropBaseline = null; return; }
+        if (!(status === 'connected' || status === 'bridge') || !advisorSpecies) return;
+        const state = merger.getState();
+        const pokes = Array.isArray(state?.pokemons) ? state.pokemons : [];
+        if (!pokes.length) return;
+        const maxId = pokes.reduce((m, pk) => Math.max(m, Number(pk?.id) || 0), 0);
+        // Só o que dropar depois de ligar: nada do que já estava na conta é mexido.
+        if (dropBaseline == null) { dropBaseline = maxId; return; }
+        const busy = advisorBusyIds(state);
+        const fresh = pokes.filter((pk) => Number(pk?.id) > dropBaseline && !dropDecisions.has(String(pk.id))
+            && !pk.starter && !busy.has(String(pk.id)) && getPokemonLocation(pk, state) === 'depot');
+        if (!fresh.length) return;
+        ensureMarketBase();
+        const rows = advisePokemons({
+            pokemons: fresh,
+            locationOf: (pk) => getPokemonLocation(pk, state),
+            species: advisorSpecies,
+            salesBySpecies: marketBase.salesBySpecies(),
+            sacrifice: { pts: 1000 },
+            nowMs: getSyncedNowMs(),
+            planOf,
+            stonePriceOf,
+            keepNota: config.dropKeepNota,
+            keepFinalMult: config.dropKeepFinalMult,
+            netOf: advisorNetOf(),
+        });
+        const rules = marketRulesOf(lastWelcome);
+        const auto = config.dropRouteMode === 'auto';
+        const now = nowFn();
+        dropListTimes = dropListTimes.filter((t) => now - t < 3_600_000);
+        let gold = Number(state?.gold || 0);
+        for (const row of rows) {
+            let d = decideDrop(row, config, rules);
+            if (auto && d.action === 'anunciar') {
+                const semVaga = dropListTimes.length + dropQueue.filter((q) => q.d.action === 'anunciar').length >= config.dropMaxListingsHour;
+                const semGold = gold - rules.diaria * d.dias < (Number(config.sniperMinGoldReserve) || 0);
+                if (semVaga || semGold) {
+                    const resto = decideDrop(row, { ...config, dropSellMarket: false }, rules);
+                    d = { ...resto, reason: `${semVaga ? 'Limite de anúncios por hora' : 'Sem gold para a diária do anúncio'}. ${resto.reason}` };
+                } else {
+                    gold -= rules.diaria * d.dias;
+                }
+            }
+            const entry = {
+                id: String(row.id), name: row.name, level: row.level, shiny: row.shiny, action: d.action, reason: d.reason,
+                price: d.price ?? null, dias: d.dias ?? null, potential: row.potential, ts: now, auto, done: false,
+            };
+            dropDecisions.set(entry.id, entry);
+            dropRecent.unshift(entry);
+            if (auto && d.action !== 'deixar') dropQueue.push({ entry, d });
+        }
+        dropRecent = dropRecent.slice(0, 30);
+        if (dropDecisions.size > 5000) for (const k of [...dropDecisions.keys()].slice(0, 2500)) dropDecisions.delete(k);
+        pumpDropQueue();
+    };
+    const dropSnapshot = (state) => {
+        const rules = marketRulesOf(lastWelcome);
+        return {
+            enabled: dropOn(),
+            mode: config.dropRouteMode,
+            watching: dropBaseline != null,
+            gameAutoSell: state?.automation?.autoVendaDepot === true,
+            diaria: rules.diaria,
+            taxaPct: Math.round(rules.taxaGold * 100),
+            queued: dropQueue.length,
+            recent: dropRecent.slice(0, 15),
+        };
+    };
+
+    // ===== Ficha do shiny: o anúncio do servidor traz só espécie e nível; o resto sai do catálogo,
+    // da base de mercado e, quando o shiny é desta conta, do Pokémon de verdade.
+    const RARIDADE_PT = { COMMON: 'Comum', UNCOMMON: 'Incomum', RARE: 'Raro', EPIC: 'Épico', LEGENDARY: 'Lendário', MYTHIC: 'Mítico' };
+    const fmtBR = (n) => Number(n || 0).toLocaleString('pt-BR');
+    const inspectShiny = (entry = {}) => {
+        if (!advisorSpecies) {
+            try {
+                const cached = marketBase.readSpeciesCache();
+                if (cached) applySpeciesCatalog(cached);
+            } catch { /* sem catálogo, segue com o que tiver */ }
+        }
+        try { ensureMarketBase(); } catch { /* base vazia */ }
+        const spId = Number(entry.speciesId) || 0;
+        const state = merger.getState();
+        const nick = String(state?.nick || session?.nick || '').toLowerCase();
+        const mine = Boolean(nick && String(entry.trainer || '').toLowerCase() === nick);
+        let pk = null;
+        if (mine) {
+            const cands = (state?.pokemons || []).filter((p) => p?.shiny && Number(p.speciesId) === spId);
+            const evolved = cands.length ? cands : (state?.pokemons || []).filter((p) => p?.shiny
+                && Number(p.especieOrigem) === spId);
+            pk = evolved.sort((a, b) => Number(b.id) - Number(a.id))[0] || null;
+        }
+        const esp = advisorSpecies?.byId?.get(Number(pk?.speciesId) || spId) || null;
+        const level = Number(pk?.level ?? pk?.nivel ?? entry.level) || 1;
+        const rows = [];
+        let nota = null;
+        if (pk) {
+            nota = notaOf(pk, esp, advisorSpecies?.ancestorsOf?.(Number(pk.speciesId)) || []);
+            if (nota != null) rows.push(['Nota', `${nota.toFixed(1)} / 10`]);
+            const ivs = pk.ivs && typeof pk.ivs === 'object' ? Object.values(pk.ivs).map(Number).filter(Number.isFinite) : [];
+            const ivTotal = pk.iv ?? pk.ivTotal ?? (ivs.length ? ivs.reduce((s, v) => s + v, 0) : null);
+            if (ivTotal != null) rows.push(['IV', ivs.length ? `${fmtBR(ivTotal)} (${ivs.join(' / ')})` : fmtBR(ivTotal)]);
+            const q = pk.quality ?? pk.qualidade;
+            if (q != null) rows.push(['Qualidade', String(q)]);
+            if (pk.potencia != null) rows.push(['Potência', `${pk.potencia} / 5`]);
+            const nat = pk.natureza ?? pk.nature;
+            if (nat) rows.push(['Natureza', String(nat)]);
+            if (Number(pk.speciesId) !== spId && esp?.name) rows.push(['Hoje', `${esp.name} Nv ${fmtBR(level)}`]);
+            try {
+                const loc = getPokemonLocation(pk, state);
+                rows.push(['Onde está', loc === 'equipe' ? 'Equipe' : (loc === 'colecao' ? 'Coleção' : 'Depot')]);
+            } catch { /* sem local */ }
+        }
+        if (esp) {
+            const rar = isLegendary(esp, esp.pokeId) && !['LEGENDARY', 'MYTHIC'].includes(esp.rarity) ? 'Lendário' : (RARIDADE_PT[esp.rarity] || esp.rarity);
+            if (rar) rows.push(['Raridade', rar]);
+            const tipos = [esp.type1, esp.type2].filter(Boolean).join(' / ');
+            if (tipos) rows.push(['Tipo', tipos]);
+            const bst = ['baseHp', 'baseAtk', 'baseDef', 'baseSpAtk', 'baseSpDef', 'baseSpeed'].reduce((s, k) => s + (Number(esp[k]) || 0), 0);
+            if (bst) rows.push(['Status base', fmtBR(bst)]);
+        }
+        const base = pk || { speciesId: spId, level, shiny: true };
+        const plan = esp ? planOf({ ...base, id: base.id ?? `s${spId}`, speciesId: esp.pokeId, level, shiny: true }) : null;
+        const best = plan?.best;
+        if (best && best.speciesId !== esp?.pokeId) {
+            rows.push(['Forma final', `${best.name} Nv ${fmtBR(best.level)}${best.nota != null ? ` · nota ${best.nota.toFixed(1)}` : ''}`]);
+        }
+        const market = estimatePokemonPrice({ speciesId: esp?.pokeId || spId, level, shiny: true }, nota, marketBase.salesBySpecies(), { nowMs: getSyncedNowMs() });
+        if (market) {
+            rows.push(['Mercado', `~${fmtBR(market.price)} ${market.currency === 'orb' ? 'gemas' : 'gold'} (${market.n} venda${market.n > 1 ? 's' : ''}, confiança ${market.confidence})`]);
+        } else {
+            rows.push(['Mercado', 'Sem vendas de shiny desta espécie nos últimos 30 dias']);
+        }
+        const hint = pk ? '' : (mine
+            ? 'Não achei este shiny entre os Pokémon da conta (pode ter sido vendido ou ainda não sincronizou).'
+            : 'IV e nota só aparecem nos shinies das suas contas: o servidor anuncia só a espécie e o nível.');
+        return { mine, found: Boolean(pk), rows, hint };
+    };
+
+    /** Resumo leve do consultor para o snapshot de 1,25 s; as listas saem só por getAdvisor(). */
+    const buildAdvisorLite = (state) => {
+        if (!advisorOn()) return { enabled: false, drops: dropSnapshot(state) };
+        ensureMarketBase();
+        return {
+            enabled: true,
+            lite: true,
+            base: marketBase.stats(),
+            speciesReady: Boolean(advisorSpecies),
+            syncing: Boolean(advisorSync),
+            sacrificePts: Number(state?.automation?.sacrificio?.pts || 0),
+            drops: dropSnapshot(state),
+        };
+    };
+    const buildAdvisorSnapshot = (state) => {
+        if (!advisorOn()) return { enabled: false };
+        ensureMarketBase();
+        const pokes = state?.pokemons || [];
+        const key = `${marketBase.version}|${advisorSpecies?.size || 0}|${pokes.length}|${pokes.map((p) => `${p.id}:${p.level}:${p.slot ?? ''}`).join(',')}|${JSON.stringify(state?.items || {})}|${state?.automation?.sacrificio?.pts || 0}|${config.dropKeepNota}|${config.dropKeepFinalMult}|${config.dropListDays}`;
+        const now = nowFn();
+        if (advisorCache.value && advisorCache.key === key && now - advisorCache.at < 60_000) return { ...advisorCache.value, drops: dropSnapshot(state) };
+        const busyIds = advisorBusyIds(state);
+        const medias = marketBase.getMedias();
+        const names = { ...advisorItemNames, ...(catalog.itemNames || {}) };
+        for (const it of catalog.marketItems || []) if (it?.id && it.name) names[it.id] = it.name;
+        const keepIds = new Set(Object.values(ITEM_IDS).map(Number));
+        const value = {
+            enabled: true,
+            base: marketBase.stats(),
+            speciesReady: Boolean(advisorSpecies),
+            syncing: Boolean(advisorSync),
+            sacrificePts: Number(state?.automation?.sacrificio?.pts || 0),
+            items: adviseItems({ items: state?.items || {}, medias: medias?.itens || {}, names, keepIds }).slice(0, 40),
+            pokemons: advisePokemons({
+                pokemons: pokes,
+                locationOf: (pk) => getPokemonLocation(pk, state),
+                species: advisorSpecies,
+                salesBySpecies: marketBase.salesBySpecies(),
+                sacrifice: state?.automation?.sacrificio || {},
+                busyIds,
+                nowMs: getSyncedNowMs(),
+                planOf,
+                stonePriceOf,
+                keepNota: config.dropKeepNota,
+                keepFinalMult: config.dropKeepFinalMult,
+                netOf: advisorNetOf(),
+            }).slice(0, 120),
+        };
+        advisorCache = { at: now, key, value };
+        return { ...value, drops: dropSnapshot(state) };
+    };
 
     const clearSniperTimers = () => {
         if (sniperTimer) {
@@ -2615,6 +3124,10 @@ export function createHeadlessController(options = {}) {
         }
         for (const t of sniperRetentionTimers.values()) clearTimeout(t);
         sniperRetentionTimers.clear();
+        if (sniperPendingTimer) {
+            clearInterval(sniperPendingTimer);
+            sniperPendingTimer = null;
+        }
     };
     const requestSniperSummary = ({ force = false } = {}) => {
         const isOnline = status === 'connected' || status === 'bridge';
@@ -3575,6 +4088,10 @@ export function createHeadlessController(options = {}) {
                 addedCorpse = true;
             }
             const kind = e.k || e.t || e.tipo || e.acao;
+            if (kind === 'mktSorteio' || kind === 'marketComprado' || kind === 'marketVendido') {
+                handleSniperMarketEvent(kind, e);
+                continue;
+            }
             if (kind === 'ataque') {
                 stats.attacks += 1;
                 rearmCombatLock();
@@ -3974,6 +4491,7 @@ export function createHeadlessController(options = {}) {
                 sendFrame({ t: 'hunt.select', slug: config.targetHuntSlug });
             }
             scheduleSniperTimer();
+            scheduleAdvisor();
 
             const needGuideNow = config.huntGuideMode !== 'off' || config.farmObjective !== 'off';
             if (isBridge) {
@@ -4083,6 +4601,7 @@ export function createHeadlessController(options = {}) {
         }
 
         if (m.t === 'market') {
+            if (handleAdvisorMarket(m)) return;
             if (m.aba === 'itens') {
                 marketSummary = m.resumo || {};
                 marketMedias = m.medias || null;
@@ -4102,28 +4621,19 @@ export function createHeadlessController(options = {}) {
                         itemId: m.itemId,
                         moeda: m.moeda === 'orb' ? 'orb' : 'gold',
                         linhas: m.linhas || [],
-                        rules: config.sniperRules || [],
+                        rules: sniperRulesWithPending(),
                         state: stateNow,
                         config,
                         tracker: sniperTracker,
                         syncedNowMs: getSyncedNowMs(),
                     });
-                    if (evalRes.actions.length) sendActions(evalRes.actions);
+                    if (evalRes.actions.length) sendSniperActions(evalRes.actions);
                     for (const lg of evalRes.logs) pushLog(lg.kind || 'reward', lg.text);
                     for (const hit of evalRes.hits) {
                         sniperRecentHits.unshift(hit);
                         if (sniperRecentHits.length > 25) sniperRecentHits.pop();
                     }
-                    if (evalRes.purchases.length > 0) {
-                        const updatedRules = (config.sniperRules || []).map((r) => {
-                            const delta = evalRes.purchases
-                                .filter((p) => p.ruleId === r.id)
-                                .reduce((sum, p) => sum + Number(p.qty || 0), 0);
-                            return delta > 0 ? { ...r, boughtQty: Number(r.boughtQty || 0) + delta } : r;
-                        });
-                        config = normalizeConfigPatch(config, { sniperRules: updatedRules });
-                        persistConfig(configPath, config);
-                    }
+                    if (evalRes.purchases.length > 0) registerSniperPending(evalRes.purchases);
                     if (evalRes.recheckAtMs != null) {
                         const pairKey = `${m.itemId}:${m.moeda === 'orb' ? 'orb' : 'gold'}`;
                         const oldTimer = sniperRetentionTimers.get(pairKey);
@@ -4144,7 +4654,7 @@ export function createHeadlessController(options = {}) {
                 if (config.sniperEnabled && !config.economyPingOnly) {
                     const evalRes = evaluateSniperPokemonListings({
                         linhas: m.linhas,
-                        rules: config.sniperRules || [],
+                        rules: sniperRulesWithPending(),
                         state: stateNow,
                         config,
                         tracker: sniperTracker,
@@ -4153,22 +4663,13 @@ export function createHeadlessController(options = {}) {
                     for (const [rId, st] of Object.entries(evalRes.matchedRuleStats || {})) {
                         sniperPokemonStats[rId] = st;
                     }
-                    if (evalRes.actions.length) sendActions(evalRes.actions);
+                    if (evalRes.actions.length) sendSniperActions(evalRes.actions);
                     for (const lg of evalRes.logs) pushLog(lg.kind || 'reward', lg.text);
                     for (const hit of evalRes.hits) {
                         sniperRecentHits.unshift(hit);
                         if (sniperRecentHits.length > 25) sniperRecentHits.pop();
                     }
-                    if (evalRes.purchases.length > 0) {
-                        const updatedRules = (config.sniperRules || []).map((r) => {
-                            const delta = evalRes.purchases
-                                .filter((p) => p.ruleId === r.id)
-                                .reduce((sum, p) => sum + Number(p.qty || 0), 0);
-                            return delta > 0 ? { ...r, boughtQty: Number(r.boughtQty || 0) + delta } : r;
-                        });
-                        config = normalizeConfigPatch(config, { sniperRules: updatedRules });
-                        persistConfig(configPath, config);
-                    }
+                    if (evalRes.purchases.length > 0) registerSniperPending(evalRes.purchases);
                     if (evalRes.recheckAtMs != null && evalRes.recheckRule) {
                         const pkKey = `pk:${evalRes.recheckRule.id}`;
                         const oldTimer = sniperRetentionTimers.get(pkKey);
@@ -5352,7 +5853,7 @@ export function createHeadlessController(options = {}) {
         return false;
     };
 
-    const getSnapshot = ({ includeHunts = true } = {}) => {
+    const getSnapshot = ({ includeHunts = true, advisorLists = true } = {}) => {
         const now = nowFn();
         const state = merger.getState();
         const currentSlug = state?.huntSlug || tracker.lastHuntSlug || null;
@@ -5533,16 +6034,17 @@ export function createHeadlessController(options = {}) {
             .sort((a, b) => (locRank[a.location] - locRank[b.location]) || (b.level - a.level) || a.name.localeCompare(b.name))
             .slice(0, 150);
 
+        const pendingByRule = sniperPendingQtyByRule();
         const enrichedSniperRules = (config.sniperRules || []).map((r) => {
             if (r.kind === 'pokemon') {
                 const st = sniperPokemonStats[r.id] || null;
-                return { ...r, currentMinPrice: st ? st.minPrice : null, avgPrice: null };
+                return { ...r, currentMinPrice: st ? st.minPrice : null, avgPrice: null, pendingQty: pendingByRule.get(r.id) || 0 };
             }
             const sum = marketSummary?.[r.itemId] || marketSummary?.[String(r.itemId)] || null;
             const currentMinPrice = sum ? (r.currency === 'orb' ? (sum.minOrb ?? null) : (sum.minGold ?? null)) : null;
             const avgRaw = marketMedias?.[r.itemId] || marketMedias?.[String(r.itemId)] || null;
             const avgPrice = avgRaw ? (r.currency === 'orb' ? (avgRaw.orb ?? null) : (avgRaw.gold ?? null)) : null;
-            return { ...r, currentMinPrice, avgPrice };
+            return { ...r, currentMinPrice, avgPrice, pendingQty: pendingByRule.get(r.id) || 0 };
         });
 
         const speciesById = new Map();
@@ -5590,6 +6092,7 @@ export function createHeadlessController(options = {}) {
                 marketItems: catalog.marketItems || [],
                 marketSpecies,
             },
+            advisor: advisorLists ? buildAdvisorSnapshot(state) : buildAdvisorLite(state),
             session: session ? {
                 nick: session.nick,
                 contaId: payload?.contaId ?? null,
@@ -5808,6 +6311,8 @@ export function createHeadlessController(options = {}) {
         clearHuntFlushTimer();
         clearCampoDrainTimer();
         clearSniperTimers();
+        clearAdvisorTimers();
+        try { marketBase.save(); } catch { /* ignore */ }
         pendingHuntSlug = null;
         clearReconnectTimer();
         closeBridgeQuietly();
@@ -5843,6 +6348,8 @@ export function createHeadlessController(options = {}) {
         importLiveTokens,
         getHunts: () => catalog.huntsList,
         getSnapshot,
+        getAdvisor: () => buildAdvisorSnapshot(merger.getState()),
+        inspectShiny,
         stop,
     };
 }

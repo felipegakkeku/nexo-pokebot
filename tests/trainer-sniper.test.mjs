@@ -221,10 +221,24 @@ test('gui: bridge WS integra Treinador Exp. Share e Sniper de Itens ponta a pont
                     linhas: [{ id: 'lot1', vendedorId: 99, vendedor: 'Seller', preco: 8, qtd: 3 }],
                 }),
             });
-            assert.ok(sentFrames.some((f) => f.t === 'market.comprar' && f.id === 'lot1' && f.qtd === 2 && f.moeda === 'orb'));
-            const snap = controller.getSnapshot({ includeHunts: false });
-            assert.equal(snap.sniper.rules[0].boughtQty, 2);
+            assert.ok(sentFrames.some((f) => f.t === 'market.comprar' && f.id === 'lot1' && f.qtd === 2 && f.moeda === 'orb' && f.sorteioUi === 1));
+            // Entrar no sorteio ainda não é compra: só conta quando o resultado chega.
+            let snap = controller.getSnapshot({ includeHunts: false });
+            assert.equal(snap.sniper.rules[0].boughtQty, 0);
+            assert.equal(snap.sniper.rules[0].pendingQty, 2);
             assert.equal(snap.sniper.recentHits.length, 1);
+            assert.equal(snap.sniper.recentHits[0].status, 'pendente');
+
+            fakeWs.onmessage?.({ data: JSON.stringify({ t: 'batalha', ev: [{ k: 'mktSorteio', fase: 'entrou', id: 'lot1' }] }) });
+            snap = controller.getSnapshot({ includeHunts: false });
+            assert.equal(snap.sniper.rules[0].boughtQty, 0);
+            assert.equal(snap.sniper.recentHits[0].status, 'sorteio');
+
+            fakeWs.onmessage?.({ data: JSON.stringify({ t: 'batalha', ev: [{ k: 'mktSorteio', fase: 'fim', id: 'lot1', ok: true, qtd: 2 }] }) });
+            snap = controller.getSnapshot({ includeHunts: false });
+            assert.equal(snap.sniper.rules[0].boughtQty, 2);
+            assert.equal(snap.sniper.rules[0].pendingQty, 0);
+            assert.equal(snap.sniper.recentHits[0].status, 'comprado');
         } finally {
             controller.stop();
         }
@@ -387,6 +401,8 @@ test('gui: bridge WS integra Sniper de Pokemon por nivel ponta a ponta', async (
                 }),
             });
             assert.ok(sentFrames.some((f) => f.t === 'market.comprar' && f.id === 'pk_hit' && f.qtd === 1 && f.preco === 420_000 && f.moeda === 'gold'));
+            assert.equal(controller.getSnapshot({ includeHunts: false }).sniper.rules[0].boughtQty, 0);
+            fakeWs.onmessage?.({ data: JSON.stringify({ t: 'batalha', ev: [{ k: 'marketComprado', id: 'pk_hit', descricao: 'Tyranitar' }] }) });
             const snap = controller.getSnapshot({ includeHunts: false });
             assert.equal(snap.sniper.rules[0].boughtQty, 1);
             assert.equal(snap.sniper.recentHits.length, 1);

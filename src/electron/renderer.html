@@ -610,6 +610,49 @@
               <ul class="sniper-hits" id="sniperHitsList"></ul>
             </div>
 
+            <div class="card" id="advisorCard" data-card="advisor">
+              <div class="card-head-row">
+                <h3>Consultor de Economia</h3>
+                <span class="scope-badge" id="advisorBaseBadge">Base local vazia</span>
+              </div>
+              <div class="sniper-top-row">
+                <label class="toggle-item"><input type="checkbox" id="cAdvisorEnabled" /> Ativar consultor</label>
+                <span class="hint-text" id="advisorSacHint"></span>
+              </div>
+              <p class="hint-text adv-intro">Junta as vendas do histórico global do mercado numa base no seu PC (compartilhada entre as contas) e compara com depot, sacrifício e evolução. É só sugestão: nada é vendido sozinho.</p>
+              <div class="adv-section-head"><b>Pokémon</b><div class="chip-row" id="advisorPokeFilter" role="group" aria-label="Filtrar sugestões de Pokémon"></div></div>
+              <ul class="adv-list" id="advisorPokeList"></ul>
+              <button type="button" class="btn sm hidden" id="btnAdvisorMore">Mostrar mais</button>
+              <div class="adv-section-head"><b>Itens da mochila</b><span class="hint-text">média de 7 dias do mercado</span></div>
+              <ul class="adv-list" id="advisorItemList"></ul>
+
+              <div class="adv-section-head"><b>Destino dos drops</b><span class="hint-text" id="dropStatus"></span></div>
+              <div class="sniper-top-row">
+                <label class="toggle-item"><input type="checkbox" id="cDropRoute" /> Decidir o destino dos Pokémon que dropam</label>
+                <select id="cDropMode" aria-label="Como agir">
+                  <option value="sugerir">Só mostrar</option>
+                  <option value="auto">Fazer sozinho</option>
+                </select>
+              </div>
+              <p class="hint-text adv-warn hidden" id="dropWarn">A venda automática do depot do jogo está ligada: ela vende na captura, antes do Hub decidir. Só passa por aqui o que a autocoleção do jogo segurar.</p>
+              <p class="hint-text adv-intro">Olha só os Pokémon que caírem depois de ligar. Considera a evolução final sem mega e até o nível 2.500. Nunca mexe em equipe, coleção, casa, Exp. Share, fila do Treinador ou inicial.</p>
+              <div class="form-grid adv-drop-grid">
+                <div class="field"><label for="cDropKeepNota">Guardar se a nota final for ≥</label><input type="number" id="cDropKeepNota" min="0" max="10" step="0.1" /></div>
+                <div class="field"><label for="cDropKeepMult">Guardar se a final vender ×</label><input type="number" id="cDropKeepMult" min="0" max="50" step="0.5" title="Quantas vezes o valor de hoje a forma final precisa vender (já tirando as pedras). 0 desliga." /></div>
+                <div class="field"><label for="cDropRest">O resto</label><select id="cDropRest"><option value="deixar">Deixar no depot</option><option value="vender">Vender no depot</option></select></div>
+              </div>
+              <label class="toggle-item adv-sub-toggle"><input type="checkbox" id="cDropSellMarket" /> Anunciar no mercado quando compensa</label>
+              <div class="form-grid adv-drop-grid">
+                <div class="field"><label for="cDropPricePct">Preço (% da média)</label><input type="number" id="cDropPricePct" min="50" max="200" step="1" /></div>
+                <div class="field"><label for="cDropListDays">Dias de anúncio</label><input type="number" id="cDropListDays" min="1" max="30" step="1" /></div>
+                <div class="field"><label for="cDropMinProfit">Lucro mín. sobre o depot (%)</label><input type="number" id="cDropMinProfit" min="0" max="1000" step="5" /></div>
+                <div class="field"><label for="cDropConfidence">Confiança mínima</label><select id="cDropConfidence"><option value="baixa">Baixa</option><option value="media">Média</option><option value="alta">Alta</option></select></div>
+                <div class="field"><label for="cDropMaxHour">Anúncios por hora</label><input type="number" id="cDropMaxHour" min="0" max="60" step="1" /></div>
+              </div>
+              <p class="hint-text" id="dropFeeHint"></p>
+              <ul class="adv-list" id="dropRecentList"></ul>
+            </div>
+
             <div class="card sound-card" id="soundCard" data-card="alerts">
               <div class="card-head-row">
                 <h3>Alertas</h3>

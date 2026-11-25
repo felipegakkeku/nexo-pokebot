@@ -454,6 +454,7 @@ export function evaluateSniperItemListings({
             continue;
         }
 
+        if (tracker.pendingListings?.has(String(listing.id))) continue;
         const prevAttempt = tracker.attemptedListings.get(listing.id) || 0;
         if (syncedNowMs - prevAttempt < 30_000) continue;
 
@@ -485,13 +486,15 @@ export function evaluateSniperItemListings({
                 price,
                 currency,
                 seller: listing.vendedor || 'Desconhecido',
-                bought: true,
+                bought: false,
+                pending: true,
+                status: 'pendente',
             };
             purchases.push(purchase);
             hits.push(purchase);
             logs.push({
-                kind: 'reward',
-                text: `Sniper comprou: ${itemLabel} x${buyQty} por ${price.toLocaleString('pt-BR')} ${currencyLabel} (${purchase.seller}).`,
+                kind: 'info',
+                text: `Sniper pediu a compra: ${itemLabel} x${buyQty} por ${price.toLocaleString('pt-BR')} ${currencyLabel} (${purchase.seller}). Aguardando o resultado.`,
             });
         }
     }
@@ -756,6 +759,7 @@ export function evaluateSniperPokemonListings({
             continue;
         }
 
+        if (tracker.pendingListings?.has(String(listing.id))) continue;
         const prevAttempt = tracker.attemptedListings.get(listing.id) || 0;
         if (syncedNowMs - prevAttempt < 30_000) continue;
         if (availableByCurrency[currency] < price) continue;
@@ -785,13 +789,15 @@ export function evaluateSniperPokemonListings({
             price,
             currency,
             seller,
-            bought: true,
+            bought: false,
+            pending: true,
+            status: 'pendente',
         };
         purchases.push(purchase);
         hits.push(purchase);
         logs.push({
-            kind: 'reward',
-            text: `Sniper Pokémon comprou: ${shinyTag}${pokeName} Nv ${level} por ${price.toLocaleString('pt-BR')} ${currencyLabel} (${seller}).`,
+            kind: 'info',
+            text: `Sniper Pokémon pediu a compra: ${shinyTag}${pokeName} Nv ${level} por ${price.toLocaleString('pt-BR')} ${currencyLabel} (${seller}). Aguardando o resultado.`,
         });
     }
 

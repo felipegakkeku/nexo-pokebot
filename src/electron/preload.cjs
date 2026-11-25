@@ -3,6 +3,9 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('pokeHub', {
     getAllSnapshots: () => ipcRenderer.invoke('hub:get-all-snapshots'),
+    getPerf: () => ipcRenderer.invoke('hub:get-perf'),
+    getAdvisor: (account) => ipcRenderer.invoke('hub:get-advisor', { account }),
+    inspectShiny: (account, entry) => ipcRenderer.invoke('hub:inspect-shiny', { account, entry }),
     getHunts: (account) => ipcRenderer.invoke('hub:get-hunts', { account }),
     getWebviewPreload: () => ipcRenderer.invoke('hub:get-webview-preload'),
     action: (account, action, payload) => ipcRenderer.invoke('hub:action', { account, action, payload }),

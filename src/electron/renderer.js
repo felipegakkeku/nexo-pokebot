@@ -33,6 +33,12 @@ let chatReminderTimer = null;
 let lastDropsSig = '';
 let lastTrainerSig = '';
 let lastSniperSig = '';
+let lastAdvisorSig = '';
+// Listas do consultor vêm à parte, só com o card à vista (o snapshot de 1,25 s traz só o resumo).
+const ADVISOR_FETCH_MS = 15_000;
+let advisorLists = { account: 0, at: 0, data: null, busy: false };
+let advisorFilter = 'todos';
+let advisorShowAll = false;
 let pollTimer = null;
 let huntCountdownTimer = null;
 let toastPos = (() => {
@@ -599,15 +605,17 @@ function renderGridToolbar() {
     });
     const wrap = $('gridHiddenWrap');
     const chips = $('gridHiddenChips');
-    if (wrap && chips) {
+    const chipsSig = gridState.hidden.map((acc) => `${acc}:${accountNick(acc)}`).join('|');
+    if (wrap && chips && chips.__nexoSig !== chipsSig) {
+        chips.__nexoSig = chipsSig;
         wrap.hidden = gridState.hidden.length === 0;
         chips.replaceChildren(...gridState.hidden.map((acc) => {
             const b = document.createElement('button');
             b.type = 'button';
-            b.className = 'grid-chip';
+            setClass(b, 'grid-chip');
             b.dataset.gridShow = String(acc);
             b.title = 'Mostrar de novo na grade';
-            b.textContent = `+ ${acc}. ${accountNick(acc)}`;
+            setText(b, `+ ${acc}. ${accountNick(acc)}`);
             return b;
         }));
     }
@@ -616,7 +624,7 @@ function renderGridToolbar() {
         const embedded = [...webviews.keys()];
         const anyOn = embedded.some((acc) => !isAccountMuted(acc));
         muteBtn.disabled = embedded.length === 0;
-        muteBtn.innerHTML = `${anyOn ? ICON_SOUND_OFF : ICON_SOUND_ON}<span>${anyOn ? 'Mutar todas' : 'Som em todas'}</span>`;
+        setHtml(muteBtn, `${anyOn ? ICON_SOUND_OFF : ICON_SOUND_ON}<span>${anyOn ? 'Mutar todas' : 'Som em todas'}</span>`);
         muteBtn.title = embedded.length === 0 ? 'Nenhum jogo aberto na grade' : '';
     }
     for (const acc of ACCOUNTS) {
@@ -656,7 +664,7 @@ function updateAudioIndicators(acc) {
     const tabIcon = $(`tabAudio-${acc}`);
     if (tabIcon) {
         tabIcon.hidden = !embedded;
-        tabIcon.innerHTML = st.muted ? ICON_SOUND_OFF : ICON_SOUND_ON;
+        setHtml(tabIcon, st.muted ? ICON_SOUND_OFF : ICON_SOUND_ON);
         tabIcon.classList.toggle('is-muted', st.muted);
         tabIcon.classList.toggle('is-playing', playing && !st.muted);
         tabIcon.title = tip;
@@ -665,7 +673,7 @@ function updateAudioIndicators(acc) {
     const btn = $(`slotAudio-${acc}`);
     if (btn) {
         btn.hidden = !embedded;
-        btn.innerHTML = `${st.muted ? ICON_SOUND_OFF : ICON_SOUND_ON}<span>${st.muted ? 'Mudo' : 'Som'}</span>`;
+        setHtml(btn, `${st.muted ? ICON_SOUND_OFF : ICON_SOUND_ON}<span>${st.muted ? 'Mudo' : 'Som'}</span>`);
         btn.classList.toggle('is-muted', st.muted);
         btn.classList.toggle('is-playing', playing && !st.muted);
         btn.title = tip;
@@ -704,7 +712,7 @@ function renderPanelsGrid() {
         box.dataset.order = want;
         box.replaceChildren(...gridState.order.map((acc) => {
             const card = document.createElement('article');
-            card.className = 'pcard';
+            setClass(card, 'pcard');
             card.dataset.acc = String(acc);
             card.innerHTML = PANEL_CARD_HTML;
             return card;
@@ -719,13 +727,13 @@ function renderPanelsGrid() {
         const hunt = t.huntName && t.huntName !== '-' ? t.huntName : '';
         const warns = Array.isArray(s.modeWarnings) ? s.modeWarnings : [];
         card.classList.toggle('active', acc === activeAccount);
-        card.querySelector('.acc-dot').className = `acc-dot ${status}`;
-        card.querySelector('.pcard-nick').textContent = `${acc}. ${accountNick(acc)}`;
-        card.querySelector('.pcard-sub').textContent = [STATUS_LABELS[status] || status.toUpperCase(), hunt].filter(Boolean).join(' · ');
-        card.querySelector('.pcard-badge').textContent = `Nv ${t.level || 0} · ${fmtNum(t.gold)} gold`;
+        setClass(card.querySelector('.acc-dot'), `acc-dot ${status}`);
+        setText(card.querySelector('.pcard-nick'), `${acc}. ${accountNick(acc)}`);
+        setText(card.querySelector('.pcard-sub'), [STATUS_LABELS[status] || status.toUpperCase(), hunt].filter(Boolean).join(' · '));
+        setText(card.querySelector('.pcard-badge'), `Nv ${t.level || 0} · ${fmtNum(t.gold)} gold`);
         const warnEl = card.querySelector('.pcard-warn');
         warnEl.hidden = warns.length === 0;
-        warnEl.textContent = warns.length ? `⚠ ${warns.map((w) => w.title).join(' | ')}` : '';
+        setText(warnEl, warns.length ? `⚠ ${warns.map((w) => w.title).join(' | ')}` : '');
 
         const pk = s.activePokemon;
         const spriteBox = card.querySelector('.pcard-sprite');
@@ -745,15 +753,15 @@ function renderPanelsGrid() {
                 img.dataset.spriteFallbackText = '?';
                 spriteBox.replaceChildren(img);
             } else {
-                spriteBox.textContent = '?';
+                setText(spriteBox, '?');
             }
         }
         const pct = pk ? Math.max(0, Math.min(100, Number(pk.hpPercent) || 0)) : 0;
-        card.querySelector('.pcard-poke-name').textContent = pk ? `${pk.shiny ? '★ ' : ''}${pk.name} Nv ${pk.level}` : 'Aguardando Pokémon';
+        setText(card.querySelector('.pcard-poke-name'), pk ? `${pk.shiny ? '★ ' : ''}${pk.name} Nv ${pk.level}` : 'Aguardando Pokémon');
         const fill = card.querySelector('.pcard-hp i');
         fill.style.width = `${pct}%`;
         fill.style.background = pct > 55 ? '#10b981' : pct > 25 ? '#f59e0b' : '#ef4444';
-        card.querySelector('.pcard-hp-txt').textContent = pk ? `${fmtNum(pk.hp)} / ${fmtNum(pk.maxHp)} HP (${pct}%)` : '';
+        setText(card.querySelector('.pcard-hp-txt'), pk ? `${fmtNum(pk.hp)} / ${fmtNum(pk.maxHp)} HP (${pct}%)` : '');
 
         const profitH = Number(st.netGoldPerHour ?? st.goldPerHour ?? 0);
         const tiles = [
@@ -780,8 +788,8 @@ function renderPanelsGrid() {
 
         const running = RUNNING_STATUSES.includes(status);
         const runBtn = card.querySelector('[data-pc-act="run"]');
-        runBtn.textContent = running ? 'Pausar' : status === 'paused' ? 'Retomar Headless' : 'Iniciar Headless';
-        runBtn.className = running ? 'btn sm' : 'btn sm primary';
+        setText(runBtn, running ? 'Pausar' : status === 'paused' ? 'Retomar Headless' : 'Iniciar Headless');
+        setClass(runBtn, running ? 'btn sm' : 'btn sm primary');
     }
 }
 
@@ -820,8 +828,8 @@ let soundCtx = null;
 function setSoundStatus(event, text, kind = '') {
     const el = document.querySelector(`[data-snd-status="${event}"]`);
     if (!el) return;
-    el.textContent = text || '';
-    el.className = `sound-status hint-text${kind ? ` ${kind}` : ''}`;
+    setText(el, text || '');
+    setClass(el, `sound-status hint-text${kind ? ` ${kind}` : ''}`);
 }
 
 function renderSoundCard() {
@@ -995,7 +1003,7 @@ async function initSoundControls() {
     let volTimer = null;
     vol?.addEventListener('input', () => {
         const v = Number(vol.value) / 100;
-        document.getElementById('sndVolumeVal').textContent = `${Math.round(v * 100)}%`;
+        setText(document.getElementById('sndVolumeVal'), `${Math.round(v * 100)}%`);
         if (soundCfg) soundCfg.volume = v;
         clearTimeout(volTimer);
         volTimer = setTimeout(async () => {
@@ -1237,6 +1245,7 @@ function setSubtab(tab) {
 }
 
 async function sendAction(action, payload = {}, acc = activeAccount) {
+    if (action === 'set-config' && Object.keys(payload?.config || {}).some((k) => /^(drop|advisor)/.test(k))) advisorLists.at = 0;
     const res = await window.pokeHub.action(acc, action, payload);
     if (res?.snapshots) {
         snapshots = res.snapshots;
@@ -1255,7 +1264,7 @@ async function claimTwitchChest(channel, acc = activeAccount, btn = null) {
     chestClaimsPending.add(key);
     if (btn) {
         btn.disabled = true;
-        btn.textContent = 'Resgatando…';
+        setText(btn, 'Resgatando…');
     }
     let res = null;
     try {
@@ -1265,7 +1274,7 @@ async function claimTwitchChest(channel, acc = activeAccount, btn = null) {
         // A lista pode ter sido redesenhada; se o botao ainda existe, restaura
         if (btn?.isConnected) {
             btn.disabled = false;
-            btn.textContent = 'Resgatar +50';
+            setText(btn, 'Resgatar +50');
         }
     }
     // O sucesso ja chega como log 'reward' da conta (vira aviso pelo fluxo normal)
@@ -1285,8 +1294,8 @@ function setConfigDirty(dirty) {
     $('btnSaveCfg').disabled = !dirty;
     const hint = $('cfgHint');
     if (hubHook('onConfigDirty', dirty) === true) return;
-    hint.textContent = dirty ? 'Alterações pendentes' : '';
-    hint.className = dirty ? 'hint-text dirty' : 'hint-text';
+    setText(hint, dirty ? 'Alterações pendentes' : '');
+    setClass(hint, dirty ? 'hint-text dirty' : 'hint-text');
 }
 
 function readCheckedPotions() {
@@ -1371,7 +1380,7 @@ async function saveConfig() {
     setConfigDirty(false);
     const res = await applyConfigTo(acc, config);
     if (res?.ok) {
-        $('cfgHint').textContent = 'Alterações salvas';
+        setText($('cfgHint'), 'Alterações salvas');
     }
     return res;
 }
@@ -1393,21 +1402,21 @@ function renderModeWarningsBanner(data) {
     const frag = document.createDocumentFragment();
     for (const w of list) {
         const card = document.createElement('div');
-        card.className = `mode-warn-item ${w.severity === 'danger' ? 'danger' : 'warn'}`;
+        setClass(card, `mode-warn-item ${w.severity === 'danger' ? 'danger' : 'warn'}`);
         const title = document.createElement('div');
-        title.className = 'mode-warn-title';
-        title.textContent = w.title;
+        setClass(title, 'mode-warn-title');
+        setText(title, w.title);
         const detail = document.createElement('div');
-        detail.className = 'mode-warn-detail';
-        detail.textContent = w.detail;
+        setClass(detail, 'mode-warn-detail');
+        setText(detail, w.detail);
         card.append(title, detail);
         if (w.fixConfig) {
             const actRow = document.createElement('div');
-            actRow.className = 'mode-warn-actions';
+            setClass(actRow, 'mode-warn-actions');
             const btn = document.createElement('button');
             btn.type = 'button';
-            btn.className = 'btn sm primary';
-            btn.textContent = w.fixLabel || 'Restaurar modo completo';
+            setClass(btn, 'btn sm primary');
+            setText(btn, w.fixLabel || 'Restaurar modo completo');
             btn.addEventListener('click', async () => {
                 dirtyByAcc[activeAccount] = false;
                 await sendAction('set-config', { config: w.fixConfig });
@@ -1478,13 +1487,13 @@ function renderConfigModePreview() {
     const frag = document.createDocumentFragment();
     for (const it of items) {
         const el = document.createElement('div');
-        el.className = `mode-warn-item ${it.cls}`;
+        setClass(el, `mode-warn-item ${it.cls}`);
         const t = document.createElement('div');
-        t.className = 'mode-warn-title';
-        t.textContent = it.title;
+        setClass(t, 'mode-warn-title');
+        setText(t, it.title);
         const d = document.createElement('div');
-        d.className = 'mode-warn-detail';
-        d.textContent = it.detail;
+        setClass(d, 'mode-warn-detail');
+        setText(d, it.detail);
         el.append(t, d);
         frag.appendChild(el);
     }
@@ -1515,7 +1524,7 @@ function renderTopTabsAndSlots() {
         const tabSub = $(`tabSub-${acc}`);
         if (tabSub) {
             const baseSub = hunt ? `${stLabel} · ${hunt}` : stLabel;
-            tabSub.textContent = warns.length > 0 ? `⚠ ${baseSub}` : baseSub;
+            setText(tabSub, warns.length > 0 ? `⚠ ${baseSub}` : baseSub);
         }
 
         // Browser slot header & placeholder
@@ -1528,8 +1537,8 @@ function renderTopTabsAndSlots() {
 
         const toggleBtn = document.querySelector(`[data-slot-act="toggle"][data-slot="${acc}"]`);
         if (toggleBtn) {
-            toggleBtn.textContent = isEmbedded ? 'Ir p/ Headless' : 'Abrir Embutido';
-            toggleBtn.className = isEmbedded ? 'btn sm primary grid-only' : 'btn sm teal grid-only';
+            setText(toggleBtn, isEmbedded ? 'Ir p/ Headless' : 'Abrir Embutido');
+            setClass(toggleBtn, isEmbedded ? 'btn sm primary grid-only' : 'btn sm teal grid-only');
         }
         const reloadBtn = document.querySelector(`[data-slot-act="reload"][data-slot="${acc}"]`);
         if (reloadBtn) reloadBtn.hidden = !isEmbedded;
@@ -1589,10 +1598,10 @@ function renderActiveAccountPanel() {
     const st = data.stats || {};
     const nick = t.nick && t.nick !== '-' ? t.nick : (data.session?.nick || `Conta ${activeAccount}`);
 
-    $('hdrNick').textContent = `Conta ${activeAccount} · ${nick}`;
+    setText($('hdrNick'), `Conta ${activeAccount} · ${nick}`);
     const pill = $('hdrStatus');
-    pill.textContent = STATUS_LABELS[status] || status.toUpperCase();
-    pill.className = `status-pill ${status}`;
+    setText(pill, STATUS_LABELS[status] || status.toUpperCase());
+    setClass(pill, `status-pill ${status}`);
 
     const errText = data.lastError && status !== 'connected' && status !== 'bridge'
         ? ` · ${data.lastError}`
@@ -1601,20 +1610,20 @@ function renderActiveAccountPanel() {
         `Nv ${t.level || 0} · ${fmtNum(t.gold)} gold · ativo há ${fmtUptime(st.uptimeSec)}${errText}`;
 
     const btnEmb = $('btnToggleEmbedded');
-    btnEmb.textContent = isEmbedded ? 'Voltar para Headless' : 'Abrir no Embutido';
+    setText(btnEmb, isEmbedded ? 'Voltar para Headless' : 'Abrir no Embutido');
     btnEmb.title = isEmbedded ? 'Fecha o jogo embutido e segue farmando em segundo plano' : 'Abre o jogo desta conta aqui dentro';
     const runningNow = RUNNING_STATUSES.includes(status);
     const btnStart = $('btnStartHeadless');
     btnStart.style.display = runningNow || isEmbedded ? 'none' : '';
-    btnStart.textContent = status === 'paused' ? 'Retomar Headless' : 'Iniciar Headless';
+    setText(btnStart, status === 'paused' ? 'Retomar Headless' : 'Iniciar Headless');
     $('btnPause').style.display = runningNow || isEmbedded ? '' : 'none';
 
     renderModeWarningsBanner(data);
 
     // Active Pokemon & Hunt
     const pk = data.activePokemon;
-    $('pokeName').textContent = pk ? `${pk.shiny ? '★ ' : ''}${pk.name} Nv ${pk.level}` : 'Aguardando Pokémon';
-    $('pokeHpTxt').textContent = pk ? `${fmtNum(pk.hp)} / ${fmtNum(pk.maxHp)} HP (${pk.hpPercent}%)` : '0 / 0 HP';
+    setText($('pokeName'), pk ? `${pk.shiny ? '★ ' : ''}${pk.name} Nv ${pk.level}` : 'Aguardando Pokémon');
+    setText($('pokeHpTxt'), pk ? `${fmtNum(pk.hp)} / ${fmtNum(pk.maxHp)} HP (${pk.hpPercent}%)` : '0 / 0 HP');
     const pct = pk ? pk.hpPercent : 0;
     const fill = $('pokeHpFill');
     fill.style.width = `${pct}%`;
@@ -1633,11 +1642,11 @@ function renderActiveAccountPanel() {
             setPokemonSpriteImg(img, pk.speciesId, Boolean(pk.shiny), pkDex, pk.name);
             box.replaceChildren(img);
         } else {
-            box.textContent = '?';
+            setText(box, '?');
         }
     }
 
-    $('huntLine').textContent = `Hunt atual: ${t.huntName || '-'}${t.noCentro ? ' (Centro)' : ''}${t.economyActive ? ' · Economia do servidor ligada' : ''}`;
+    setText($('huntLine'), `Hunt atual: ${t.huntName || '-'}${t.noCentro ? ' (Centro)' : ''}${t.economyActive ? ' · Economia do servidor ligada' : ''}`);
     const guideMode = data.config?.huntGuideMode || 'off';
     $('huntGuideLine').textContent = guideMode !== 'off' && data.huntGuide?.note
         ? `/hunt: ${data.huntGuide.note}`
@@ -1677,37 +1686,37 @@ function renderActiveAccountPanel() {
     renderVoteBar(data);
 
     // KPIs e Eficiência
-    $('kKills').textContent = fmtNum(st.kills);
-    $('kKillsSub').textContent = `${st.killsPerMin || 0}/min`;
-    $('kXp').textContent = fmtNum(st.xpGained);
-    $('kXpSub').textContent = `${fmtNum(st.xpPerHour)}/h · treinador ${fmtNum(st.xpTrainerPerHour)}/h`;
+    setText($('kKills'), fmtNum(st.kills));
+    setText($('kKillsSub'), `${st.killsPerMin || 0}/min`);
+    setText($('kXp'), fmtNum(st.xpGained));
+    setText($('kXpSub'), `${fmtNum(st.xpPerHour)}/h · treinador ${fmtNum(st.xpTrainerPerHour)}/h`);
     const netGold = st.netGold ?? st.goldGained ?? 0;
     const netPerH = st.netGoldPerHour ?? st.goldPerHour ?? 0;
-    $('kGold').textContent = `${netGold >= 0 ? '' : '-'}${fmtNum(Math.abs(netGold))}`;
-    $('kGoldSub').textContent = `${netPerH >= 0 ? '+' : '-'}${fmtNum(Math.abs(netPerH))}/h líq.`;
-    $('kCaps').textContent = fmtNum(st.captures);
-    $('kCapsSub').textContent = `${Number(st.shiniesCaptured || 0) === 1 ? '1 shiny' : `${st.shiniesCaptured || 0} shinies`} · ${fmtNum(st.ballsThrown)} bolas`;
+    setText($('kGold'), `${netGold >= 0 ? '' : '-'}${fmtNum(Math.abs(netGold))}`);
+    setText($('kGoldSub'), `${netPerH >= 0 ? '+' : '-'}${fmtNum(Math.abs(netPerH))}/h líq.`);
+    setText($('kCaps'), fmtNum(st.captures));
+    setText($('kCapsSub'), `${Number(st.shiniesCaptured || 0) === 1 ? '1 shiny' : `${st.shiniesCaptured || 0} shinies`} · ${fmtNum(st.ballsThrown)} bolas`);
 
     const fmtDec = (n) => String(Number(n || 0)).replace('.', ',');
-    $('eAvgKill').textContent = st.avgKillSec > 0 ? `${fmtDec(st.avgKillSec)}s` : '-';
-    $('eAvgKillSub').textContent = `${fmtDec(st.killsPerMin || 0)} abates/min`;
-    $('eCapKill').textContent = st.kills > 0 ? `${fmtDec(st.capturePerKillPct || 0)}%` : '-';
-    $('eCapKillSub').textContent = st.killsPerCapture > 0 ? `1 a cada ${fmtDec(st.killsPerCapture)} abates` : 'sem capturas';
-    $('eBallCap').textContent = st.ballsPerCapture > 0 ? fmtDec(st.ballsPerCapture) : '-';
-    $('eBallCapSub').textContent = `${fmtDec(st.catchPerBallPct || 0)}% acerto/bola`;
-    $('eSpent').textContent = `-${fmtNum(st.spentGold || 0)}`;
-    $('eBrutoSub').textContent = `bruto: +${fmtNum(st.goldGained || 0)}`;
-    $('eShinies').textContent = `${fmtNum(st.shiniesCaptured || 0)} / ${fmtNum(st.shiniesSeen || 0)}`;
-    $('eShiniesSub').textContent = 'cap / vistos';
-    $('eSurv').textContent = `${fmtNum(st.heals || 0)} poções · ${fmtNum(st.revivesUsed || 0)} revives`;
-    $('eSurvSub').textContent = `${fmtNum(st.playerDeaths || 0)} mortes · ${fmtDec(st.potionsPerHour || 0)} poç/h`;
+    setText($('eAvgKill'), st.avgKillSec > 0 ? `${fmtDec(st.avgKillSec)}s` : '-');
+    setText($('eAvgKillSub'), `${fmtDec(st.killsPerMin || 0)} abates/min`);
+    setText($('eCapKill'), st.kills > 0 ? `${fmtDec(st.capturePerKillPct || 0)}%` : '-');
+    setText($('eCapKillSub'), st.killsPerCapture > 0 ? `1 a cada ${fmtDec(st.killsPerCapture)} abates` : 'sem capturas');
+    setText($('eBallCap'), st.ballsPerCapture > 0 ? fmtDec(st.ballsPerCapture) : '-');
+    setText($('eBallCapSub'), `${fmtDec(st.catchPerBallPct || 0)}% acerto/bola`);
+    setText($('eSpent'), `-${fmtNum(st.spentGold || 0)}`);
+    setText($('eBrutoSub'), `bruto: +${fmtNum(st.goldGained || 0)}`);
+    setText($('eShinies'), `${fmtNum(st.shiniesCaptured || 0)} / ${fmtNum(st.shiniesSeen || 0)}`);
+    setText($('eShiniesSub'), 'cap / vistos');
+    setText($('eSurv'), `${fmtNum(st.heals || 0)} poções · ${fmtNum(st.revivesUsed || 0)} revives`);
+    setText($('eSurvSub'), `${fmtNum(st.playerDeaths || 0)} mortes · ${fmtDec(st.potionsPerHour || 0)} poç/h`);
 
     // Drops da sessão & foco do mapa (memoizado por assinatura)
     const dr = data.drops || {};
     const focusKey = dr.focus || 'hunt';
     const focusBadge = $('dropsFocusBadge');
-    focusBadge.textContent = `${dr.focusLabel || 'XP / Gold / Shiny'} · ${fmtNum(dr.total || 0)} drops`;
-    focusBadge.className = `focus-badge ${focusKey}`;
+    setText(focusBadge, `${dr.focusLabel || 'XP / Gold / Shiny'} · ${fmtNum(dr.total || 0)} drops`);
+    setClass(focusBadge, `focus-badge ${focusKey}`);
 
     const featured = Array.isArray(dr.featured) ? dr.featured : [];
     const recent = Array.isArray(dr.recent) ? dr.recent : [];
@@ -1721,7 +1730,7 @@ function renderActiveAccountPanel() {
     if (restoreBtn) {
         restoreBtn.classList.toggle('hidden', hiddenItems.length === 0);
         if (hiddenItems.length > 0) {
-            restoreBtn.textContent = `${hiddenItems.length} oculto${hiddenItems.length > 1 ? 's' : ''} · restaurar`;
+            setText(restoreBtn, `${hiddenItems.length} oculto${hiddenItems.length > 1 ? 's' : ''} · restaurar`);
         }
     }
 
@@ -1854,6 +1863,7 @@ function renderActiveAccountPanel() {
     }
     renderTrainerCard(data);
     renderSniperCard(data);
+    renderAdvisorCard(data);
 
     // Connections
     const profSel = $('cBrowserProfile');
@@ -1873,9 +1883,9 @@ function renderActiveAccountPanel() {
     const lp = data.loginInProgress || '';
     const lv = data.lives || {};
     const gameOk = status === 'connected' || status === 'bridge';
-    $('pokeLoginState').textContent = `PokeIdle · ${lp === 'pokeidle' ? 'Aguardando login no navegador…' : (gameOk ? nick : `Conta ${activeAccount}`)}`;
-    $('twitchLoginState').textContent = `Twitch · ${lp === 'twitch' ? 'Faça login no Chrome e feche a janela…' : (lv.hasTwitchToken ? 'Conectada' : 'Desconectada')}`;
-    $('kickLoginState').textContent = `Kick · ${lp === 'kick' ? 'Faça login no Chrome e feche a janela…' : (lv.hasKickToken ? 'Conectada' : 'Desconectada')}`;
+    setText($('pokeLoginState'), `PokeIdle · ${lp === 'pokeidle' ? 'Aguardando login no navegador…' : (gameOk ? nick : `Conta ${activeAccount}`)}`);
+    setText($('twitchLoginState'), `Twitch · ${lp === 'twitch' ? 'Faça login no Chrome e feche a janela…' : (lv.hasTwitchToken ? 'Conectada' : 'Desconectada')}`);
+    setText($('kickLoginState'), `Kick · ${lp === 'kick' ? 'Faça login no Chrome e feche a janela…' : (lv.hasKickToken ? 'Conectada' : 'Desconectada')}`);
 
     const bPk = $('btnLoginPokeIdle');
     const bTw = $('btnLoginTwitch');
@@ -1883,10 +1893,10 @@ function renderActiveAccountPanel() {
     bPk.disabled = Boolean(lp) && lp !== 'pokeidle';
     bTw.disabled = Boolean(lp) && lp !== 'twitch';
     bKk.disabled = Boolean(lp) && lp !== 'kick';
-    bPk.textContent = lp === 'pokeidle' ? 'Cancelar login' : (gameOk ? 'Trocar conta' : 'Logar PokeIdle');
-    bTw.textContent = lp === 'twitch' ? 'Cancelar login' : (lv.hasTwitchToken ? 'Reconectar Twitch' : 'Conectar Twitch');
-    bKk.textContent = lp === 'kick' ? 'Cancelar login' : (lv.hasKickToken ? 'Reconectar Kick' : 'Conectar Kick');
-    $('btnReloadSess').textContent = data.browserProfile ? 'Usar sessão do Chrome' : 'Recarregar sessão';
+    setText(bPk, lp === 'pokeidle' ? 'Cancelar login' : (gameOk ? 'Trocar conta' : 'Logar PokeIdle'));
+    setText(bTw, lp === 'twitch' ? 'Cancelar login' : (lv.hasTwitchToken ? 'Reconectar Twitch' : 'Conectar Twitch'));
+    setText(bKk, lp === 'kick' ? 'Cancelar login' : (lv.hasKickToken ? 'Reconectar Kick' : 'Conectar Kick'));
+    setText($('btnReloadSess'), data.browserProfile ? 'Usar sessão do Chrome' : 'Recarregar sessão');
 
     if (!$('tab-lives').classList.contains('hidden')) renderLives(lv);
     if ($('tab-activity').classList.contains('hidden')) return;
@@ -1900,7 +1910,7 @@ function renderTrainerCard(data) {
 
     const badge = $('trainerBadge');
     if (badge) {
-        badge.textContent = `${tr.expShareBag ?? 0} livre${tr.expShareBag === 1 ? '' : 's'} · ${tr.expShareEquipped ?? 0} Exp. Share · ${tr.houseSlotsOccupied ?? 0}/${tr.houseSlotsTotal ?? 0} Casa`;
+        setText(badge, `${tr.expShareBag ?? 0} livre${tr.expShareBag === 1 ? '' : 's'} · ${tr.expShareEquipped ?? 0} Exp. Share · ${tr.houseSlotsOccupied ?? 0}/${tr.houseSlotsTotal ?? 0} Casa`);
     }
     if ($('cTrainerEnabled')) $('cTrainerEnabled').checked = Boolean(cfg.trainerEnabled);
     if ($('cTrainerUseExpShare')) $('cTrainerUseExpShare').checked = cfg.trainerUseExpShare !== false;
@@ -1970,7 +1980,7 @@ function renderSniperCard(data) {
 
     const badge = $('sniperSaldoBadge');
     if (badge) {
-        badge.textContent = `Gold ${fmtNum(sn.gold || 0)} · Gemas ${fmtNum(sn.orbs || 0)}`;
+        setText(badge, `Gold ${fmtNum(sn.gold || 0)} · Gemas ${fmtNum(sn.orbs || 0)}`);
     }
     if ($('cSniperEnabled')) $('cSniperEnabled').checked = Boolean(cfg.sniperEnabled);
     const intEl = $('cSniperInterval');
@@ -2004,7 +2014,7 @@ function renderSniperCard(data) {
 
     const rules = Array.isArray(sn.rules) ? sn.rules : [];
     const hits = Array.isArray(sn.recentHits) ? sn.recentHits : [];
-    const snSig = `${activeAccount}|${rules.map((r) => `${r.id}:${r.kind || 'item'}:${r.speciesId || 0}:${r.speciesName || ''}:${r.minLevel || 1}:${r.maxLevel || 0}:${r.onlyShiny ? 1 : 0}:${r.maxPrice}:${r.maxQty}:${r.boughtQty}:${r.autoBuy}:${r.enabled}:${r.currentMinPrice}`).join(';')}|${hits.length}:${hits[0]?.ts || 0}`;
+    const snSig = `${activeAccount}|${rules.map((r) => `${r.id}:${r.kind || 'item'}:${r.speciesId || 0}:${r.speciesName || ''}:${r.minLevel || 1}:${r.maxLevel || 0}:${r.onlyShiny ? 1 : 0}:${r.maxPrice}:${r.maxQty}:${r.boughtQty}:${r.autoBuy}:${r.enabled}:${r.currentMinPrice}:${r.pendingQty || 0}`).join(';')}|${hits.length}:${hits[0]?.ts || 0}:${hits.slice(0, 6).map((h) => h.status || '').join(',')}`;
     if (snSig !== lastSniperSig) {
         lastSniperSig = snSig;
         const rList = $('sniperRulesList');
@@ -2016,7 +2026,8 @@ function renderSniperCard(data) {
                     const moedaTxt = r.currency === 'orb' ? 'gemas' : 'gold';
                     const minTxt = typeof r.currentMinPrice === 'number' ? ` · menor atual ${fmtNum(r.currentMinPrice)}` : '';
                     const avgTxt = typeof r.avgPrice === 'number' ? ` · média ${fmtNum(r.avgPrice)}` : '';
-                    const qtyTxt = r.maxQty > 0 ? ` · ${r.boughtQty || 0}/${r.maxQty} comprados` : (r.boughtQty > 0 ? ` · ${r.boughtQty} comprados` : '');
+                    const pendTxt = r.pendingQty > 0 ? ` · ${fmtNum(r.pendingQty)} aguardando sorteio` : '';
+                    const qtyTxt = (r.maxQty > 0 ? ` · ${r.boughtQty || 0}/${r.maxQty} comprados` : (r.boughtQty > 0 ? ` · ${r.boughtQty} comprados` : '')) + pendTxt;
                     const isPoke = r.kind === 'pokemon';
                     const titleTxt = isPoke
                         ? (r.speciesName || (r.speciesId > 0 ? `Espécie #${r.speciesId}` : 'Qualquer Pokémon'))
@@ -2048,12 +2059,198 @@ function renderSniperCard(data) {
                 const labelTxt = h.kind === 'pokemon'
                     ? `${h.shiny ? '★ ' : ''}${escapeHtml(h.itemName || `Espécie #${h.speciesId || '?'}`)} Nv ${fmtNum(h.level || 1)}`
                     : `${escapeHtml(h.itemName || `Item #${h.itemId}`)} x${fmtNum(h.qty)}`;
-                return `<li class="sniper-hit-line${h.bought ? ' bought' : ''}">` +
-                    `<span><b>${h.bought ? 'Comprou' : 'Oferta'}</b> ${labelTxt}</span>` +
+                const st = h.bought ? 'comprado' : (h.status || '');
+                const stInfo = {
+                    comprado: ['bought', 'Comprou'],
+                    pendente: ['pending', 'Pedido enviado'],
+                    sorteio: ['pending', 'No sorteio'],
+                    perdeu: ['lost', 'Perdeu o sorteio'],
+                    falhou: ['lost', 'Não comprou'],
+                    'sem-resposta': ['lost', 'Sem resultado'],
+                }[st] || ['', 'Oferta'];
+                return `<li class="sniper-hit-line${stInfo[0] ? ` ${stInfo[0]}` : ''}">` +
+                    `<span><b>${stInfo[1]}</b> ${labelTxt}</span>` +
                     `<span>${fmtNum(h.price)} ${moedaTxt} · ${tm}</span></li>`;
             }).join('');
         }
     }
+}
+
+const ADVISOR_ACTIONS = {
+    mercado: ['Mercado', 'market'],
+    evoluir: ['Evoluir', 'evolve'],
+    guardar: ['Guardar', 'collect'],
+    sacrificar: ['Sacrificar', 'sacrifice'],
+    depot: ['Depot', 'depot'],
+    manter: ['Manter', 'keep'],
+};
+const ADVISOR_ITEM_ACTIONS = { vender: ['Vender', 'market'], 'aos-poucos': ['Aos poucos', 'sacrifice'], manter: ['Manter', 'keep'] };
+const ADVISOR_PAGE = 25;
+
+function advisorCardVisible() {
+    const card = $('advisorCard');
+    return Boolean(card && card.offsetParent !== null && !card.classList.contains('is-collapsed'));
+}
+
+function refreshAdvisorLists({ force = false } = {}) {
+    if (advisorLists.busy || !window.pokeHub?.getAdvisor) return;
+    const acc = activeAccount;
+    const fresh = advisorLists.account === acc && Date.now() - advisorLists.at < ADVISOR_FETCH_MS;
+    if (!force && fresh) return;
+    if (!advisorCardVisible()) return;
+    advisorLists.busy = true;
+    window.pokeHub.getAdvisor(acc).then((data) => {
+        advisorLists = { account: acc, at: Date.now(), data, busy: false };
+        if (acc === activeAccount && snapshots[acc]) renderAdvisorCard(snapshots[acc]);
+    }).catch(() => {
+        advisorLists.busy = false;
+    });
+}
+
+function renderAdvisorCard(data) {
+    const lite = data?.advisor;
+    const cfg = data?.config || {};
+    const chk = $('cAdvisorEnabled');
+    if (chk) chk.checked = cfg.advisorEnabled !== false;
+    if (!lite) return;
+    if (lite.enabled) refreshAdvisorLists();
+    const full = lite.lite && advisorLists.account === activeAccount ? advisorLists.data : null;
+    const adv = lite.lite ? { ...lite, items: full?.items, pokemons: full?.pokemons } : lite;
+    const pokes = Array.isArray(adv.pokemons) ? adv.pokemons : [];
+    const items = Array.isArray(adv.items) ? adv.items : [];
+    const b = adv.base || {};
+    renderDropRouting(adv, cfg);
+    const sig = `${activeAccount}|${adv.enabled}|${adv.syncing}|${adv.speciesReady}|${b.total}|${b.lastSyncAt}|${b.mediasAt}|${adv.sacrificePts}|${advisorFilter}|${advisorShowAll}|` +
+        pokes.map((p) => `${p.id}:${p.action}:${p.level}:${p.market?.price || 0}`).join(',') + '|' + items.map((i) => `${i.id}:${i.qty}:${i.valueGold}`).join(',');
+    if (sig === lastAdvisorSig) return;
+    lastAdvisorSig = sig;
+
+    const badge = $('advisorBaseBadge');
+    const pList = $('advisorPokeList');
+    const iList = $('advisorItemList');
+    const more = $('btnAdvisorMore');
+    const filt = $('advisorPokeFilter');
+    if (!adv.enabled) {
+        if (badge) badge.textContent = 'Desligado';
+        if (pList) pList.innerHTML = '<li class="hint-text">Consultor desligado nesta conta.</li>';
+        if (iList) iList.innerHTML = '';
+        if (filt) filt.innerHTML = '';
+        more?.classList.add('hidden');
+        return;
+    }
+    if (badge) {
+        const syncTxt = adv.syncing ? 'atualizando' : (b.lastSyncAt ? `atualizada ${fmtAgo(b.lastSyncAt)}` : 'aguardando a 1ª leitura');
+        setText(badge, `${fmtNum(b.total || 0)} vendas · ${syncTxt}`);
+        badge.title = `${fmtNum(b.pokemon || 0)} vendas de Pokémon e ${fmtNum(b.item || 0)} de itens, últimos 30 dias.`;
+    }
+    const sac = $('advisorSacHint');
+    if (sac) sac.textContent = adv.sacrificePts > 0 ? `Barra de sacrifício: ${fmtNum(adv.sacrificePts)}/1000` : '';
+
+    const counts = { todos: pokes.length };
+    for (const p of pokes) counts[p.action] = (counts[p.action] || 0) + 1;
+    if (filt) {
+        const keys = ['todos', 'mercado', 'evoluir', 'guardar', 'sacrificar', 'depot', 'manter'].filter((k) => k === 'todos' || counts[k]);
+        if (!keys.includes(advisorFilter)) advisorFilter = 'todos';
+        filt.innerHTML = keys.map((k) => `<button type="button" class="adv-chip${k === advisorFilter ? ' active' : ''}" data-adv-filter="${k}">${k === 'todos' ? 'Todos' : ADVISOR_ACTIONS[k][0]} <span>${fmtNum(counts[k] || 0)}</span></button>`).join('');
+    }
+    if (pList) {
+        const shown = pokes.filter((p) => advisorFilter === 'todos' || p.action === advisorFilter);
+        const page = advisorShowAll ? shown : shown.slice(0, ADVISOR_PAGE);
+        if (adv.lite && !Array.isArray(adv.pokemons)) {
+            pList.innerHTML = '<li class="hint-text">Montando a lista...</li>';
+        } else if (!pokes.length) {
+            pList.innerHTML = `<li class="hint-text">${adv.speciesReady ? 'Nenhum Pokémon fora da equipe para avaliar.' : 'Carregando o catálogo de espécies do jogo...'}</li>`;
+        } else {
+            pList.innerHTML = page.map((p) => {
+                const [label, cls] = ADVISOR_ACTIONS[p.action] || ['?', ''];
+                const mk = p.market ? `${fmtNum(p.market.price)} ${p.market.currency === 'orb' ? 'gemas' : 'gold'}` : '';
+                const meta = [
+                    `Nv ${fmtNum(p.level)}`,
+                    p.nota != null ? `nota ${Number(p.nota).toFixed(1)}` : '',
+                    `depot ${fmtNum(p.depot || 0)}`,
+                    p.sacPoints > 0 ? `${fmtNum(p.sacPoints)} pts` : '',
+                    mk ? `mercado ~${mk}` : '',
+                ].filter(Boolean).join(' · ');
+                const pt = p.potential;
+                const finalTxt = pt ? `Final: ${escapeHtml(pt.name)}${pt.level ? ` Nv ${fmtNum(pt.level)}` : ''}` +
+                    `${pt.nota != null ? ` · nota ${Number(pt.nota).toFixed(1)}` : ''}` +
+                    `${pt.market?.currency === 'gold' ? ` · vende ~${fmtNum(pt.market.price)} gold` : ''}` +
+                    `${pt.stones?.length ? ` · ${pt.stones.length} pedra${pt.stones.length > 1 ? 's' : ''}${pt.stoneCost ? ` (~${fmtNum(pt.stoneCost)})` : ''}` : ''}` : '';
+                return `<li class="adv-row">` +
+                    `<span class="adv-act ${cls}">${label}</span>` +
+                    `<div class="adv-main"><div class="adv-name">${p.shiny ? '<span class="sniper-tag shiny">SHINY</span> ' : ''}<b>${escapeHtml(p.name)}</b><small>${meta}</small></div>` +
+                    `<div class="adv-reason">${escapeHtml(p.reason || '')}</div>` +
+                    `${finalTxt ? `<div class="adv-final">${finalTxt}</div>` : ''}</div></li>`;
+            }).join('') || '<li class="hint-text">Nada nesta categoria.</li>';
+        }
+        if (more) {
+            more.classList.toggle('hidden', shown.length <= ADVISOR_PAGE);
+            setText(more, advisorShowAll ? 'Mostrar menos' : `Mostrar todos (${fmtNum(shown.length)})`);
+        }
+    }
+    if (iList) {
+        iList.innerHTML = items.length ? items.map((i) => {
+            const [label, cls] = ADVISOR_ITEM_ACTIONS[i.action] || ['?', ''];
+            const vals = [
+                i.gold ? `~${fmtNum(Math.round(i.gold.avg))} gold/un` : '',
+                i.orb ? `~${fmtNum(Math.round(i.orb.avg))} gemas/un` : '',
+                i.valueGold ? `total ${fmtNum(i.valueGold)} gold` : (i.valueOrb ? `total ${fmtNum(i.valueOrb)} gemas` : ''),
+                `saída ${i.liquidity}`,
+            ].filter(Boolean).join(' · ');
+            return `<li class="adv-row">` +
+                `<span class="adv-act ${cls}">${label}</span>` +
+                `<div class="adv-main"><div class="adv-name"><b>${escapeHtml(i.name)}</b><small>x${fmtNum(i.qty)} · ${vals}</small></div>` +
+                `<div class="adv-reason">${escapeHtml(i.reason || '')}</div></div></li>`;
+        }).join('') : `<li class="hint-text">${b.mediasAt ? 'Nenhum item da mochila com venda nos últimos 7 dias.' : 'Aguardando as médias do mercado.'}</li>`;
+    }
+}
+
+const DROP_ACTIONS = { guardar: ['Guardar', 'collect'], anunciar: ['Anunciar', 'market'], vender: ['Vender', 'depot'], deixar: ['Depot', 'keep'] };
+const DROP_FIELDS = [
+    ['cDropKeepNota', 'dropKeepNota', 7],
+    ['cDropKeepMult', 'dropKeepFinalMult', 3],
+    ['cDropPricePct', 'dropPricePct', 100],
+    ['cDropListDays', 'dropListDays', 1],
+    ['cDropMinProfit', 'dropMinProfitPct', 50],
+    ['cDropMaxHour', 'dropMaxListingsHour', 6],
+];
+const DROP_SELECTS = [['cDropMode', 'dropRouteMode', 'sugerir'], ['cDropRest', 'dropRest', 'deixar'], ['cDropConfidence', 'dropMinConfidence', 'media']];
+let lastDropSig = '';
+
+function renderDropRouting(adv, cfg) {
+    const on = $('cDropRoute');
+    if (on) on.checked = cfg.dropRouteEnabled === true;
+    const sm = $('cDropSellMarket');
+    if (sm) sm.checked = cfg.dropSellMarket !== false;
+    for (const [id, key, def] of [...DROP_FIELDS, ...DROP_SELECTS]) {
+        const el = $(id);
+        if (el && document.activeElement !== el) el.value = String(cfg[key] ?? def);
+    }
+    const dr = adv?.drops || {};
+    $('dropWarn')?.classList.toggle('hidden', !(dr.enabled && dr.gameAutoSell));
+    const st = $('dropStatus');
+    if (st) {
+        st.textContent = !dr.enabled ? 'desligado'
+            : `${dr.mode === 'auto' ? 'fazendo sozinho' : 'só mostrando'}${dr.watching ? '' : ' · começando a olhar'}${dr.queued ? ` · ${dr.queued} na fila` : ''}`;
+    }
+    const fee = $('dropFeeHint');
+    if (fee) fee.textContent = dr.diaria ? `O jogo cobra ${fmtNum(dr.diaria)} gold por dia de anúncio e ${dr.taxaPct}% da venda. O Hub só anuncia se, depois disso, sobrar o lucro mínimo sobre o depot.` : '';
+    const recent = Array.isArray(dr.recent) ? dr.recent : [];
+    const sig = `${activeAccount}|${dr.enabled}|${recent.map((e) => `${e.id}:${e.action}:${e.done ? 1 : 0}:${e.skipped ? 1 : 0}`).join(',')}`;
+    if (sig === lastDropSig) return;
+    lastDropSig = sig;
+    const list = $('dropRecentList');
+    if (!list) return;
+    if (!dr.enabled) { list.innerHTML = ''; return; }
+    list.innerHTML = recent.length ? recent.map((e) => {
+        const [label, cls] = DROP_ACTIONS[e.action] || ['?', ''];
+        const tm = e.ts ? new Date(e.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+        const state = e.auto ? (e.done ? 'feito' : (e.skipped ? 'não deu' : (e.action === 'deixar' ? '' : 'na fila'))) : 'sugestão';
+        return `<li class="adv-row">` +
+            `<span class="adv-act ${cls}">${label}</span>` +
+            `<div class="adv-main"><div class="adv-name">${e.shiny ? '<span class="sniper-tag shiny">SHINY</span> ' : ''}<b>${escapeHtml(e.name)}</b><small>Nv ${fmtNum(e.level)} · ${tm}${state ? ` · ${state}` : ''}</small></div>` +
+            `<div class="adv-reason">${escapeHtml(e.reason || '')}</div></div></li>`;
+    }).join('') : '<li class="hint-text">Nenhum drop novo desde que ligou.</li>';
 }
 
 function fmtAgo(ts) {
@@ -2069,22 +2266,22 @@ function buildWatchChip(ch) {
     const w = ch.watch;
     if (ch.platform !== 'twitch' || !w) return null;
     const chip = document.createElement('span');
-    chip.className = 'watch-chip';
+    setClass(chip, 'watch-chip');
     if (w.watching) {
         chip.classList.add('watching');
-        chip.textContent = `▶ Sequência ${w.minutes || 0}/${w.targetMinutes || 15} min`;
+        setText(chip, `▶ Sequência ${w.minutes || 0}/${w.targetMinutes || 15} min`);
         chip.title = 'Assistindo no player real da Twitch (invisível, sem som) para a live contar na sequência.';
     } else if (w.kind === 'watch' && w.ok) {
         chip.classList.add('ok');
-        chip.textContent = '✓ Sequência';
+        setText(chip, '✓ Sequência');
         chip.title = `Live assistida ${w.minutes || 0} min no player real ${fmtAgo(w.at)}. Conta para a sequência de lives.`;
     } else if (w.kind === 'watch' && w.ok === false) {
         chip.classList.add('warn');
-        chip.textContent = '! Sequência';
+        setText(chip, '! Sequência');
         chip.title = `Não deu para assistir no player: ${w.reasonText || 'erro'}. Tento de novo em alguns minutos.`;
     } else if (w.following) {
         chip.classList.add('follow');
-        chip.textContent = '♥ Seguindo';
+        setText(chip, '♥ Seguindo');
         chip.title = 'Esta conta segue o canal na Twitch.';
     } else {
         return null;
@@ -2169,9 +2366,9 @@ function requestLivesRefresh() {
 function renderLives(lv) {
     const twSummary = (lv.twitchRewards || [lv.rewardType || 'xp']).join('+').toUpperCase() || 'OFF';
     const kkSummary = (lv.kickRewards || [lv.rewardType || 'xp']).join('+').toUpperCase() || 'OFF';
-    $('liveMinutes').textContent = fmtNum(lv.minutesWatched || 0);
-    $('liveChests').textContent = fmtNum(lv.chestsClaimed || 0);
-    $('liveRedeemed').textContent = fmtNum(lv.rewardsRedeemed || 0);
+    setText($('liveMinutes'), fmtNum(lv.minutesWatched || 0));
+    setText($('liveChests'), fmtNum(lv.chestsClaimed || 0));
+    setText($('liveRedeemed'), fmtNum(lv.rewardsRedeemed || 0));
     const fresh = lv.balancesAt ? ` · pontos atualizados ${fmtAgo(lv.balancesAt)}` : '';
     $('livesHead').textContent = lv.enabled
         ? `Coleta ativa · Twitch ${twSummary} · Kick ${kkSummary}${fresh}`
@@ -2200,36 +2397,36 @@ function renderLives(lv) {
         const frag = document.createDocumentFragment();
         for (const [index, ch] of channels.entries()) {
             const row = document.createElement('div');
-            row.className = 'live-chan-row';
+            setClass(row, 'live-chan-row');
 
             const info = document.createElement('div');
-            info.className = 'live-chan-info';
+            setClass(info, 'live-chan-info');
             const badge = document.createElement('span');
-            badge.className = `plat-badge ${ch.platform === 'twitch' ? 'tw' : 'kk'}`;
-            badge.textContent = ch.platform === 'twitch' ? 'Twitch' : 'Kick';
+            setClass(badge, `plat-badge ${ch.platform === 'twitch' ? 'tw' : 'kk'}`);
+            setText(badge, ch.platform === 'twitch' ? 'Twitch' : 'Kick');
             info.appendChild(badge);
             if (ch.live) {
                 const onTag = document.createElement('span');
-                onTag.className = 'live-on-tag';
-                onTag.textContent = 'Ao vivo';
+                setClass(onTag, 'live-on-tag');
+                setText(onTag, 'Ao vivo');
                 info.appendChild(onTag);
             }
             const nameEl = document.createElement('span');
-            nameEl.className = 'live-chan-name';
-            nameEl.textContent = ch.channel;
+            setClass(nameEl, 'live-chan-name');
+            setText(nameEl, ch.channel);
             nameEl.title = ch.channel;
             info.appendChild(nameEl);
             const watchChip = buildWatchChip(ch);
             if (watchChip) info.appendChild(watchChip);
             if (typeof ch.balance === 'number') {
                 const ptsEl = document.createElement('span');
-                ptsEl.className = 'live-chan-pts';
-                ptsEl.textContent = `${fmtNum(ch.balance)} pts`;
+                setClass(ptsEl, 'live-chan-pts');
+                setText(ptsEl, `${fmtNum(ch.balance)} pts`);
                 info.appendChild(ptsEl);
             }
 
             const sel = document.createElement('select');
-            sel.className = `live-chan-sel${ch.override ? ' custom-set' : ''}`;
+            setClass(sel, `live-chan-sel${ch.override ? ' custom-set' : ''}`);
             sel.dataset.chanKey = ch.key;
             for (const [val, label] of LIVE_CHANNEL_REWARD_OPTIONS) {
                 sel.appendChild(new Option(label, val));
@@ -2241,22 +2438,22 @@ function renderLives(lv) {
             const noteInfo = channelNotes[index];
             if (noteInfo?.text) {
                 const note = document.createElement('small');
-                note.className = noteInfo.soft ? 'channel-smart-note' : 'channel-warning';
-                note.textContent = noteInfo.text;
+                setClass(note, noteInfo.soft ? 'channel-smart-note' : 'channel-warning');
+                setText(note, noteInfo.text);
                 row.append(note);
             } else if (ch.smartNote) {
                 const note = document.createElement('small');
-                note.className = 'channel-smart-note';
-                note.textContent = ch.smartNote;
+                setClass(note, 'channel-smart-note');
+                setText(note, ch.smartNote);
                 row.append(note);
             }
             const url = (ch.platform === 'twitch' ? 'https://www.twitch.tv/' : 'https://kick.com/') + ch.channel;
             const hasManualChest = ch.platform === 'twitch' && Boolean(lv.twitch?.[ch.channel]?.manualChest);
             if (hasManualChest) {
                 const chestBtn = document.createElement('button');
-                chestBtn.className = 'btn sm chest-quick-btn';
+                setClass(chestBtn, 'btn sm chest-quick-btn');
                 const pending = chestClaimsPending.has(`${activeAccount}:${ch.channel}`);
-                chestBtn.textContent = pending ? 'Resgatando…' : 'Resgatar +50';
+                setText(chestBtn, pending ? 'Resgatando…' : 'Resgatar +50');
                 chestBtn.disabled = pending;
                 chestBtn.title = 'Resgata a caixinha +50 direto daqui, sem abrir o chat. Se a Twitch recusar, abre o chat leve como plano B.';
                 chestBtn.onclick = () => void claimTwitchChest(ch.channel, activeAccount, chestBtn);
@@ -2265,8 +2462,8 @@ function renderLives(lv) {
             if (lv.officialUrls?.includes(url)) {
                 for (const [title, action] of [['Abrir chat', 'open-live-chat'], ['Abrir live', 'open-lives']]) {
                     const button = document.createElement('button');
-                    button.className = 'btn sm';
-                    button.textContent = title;
+                    setClass(button, 'btn sm');
+                    setText(button, title);
                     button.onclick = () => sendAction(action, { url });
                     row.append(button);
                 }
@@ -2287,13 +2484,13 @@ function renderActivity(data) {
         list.replaceChildren();
         for (const entry of feed) {
             const item = document.createElement('li');
-            item.className = 'shiny-feed-item clickable';
+            setClass(item, 'shiny-feed-item clickable');
             item.title = 'Clique para abrir o card completo deste shiny';
             const entryDex = resolvePokemonSpriteDex(entry.speciesId, entry.name, entry.spriteDex);
             const entryUrl = pokemonSpriteUrl(entry.speciesId, true, entryDex, entry.name);
             if (entryUrl) {
                 const img = document.createElement('img');
-                img.className = 'shiny-feed-sprite';
+                setClass(img, 'shiny-feed-sprite');
                 img.alt = '';
                 img.loading = 'lazy';
                 img.src = entryUrl;
@@ -2303,12 +2500,12 @@ function renderActivity(data) {
                 item.append(img);
             }
             const txt = document.createElement('span');
-            txt.className = 'shiny-feed-text';
+            setClass(txt, 'shiny-feed-text');
             const name = document.createElement('strong');
             const lvTxt = entry.level && entry.level !== '?' ? ` (Nv ${entry.level})` : '';
-            name.textContent = `${entry.name}${lvTxt}`;
+            setText(name, `${entry.name}${lvTxt}`);
             const meta = document.createElement('small');
-            meta.textContent = `${entry.trainer} · ${entry.egg ? 'Ovo' : 'Captura'} · ${new Date(entry.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+            setText(meta, `${entry.trainer} · ${entry.egg ? 'Ovo' : 'Captura'} · ${new Date(entry.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`);
             txt.append(name, meta);
             item.append(txt);
             item.addEventListener('click', () => openShinyInspectCard(entry));
@@ -2332,13 +2529,37 @@ function renderActivity(data) {
     }
 }
 
+// Escritas no DOM só quando o valor muda: evita relayout e mutações a cada tique.
+function setText(el, txt) {
+    if (!el) return;
+    const v = txt == null ? '' : String(txt);
+    if (el.textContent === v && el.childElementCount === 0) return;
+    el.textContent = v;
+}
+/** innerHTML só quando o HTML gerado muda (guarda o último no próprio elemento). */
+function setHtml(el, html) {
+    if (!el || el.__nexoHtml === html) return;
+    el.__nexoHtml = html;
+    el.innerHTML = html;
+}
+function setClass(el, v) {
+    if (el && el.className !== v) el.className = v;
+}
+function setCls(el, cls, on) {
+    if (el && el.classList.contains(cls) !== Boolean(on)) el.classList.toggle(cls, Boolean(on));
+}
+function setDisabled(el, on) {
+    if (el && el.disabled !== Boolean(on)) el.disabled = Boolean(on);
+}
+
+/** @returns {boolean} true quando há contagem de décimos rolando (o timer então roda rápido). */
 function refreshHuntAndCenterButtons() {
     const data = snapshots[activeAccount];
     const btnCenter = $('btnGoCenter');
     const btnHunt = $('btnChangeHunt');
     const pendingBar = $('pendingHuntBar');
     const pendingText = $('pendingHuntText');
-    if (!btnCenter || !btnHunt) return;
+    if (!btnCenter || !btnHunt) return false;
 
     const status = data?.status || 'disconnected';
     const isOnline = status === 'connected' || status === 'bridge';
@@ -2350,43 +2571,44 @@ function refreshHuntAndCenterButtons() {
     const fmtSec = (ms) => (ms / 1000).toFixed(1).replace('.', ',');
 
     if (!isOnline) {
-        btnCenter.disabled = true;
-        btnCenter.classList.remove('locked');
-        btnCenter.textContent = 'Centro Médico';
-        btnHunt.textContent = 'Trocar hunt';
+        setDisabled(btnCenter, true);
+        setCls(btnCenter, 'locked', false);
+        setText(btnCenter, 'Centro Médico');
+        setText(btnHunt, 'Trocar hunt');
     } else if (t.noCentro) {
-        btnCenter.disabled = false;
-        btnCenter.classList.remove('locked');
-        btnCenter.textContent = 'Curar no Centro';
-        btnHunt.textContent = swapLeftMs > 0 ? `Agendar (${fmtSec(swapLeftMs)}s)` : 'Trocar hunt';
+        setDisabled(btnCenter, false);
+        setCls(btnCenter, 'locked', false);
+        setText(btnCenter, 'Curar no Centro');
+        setText(btnHunt, swapLeftMs > 0 ? `Agendar (${fmtSec(swapLeftMs)}s)` : 'Trocar hunt');
     } else if (combatLeftMs > 0) {
-        btnCenter.disabled = true;
-        btnCenter.classList.add('locked');
-        btnCenter.textContent = `Centro (${fmtSec(combatLeftMs)}s)`;
-        btnHunt.textContent = t.pendingHuntSlug
+        setDisabled(btnCenter, true);
+        setCls(btnCenter, 'locked', true);
+        setText(btnCenter, `Centro (${fmtSec(combatLeftMs)}s)`);
+        setText(btnHunt, t.pendingHuntSlug
             ? `Agendada (${fmtSec(lockLeftMs)}s)`
-            : `Agendar (${fmtSec(lockLeftMs)}s)`;
+            : `Agendar (${fmtSec(lockLeftMs)}s)`);
     } else {
-        btnCenter.disabled = !t.huntSlug;
-        btnCenter.classList.remove('locked');
-        btnCenter.textContent = 'Centro Médico';
-        btnHunt.textContent = swapLeftMs > 0
+        setDisabled(btnCenter, !t.huntSlug);
+        setCls(btnCenter, 'locked', false);
+        setText(btnCenter, 'Centro Médico');
+        setText(btnHunt, swapLeftMs > 0
             ? (t.pendingHuntSlug ? `Agendada (${fmtSec(swapLeftMs)}s)` : `Agendar (${fmtSec(swapLeftMs)}s)`)
-            : 'Trocar hunt';
+            : 'Trocar hunt');
     }
 
     if (pendingBar && pendingText) {
         if (t.pendingHuntSlug && isOnline) {
             const label = t.pendingHuntName || t.pendingHuntSlug;
-            pendingText.textContent = lockLeftMs > 0
+            setText(pendingText, lockLeftMs > 0
                 ? `Troca agendada: ${label} (${fmtSec(lockLeftMs)}s)`
-                : `Trocando para ${label}...`;
-            pendingBar.classList.remove('hidden');
+                : `Trocando para ${label}...`);
+            setCls(pendingBar, 'hidden', false);
         } else {
-            pendingBar.classList.add('hidden');
+            setCls(pendingBar, 'hidden', true);
         }
     }
     refreshTopCatchTimer(data);
+    return isOnline && lockLeftMs > 0;
 }
 
 const TOAST_ICONS = {
@@ -2517,7 +2739,7 @@ function openShinyInspectCard(entry) {
     const dex = resolvePokemonSpriteDex(entry.speciesId, entry.name, entry.spriteDex);
     const when = entry.ts ? new Date(entry.ts).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'medium' }) : 'Agora';
     if (titleEl) {
-        titleEl.textContent = entry.own ? `Seu Shiny: ${entry.name}` : `Shiny no servidor: ${entry.name}`;
+        setText(titleEl, entry.own ? `Seu Shiny: ${entry.name}` : `Shiny no servidor: ${entry.name}`);
     }
     if (metaEl) {
         const parts = [
@@ -2526,36 +2748,48 @@ function openShinyInspectCard(entry) {
             entry.hunt && entry.hunt !== 'Ovo Shiny' ? `Mapa: ${entry.hunt}` : '',
             when,
         ].filter(Boolean);
-        metaEl.textContent = parts.join(' · ');
+        setText(metaEl, parts.join(' · '));
     }
-    if (bodyEl) {
+    const extra = (Array.isArray(entry.details) ? entry.details : []).filter(([k]) => !/^(looktype|outfit)$/i.test(String(k)));
+    const paint = (info) => {
+        if (!bodyEl) return;
         bodyEl.replaceChildren();
-        const cardEl = buildToastCard({
+        bodyEl.append(buildToastCard({
             speciesId: entry.speciesId,
             spriteDex: dex,
             sprite: pokemonSpriteUrl(entry.speciesId, true, dex, entry.name),
             name: entry.name,
             level: entry.level,
             subtitle: [dex ? `#${dex}` : '', entry.speciesId && entry.speciesId !== dex ? `ID ${entry.speciesId}` : ''].filter(Boolean).join(' · '),
-            rows: Array.isArray(entry.details) ? entry.details : [],
-        });
-        bodyEl.append(cardEl);
-        if (!Array.isArray(entry.details) || entry.details.length === 0) {
+            rows: [...(info?.rows || []), ...extra],
+            maxRows: 16,
+        }));
+        const txt = info ? info.hint : 'Buscando os dados do Pokémon...';
+        if (txt) {
             const hint = document.createElement('div');
-            hint.className = 'hint-text';
+            setClass(hint, 'hint-text');
             hint.style.marginTop = '8px';
-            hint.textContent = 'O servidor não enviou atributos extras (IVs/natureza) neste anúncio.';
+            setText(hint, txt);
             bodyEl.append(hint);
         }
-    }
+    };
+    paint(null);
     modal.classList.remove('hidden');
+    const token = (openShinyInspectCard.token = (openShinyInspectCard.token || 0) + 1);
+    Promise.resolve(window.pokeHub?.inspectShiny?.(activeAccount, entry))
+        .then((info) => {
+            if (token === openShinyInspectCard.token) paint(info || { rows: [], hint: 'Sem dados extras deste shiny.' });
+        })
+        .catch(() => {
+            if (token === openShinyInspectCard.token) paint({ rows: [], hint: 'Não consegui ler os dados agora.' });
+        });
 }
 
 function buildToastCard(card) {
     const wrap = document.createElement('div');
-    wrap.className = 'toast-card';
+    setClass(wrap, 'toast-card');
     const art = document.createElement('div');
-    art.className = 'toast-card-art';
+    setClass(art, 'toast-card-art');
     const dex = resolvePokemonSpriteDex(card.speciesId, card.name, card.spriteDex);
     const spriteSrc = card.sprite || pokemonSpriteUrl(card.speciesId, true, dex, card.name);
     if (spriteSrc) {
@@ -2575,41 +2809,41 @@ function buildToastCard(card) {
         }
         art.append(img);
     } else {
-        art.textContent = '★';
+        setText(art, '★');
     }
     for (let i = 0; i < 3; i++) {
         const sp = document.createElement('span');
-        sp.className = `sparkle s${i + 1}`;
-        sp.textContent = '✦';
+        setClass(sp, `sparkle s${i + 1}`);
+        setText(sp, '✦');
         art.append(sp);
     }
     const info = document.createElement('div');
-    info.className = 'toast-card-info';
+    setClass(info, 'toast-card-info');
     const name = document.createElement('div');
-    name.className = 'toast-card-name';
-    name.textContent = card.name || '';
+    setClass(name, 'toast-card-name');
+    setText(name, card.name || '');
     if (card.level !== undefined && card.level !== null && card.level !== '?') {
         const lv = document.createElement('span');
-        lv.className = 'toast-card-level';
-        lv.textContent = `Nv ${card.level}`;
+        setClass(lv, 'toast-card-level');
+        setText(lv, `Nv ${card.level}`);
         name.append(' ', lv);
     }
     info.append(name);
     if (card.subtitle) {
         const sub = document.createElement('div');
-        sub.className = 'toast-card-sub';
-        sub.textContent = card.subtitle;
+        setClass(sub, 'toast-card-sub');
+        setText(sub, card.subtitle);
         info.append(sub);
     }
-    const rows = Array.isArray(card.rows) ? card.rows.slice(0, 8) : [];
+    const rows = Array.isArray(card.rows) ? card.rows.slice(0, card.maxRows || 8) : [];
     if (rows.length) {
         const dl = document.createElement('dl');
-        dl.className = 'toast-card-rows';
+        setClass(dl, 'toast-card-rows');
         for (const [k, v] of rows) {
             const dt = document.createElement('dt');
-            dt.textContent = labelPokemonDetail(k);
+            setText(dt, labelPokemonDetail(k));
             const dd = document.createElement('dd');
-            dd.textContent = String(v);
+            setText(dd, String(v));
             dl.append(dt, dd);
         }
         info.append(dl);
@@ -2737,7 +2971,7 @@ function showToast({
     const accColor = hasAcc ? (window.nexoIcons?.accountAccent?.(accNum) || 'azul') : '';
 
     const item = document.createElement('div');
-    item.className = `toast-item ${meta.tone}${hasAcc ? ' has-acc' : ''}${card ? ' has-card' : ''}${onClick ? ' actionable' : ''}`;
+    setClass(item, `toast-item ${meta.tone}${hasAcc ? ' has-acc' : ''}${card ? ' has-card' : ''}${onClick ? ' actionable' : ''}`);
     if (hasAcc) {
         item.dataset.acc = String(accNum);
         item.dataset.accColor = accColor;
@@ -2745,17 +2979,17 @@ function showToast({
     item.setAttribute('role', meta.tone === 'error' ? 'alert' : 'status');
 
     const icon = document.createElement('div');
-    icon.className = 'toast-icon';
+    setClass(icon, 'toast-icon');
     const svg = window.nexoIcons?.icon?.(meta.icon);
     if (svg) icon.innerHTML = svg;
     else icon.textContent = TOAST_ICONS[kind] || TOAST_ICONS.info;
 
     const main = document.createElement('div');
-    main.className = 'toast-main';
+    setClass(main, 'toast-main');
     const head = document.createElement('div');
-    head.className = 'toast-head';
+    setClass(head, 'toast-head');
     const badges = document.createElement('div');
-    badges.className = 'toast-badges';
+    setClass(badges, 'toast-badges');
 
     let headline = String(title || '').trim();
     if (hasAcc) {
@@ -2766,53 +3000,53 @@ function showToast({
             nickLabel = (accMatch[2] || '').trim();
         }
         const accPill = document.createElement('span');
-        accPill.className = 'toast-acc-pill';
+        setClass(accPill, 'toast-acc-pill');
         const dot = document.createElement('i');
-        dot.className = 'acc-pill-dot';
+        setClass(dot, 'acc-pill-dot');
         accPill.append(dot, document.createTextNode(nickLabel ? `C${accNum} · ${nickLabel}` : `Conta ${accNum}`));
         badges.append(accPill);
     }
 
     const catPill = document.createElement('span');
-    catPill.className = `toast-cat-pill ${meta.tone}`;
-    catPill.textContent = meta.tag;
+    setClass(catPill, `toast-cat-pill ${meta.tone}`);
+    setText(catPill, meta.tag);
     badges.append(catPill);
 
     const timeSpan = document.createElement('span');
-    timeSpan.className = 'toast-time';
-    timeSpan.textContent = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    setClass(timeSpan, 'toast-time');
+    setText(timeSpan, new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }));
     head.append(badges, timeSpan);
     main.append(head);
 
     if (headline && headline.toUpperCase() !== meta.tag) {
         const titleEl = document.createElement('div');
-        titleEl.className = 'toast-title';
-        titleEl.textContent = headline;
+        setClass(titleEl, 'toast-title');
+        setText(titleEl, headline);
         main.append(titleEl);
     }
     if (card) main.append(buildToastCard(card));
     if (bodyTxt) {
         const body = document.createElement('div');
-        body.className = 'toast-body';
-        body.textContent = bodyTxt;
+        setClass(body, 'toast-body');
+        setText(body, bodyTxt);
         main.append(body);
     }
     if (onClick && actionLabel) {
         const act = document.createElement('span');
-        act.className = 'toast-action';
-        act.textContent = actionLabel;
+        setClass(act, 'toast-action');
+        setText(act, actionLabel);
         main.append(act);
     }
 
     const close = document.createElement('button');
     close.type = 'button';
-    close.className = 'toast-close';
+    setClass(close, 'toast-close');
     close.setAttribute('aria-label', 'Fechar notificação');
-    close.textContent = '×';
+    setText(close, '×');
 
     const life = duration || (card ? 15_000 : (meta.tone === 'shiny' || onClick ? 8_000 : 5_500));
     const bar = document.createElement('div');
-    bar.className = 'toast-progress';
+    setClass(bar, 'toast-progress');
     bar.style.animationDuration = `${life}ms`;
 
     item.append(icon, main, close, bar);
@@ -3100,8 +3334,8 @@ function refreshTopCatchTimer(data = snapshots[activeAccount]) {
     if (!timerEl) return;
     const tc = data?.collection?.topCatch;
     if (!tc?.endMs) {
-        if (timerEl.textContent !== 'Sem dados') timerEl.textContent = 'Sem dados';
-        timerEl.classList.remove('ending');
+        setText(timerEl, 'Sem dados');
+        setCls(timerEl, 'ending', false);
         return;
     }
     const remMs = Number.isFinite(tc.remainingMs)
@@ -3109,7 +3343,7 @@ function refreshTopCatchTimer(data = snapshots[activeAccount]) {
         : Math.max(0, Number(tc.endMs) - Date.now());
     const label = remMs > 0 ? `Falta ${fmtEventCountdown(remMs)}` : 'Virando semana...';
     if (timerEl.textContent !== label) timerEl.textContent = label;
-    timerEl.classList.toggle('ending', remMs > 0 && remMs < 12 * 3600_000);
+    setCls(timerEl, 'ending', remMs > 0 && remMs < 12 * 3600_000);
     const tip = `Semana Top Catch ${tc.week || ''} (reseta domingo 00h Brasília)`;
     if (timerEl.title !== tip) timerEl.title = tip;
 }
@@ -3139,15 +3373,15 @@ function renderCollectionCard(data = snapshots[activeAccount]) {
     const countEl = $('tcCount');
     const countSubEl = $('tcCountSub');
     if (countEl) {
-        countEl.textContent = `${fmtNum(tc.count || 0)} espécies`;
+        setText(countEl, `${fmtNum(tc.count || 0)} espécies`);
     }
     if (countSubEl) {
         if (tc.loaded && Number(tc.unlockedTotal || 0) > 0) {
-            countSubEl.textContent = `${fmtNum(tc.unlockedCaptured)}/${fmtNum(tc.unlockedTotal)} liberadas (${tc.pct || 0}%) · ${fmtNum(tc.unlockedPendingHunts)} hunts`;
+            setText(countSubEl, `${fmtNum(tc.unlockedCaptured)}/${fmtNum(tc.unlockedTotal)} liberadas (${tc.pct || 0}%) · ${fmtNum(tc.unlockedPendingHunts)} hunts`);
         } else if (isOnline) {
-            countSubEl.textContent = 'clique em ↻ para carregar lista semanal';
+            setText(countSubEl, 'clique em ↻ para carregar lista semanal');
         } else {
-            countSubEl.textContent = 'conecte para sincronizar';
+            setText(countSubEl, 'conecte para sincronizar');
         }
     }
 
@@ -3159,24 +3393,24 @@ function renderCollectionCard(data = snapshots[activeAccount]) {
     if (rankEl && rankSubEl) {
         if (rk && rk.pos != null) {
             const prizeTag = rk.prize ? ` · ${rk.prize.diamantes} 💎${rk.prize.selo ? ' ★' : ''}` : '';
-            rankEl.textContent = `#${fmtNum(rk.pos)}${prizeTag}`;
+            setText(rankEl, `#${fmtNum(rk.pos)}${prizeTag}`);
             if (rk.inPrizeZone && rk.above) {
                 const diff = Math.max(1, Number(rk.above.count || 0) - Number(tc.count || 0));
-                rankSubEl.textContent = `Acima: ${rk.above.nick || '#'} (+${fmtNum(diff)}) · 1º: ${fmtNum(rk.top1Count)}`;
+                setText(rankSubEl, `Acima: ${rk.above.nick || '#'} (+${fmtNum(diff)}) · 1º: ${fmtNum(rk.top1Count)}`);
             } else if (rk.inPrizeZone) {
-                rankSubEl.textContent = rk.pos === 1 ? 'Líder do Top Catch semanal!' : `1º lugar: ${fmtNum(rk.top1Count)} espécies`;
+                setText(rankSubEl, rk.pos === 1 ? 'Líder do Top Catch semanal!' : `1º lugar: ${fmtNum(rk.top1Count)} espécies`);
             } else if (rk.top100Cutoff != null) {
                 const diff100 = Math.max(1, Number(rk.top100Cutoff) - Number(tc.count || 0));
-                rankSubEl.textContent = `Top 100: ${fmtNum(rk.top100Cutoff)} (+${fmtNum(diff100)}) · 1º: ${fmtNum(rk.top1Count)}`;
+                setText(rankSubEl, `Top 100: ${fmtNum(rk.top100Cutoff)} (+${fmtNum(diff100)}) · 1º: ${fmtNum(rk.top1Count)}`);
             } else {
-                rankSubEl.textContent = `${fmtNum(rk.totalRanked)} no ranking`;
+                setText(rankSubEl, `${fmtNum(rk.totalRanked)} no ranking`);
             }
         } else if (rk && rk.top1Count != null) {
-            rankEl.textContent = 'Sem captura';
-            rankSubEl.textContent = `1º: ${fmtNum(rk.top1Count)} · Top 100: ${fmtNum(rk.top100Cutoff ?? 0)}`;
+            setText(rankEl, 'Sem captura');
+            setText(rankSubEl, `1º: ${fmtNum(rk.top1Count)} · Top 100: ${fmtNum(rk.top100Cutoff ?? 0)}`);
         } else {
-            rankEl.textContent = '-';
-            rankSubEl.textContent = isOnline ? 'clique em ↻ para buscar ranking' : 'sem ranking';
+            setText(rankEl, '-');
+            setText(rankSubEl, isOnline ? 'clique em ↻ para buscar ranking' : 'sem ranking');
         }
     }
 
@@ -3186,13 +3420,13 @@ function renderCollectionCard(data = snapshots[activeAccount]) {
     const msFill = $('tcMilestoneFill');
     if (ms && msTxt && msRew && msFill) {
         if (ms.completedAll) {
-            msTxt.textContent = `Marcos: ${fmtNum(ms.current)} / 600`;
-            msRew.textContent = 'Todos concluídos ✓';
+            setText(msTxt, `Marcos: ${fmtNum(ms.current)} / 600`);
+            setText(msRew, 'Todos concluídos ✓');
             msFill.style.width = '100%';
             msFill.classList.add('done');
         } else {
-            msTxt.textContent = `Marco: ${fmtNum(ms.current)} / ${fmtNum(ms.next)} (faltam ${fmtNum(ms.remainingToNext)})`;
-            msRew.textContent = ms.nextRewardLabel || '';
+            setText(msTxt, `Marco: ${fmtNum(ms.current)} / ${fmtNum(ms.next)} (faltam ${fmtNum(ms.remainingToNext)})`);
+            setText(msRew, ms.nextRewardLabel || '');
             msFill.style.width = `${Math.max(0, Math.min(100, Number(ms.progressPct || 0)))}%`;
             msFill.classList.remove('done');
         }
@@ -3201,11 +3435,11 @@ function renderCollectionCard(data = snapshots[activeAccount]) {
     const dexEl = $('dexSummary');
     if (dexEl) {
         if (Number(dex.unlockedTotal || 0) > 0) {
-            dexEl.textContent = `Pokédex: ${fmtNum(dex.unlockedCaptured)} / ${fmtNum(dex.unlockedTotal)} liberadas (${dex.pct || 0}%) · faltam ${fmtNum(dex.unlockedPendingHunts)} hunts · ${fmtNum(dex.capturedTotal)} registradas`;
+            setText(dexEl, `Pokédex: ${fmtNum(dex.unlockedCaptured)} / ${fmtNum(dex.unlockedTotal)} liberadas (${dex.pct || 0}%) · faltam ${fmtNum(dex.unlockedPendingHunts)} hunts · ${fmtNum(dex.capturedTotal)} registradas`);
         } else if (Number(dex.capturedTotal || 0) > 0) {
-            dexEl.textContent = `Pokédex: ${fmtNum(dex.capturedTotal)} espécies registradas`;
+            setText(dexEl, `Pokédex: ${fmtNum(dex.capturedTotal)} espécies registradas`);
         } else {
-            dexEl.textContent = 'Pokédex: conecte para carregar hunts liberadas';
+            setText(dexEl, 'Pokédex: conecte para carregar hunts liberadas');
         }
     }
 
@@ -3233,7 +3467,7 @@ function renderVoteBar(data = snapshots[activeAccount]) {
         const noSession = !data?.session?.nick && (!data?.trainer?.nick || data.trainer.nick === '-');
         btn.disabled = noSession;
         if (btnExt) btnExt.disabled = noSession;
-        pill.textContent = 'IdleHub.io';
+        setText(pill, 'IdleHub.io');
         sub.textContent = v?.error
             ? `Erro: ${v.error}`
             : 'Conecte a conta ou clique em ↻ para verificar';
@@ -3247,17 +3481,17 @@ function renderVoteBar(data = snapshots[activeAccount]) {
     btn.disabled = !v.url;
     if (btnExt) btnExt.disabled = !v.url;
     if (!v.ativo) {
-        pill.textContent = 'Desligado';
-        sub.textContent = 'Vote & Ganhe inativo no servidor';
+        setText(pill, 'Desligado');
+        setText(sub, 'Vote & Ganhe inativo no servidor');
         return;
     }
     const progress = `${v.noPar || 0}/${v.votosPorDiamante || 2} p/ 💎 · ${fmtNum(v.votos || 0)} votos (${fmtNum(v.diamantes || 0)} 💎)`;
     if (ready) {
-        pill.textContent = 'Disponível agora';
-        sub.textContent = `${progress}`;
+        setText(pill, 'Disponível agora');
+        setText(sub, `${progress}`);
     } else {
-        pill.textContent = `Em ${fmtShortDuration(remMs)}`;
-        sub.textContent = progress;
+        setText(pill, `Em ${fmtShortDuration(remMs)}`);
+        setText(sub, progress);
     }
 }
 
@@ -3300,34 +3534,34 @@ function renderUpdateBanner(st) {
         title.textContent = st.status === 'downloading'
             ? `Baixando v${shortVer(st.latestVersion)} · ${st.percent || 0}%`
             : 'Aplicando atualização: o Hub vai fechar e reabrir sozinho';
-        sub.textContent = 'Suas 4 contas, sessões e configurações ficam preservadas.';
+        setText(sub, 'Suas 4 contas, sessões e configurações ficam preservadas.');
     } else if (st.failedTarget && st.hasUpdate) {
         mode = 'error';
-        title.textContent = `A atualização para v${shortVer(st.failedTarget)} não foi aplicada`;
-        sub.textContent = `Clique em Tentar de novo. Detalhes em ${st.logPath || 'nexo-pokebot-last-update.log'}`;
+        setText(title, `A atualização para v${shortVer(st.failedTarget)} não foi aplicada`);
+        setText(sub, `Clique em Tentar de novo. Detalhes em ${st.logPath || 'nexo-pokebot-last-update.log'}`);
     } else if (st.hasUpdate && readUpdateSnooze() !== st.latestVersion) {
         mode = 'available';
-        title.textContent = `Nova versão disponível: v${shortVer(st.latestVersion)}`;
+        setText(title, `Nova versão disponível: v${shortVer(st.latestVersion)}`);
         const size = st.assetSize ? ` · ${formatBytesMb(st.assetSize)}` : '';
         sub.textContent = st.isGitRepo
             ? 'Pasta de desenvolvimento: atualize com git pull.'
             : `Você está na v${shortVer(st.currentVersion)}${size}. Atualiza em 1 clique sem perder as contas.`;
     } else if (st.justUpdatedFrom && !updateDoneBannerDismissed) {
         mode = 'done';
-        title.textContent = `Atualizado para v${shortVer(st.currentVersion)}`;
-        sub.textContent = `Antes: v${shortVer(st.justUpdatedFrom)}. Veja o que mudou em Novidades.`;
+        setText(title, `Atualizado para v${shortVer(st.currentVersion)}`);
+        setText(sub, `Antes: v${shortVer(st.justUpdatedFrom)}. Veja o que mudou em Novidades.`);
     }
 
     bar.classList.toggle('hidden', !mode);
     bar.classList.toggle('error', mode === 'error');
     bar.classList.toggle('done', mode === 'done');
     if (!mode) return;
-    icon.textContent = mode === 'error' ? '!' : mode === 'done' ? '✓' : '⬇';
+    setText(icon, mode === 'error' ? '!' : mode === 'done' ? '✓' : '⬇');
     btnInstall.classList.toggle('hidden', !(canInstall && (mode === 'available' || mode === 'error')));
-    btnInstall.textContent = mode === 'error' ? 'Tentar de novo' : 'Atualizar agora';
+    setText(btnInstall, mode === 'error' ? 'Tentar de novo' : 'Atualizar agora');
     btnNotes.classList.toggle('hidden', busy);
     btnLater.classList.toggle('hidden', busy);
-    btnLater.textContent = mode === 'done' ? 'Fechar' : 'Depois';
+    setText(btnLater, mode === 'done' ? 'Fechar' : 'Depois');
 }
 
 function renderUpdateUi(st) {
@@ -3362,48 +3596,48 @@ function renderUpdateUi(st) {
     const busy = st.status === 'checking' || st.status === 'downloading' || st.status === 'extracting' || st.status === 'applying';
     btn.classList.toggle('has-update', hasUpd);
     if (st.status === 'downloading') {
-        btn.textContent = `Baixando ${st.percent || 0}%`;
+        setText(btn, `Baixando ${st.percent || 0}%`);
     } else if (st.status === 'extracting' || st.status === 'applying') {
-        btn.textContent = 'Aplicando...';
+        setText(btn, 'Aplicando...');
     } else if (hasUpd) {
-        btn.textContent = `v${(st.latestVersion || '').replace(/\.0$/, '')}`;
+        setText(btn, `v${(st.latestVersion || '').replace(/\.0$/, '')}`);
     } else {
-        btn.textContent = 'Atualizar';
+        setText(btn, 'Atualizar');
     }
 
-    verTag.textContent = hasUpd ? `v${curVer} -> v${st.latestVersion}` : `v${curVer}`;
+    setText(verTag, hasUpd ? `v${curVer} -> v${st.latestVersion}` : `v${curVer}`);
     btnCheck.disabled = busy;
 
     if (st.status === 'checking') {
-        title.textContent = 'Verificando atualizações';
-        desc.textContent = 'Consultando Releases em felipegakkeku/nexo-pokebot...';
+        setText(title, 'Verificando atualizações');
+        setText(desc, 'Consultando Releases em felipegakkeku/nexo-pokebot...');
         progWrap.classList.add('hidden');
         btnInstall.classList.add('hidden');
     } else if (st.status === 'downloading') {
-        title.textContent = `Baixando v${st.latestVersion}`;
+        setText(title, `Baixando v${st.latestVersion}`);
         const mbDone = formatBytesMb(st.downloadedBytes);
         const mbTot = formatBytesMb(st.totalBytes || st.assetSize);
-        desc.textContent = mbTot ? `${mbDone} / ${mbTot}` : 'Baixando pacote Windows...';
+        setText(desc, mbTot ? `${mbDone} / ${mbTot}` : 'Baixando pacote Windows...');
         progWrap.classList.remove('hidden');
         progFill.style.width = `${Math.max(0, Math.min(100, Number(st.percent || 0)))}%`;
-        progTxt.textContent = `${st.percent || 0}%`;
+        setText(progTxt, `${st.percent || 0}%`);
         btnInstall.classList.add('hidden');
     } else if (st.status === 'extracting') {
-        title.textContent = `Extraindo v${st.latestVersion}`;
-        desc.textContent = 'Validando pacote antes de aplicar...';
+        setText(title, `Extraindo v${st.latestVersion}`);
+        setText(desc, 'Validando pacote antes de aplicar...');
         progWrap.classList.remove('hidden');
         progFill.style.width = '100%';
-        progTxt.textContent = 'Extraindo...';
+        setText(progTxt, 'Extraindo...');
         btnInstall.classList.add('hidden');
     } else if (st.status === 'applying') {
-        title.textContent = 'Aplicando atualização';
-        desc.textContent = 'Fechando para atualizar e reabrir automaticamente...';
+        setText(title, 'Aplicando atualização');
+        setText(desc, 'Fechando para atualizar e reabrir automaticamente...');
         progWrap.classList.remove('hidden');
         progFill.style.width = '100%';
-        progTxt.textContent = 'Reiniciando...';
+        setText(progTxt, 'Reiniciando...');
         btnInstall.classList.add('hidden');
     } else if (hasUpd) {
-        title.textContent = `Nova Release: v${st.latestVersion}`;
+        setText(title, `Nova Release: v${st.latestVersion}`);
         const sizeLabel = st.assetSize ? ` (${formatBytesMb(st.assetSize)})` : '';
         desc.textContent = st.isGitRepo
             ? 'Ambiente Git (.git) detectado. Use git pull ou abra a Release no GitHub.'
@@ -3420,12 +3654,12 @@ function renderUpdateUi(st) {
             });
         }
     } else if (st.status === 'error') {
-        title.textContent = 'Erro na atualização';
-        desc.textContent = st.error || 'Não foi possível consultar o GitHub agora.';
+        setText(title, 'Erro na atualização');
+        setText(desc, st.error || 'Não foi possível consultar o GitHub agora.');
         progWrap.classList.add('hidden');
         btnInstall.classList.add('hidden');
     } else {
-        title.textContent = 'Tudo atualizado';
+        setText(title, 'Tudo atualizado');
         desc.textContent = st.checkedAt
             ? `Você já está na última Release (v${curVer}).`
             : 'Clique em Verificar para buscar novas Releases no GitHub.';
@@ -3434,14 +3668,121 @@ function renderUpdateUi(st) {
     }
 
     if (hasUpd && st.releaseNotes) {
-        notesEl.textContent = st.releaseNotes.slice(0, 900);
+        setText(notesEl, st.releaseNotes.slice(0, 900));
         notesEl.classList.remove('hidden');
     } else {
         notesEl.classList.add('hidden');
     }
 }
 
+// ===== Medidor de desempenho (Ctrl+Shift+D) =====
+const perfRenderMs = [];
+let perfPanel = null;
+let perfTimer = null;
+let perfObserver = null;
+let perfMutations = 0;
+let perfMutSince = 0;
+const PERF_LABELS = {
+    gpuCpuPct: ['CPU da GPU', '%'],
+    mainCpuPct: ['CPU do processo principal', '%'],
+    rendererCpuPct: ['CPU da tela do Hub', '%'],
+    lagP95Ms: ['Atraso do principal (p95)', 'ms'],
+    snapshotMs: ['Montar os snapshots (p95)', 'ms'],
+    snapshotKb: ['Tamanho do snapshot', 'KB'],
+    renderMs: ['Desenhar a tela (p95)', 'ms'],
+    mutationsPerSec: ['Mudanças no DOM por segundo', ''],
+};
+const p95 = (arr) => {
+    if (!arr.length) return 0;
+    const s = [...arr].sort((x, y) => x - y);
+    return s[Math.min(s.length - 1, Math.ceil(0.95 * s.length) - 1)];
+};
+function perfPanelText(rows, info) {
+    const lines = rows.map((r) => `${PERF_LABELS[r.key]?.[0] || r.key}: ${r.value}${PERF_LABELS[r.key]?.[1] || ''} (meta ${r.budget}) ${r.ok ? 'ok' : 'ACIMA'}`);
+    if (info) lines.push(info);
+    return lines.join('\n');
+}
+async function refreshPerfPanel() {
+    if (!perfPanel || !window.pokeHub?.getPerf) return;
+    let perf = null;
+    try { perf = await window.pokeHub.getPerf(); } catch { return; }
+    if (!perf || !perfPanel) return;
+    const now = performance.now();
+    const secs = Math.max(0.5, (now - perfMutSince) / 1000);
+    const values = { ...perf.values, renderMs: p95(perfRenderMs), mutationsPerSec: perfMutations / secs };
+    perfMutations = 0;
+    perfMutSince = now;
+    const rows = [];
+    for (const [key, budget] of Object.entries(perf.budgets || {})) {
+        const v = values[key];
+        if (v == null || !Number.isFinite(v)) continue;
+        rows.push({ key, value: Math.round(v * 10) / 10, budget, ok: v <= budget });
+    }
+    const wv = perf.cpu?.Webview;
+    const info = `${wv != null ? `Jogos embutidos: ${wv}% de CPU somados · ` : ''}pior atraso: ${Math.round(perf.lagMaxMs || 0)} ms`;
+    const body = perfPanel.querySelector('.perf-rows');
+    setHtml(body, rows.map((r) => `<tr class="${r.ok ? 'ok' : 'over'}"><td>${escapeHtml(PERF_LABELS[r.key]?.[0] || r.key)}</td>` +
+        `<td>${r.value}${PERF_LABELS[r.key]?.[1] || ''}</td><td>até ${r.budget}${PERF_LABELS[r.key]?.[1] || ''}</td><td>${r.ok ? 'ok' : 'acima'}</td></tr>`).join(''));
+    setText(perfPanel.querySelector('.perf-info'), info);
+    perfPanel.__text = perfPanelText(rows, info);
+}
+function togglePerfPanel() {
+    if (perfPanel) {
+        clearInterval(perfTimer);
+        perfObserver?.disconnect();
+        perfObserver = null;
+        perfPanel.remove();
+        perfPanel = null;
+        return;
+    }
+    perfPanel = document.createElement('div');
+    perfPanel.className = 'perf-panel';
+    perfPanel.setAttribute('role', 'dialog');
+    perfPanel.setAttribute('aria-label', 'Desempenho do Hub');
+    perfPanel.innerHTML = '<div class="perf-head"><b>Desempenho do Hub</b><span>' +
+        '<button type="button" class="btn sm" data-perf="copy">Copiar números</button>' +
+        '<button type="button" class="icon-btn sm" data-perf="close" aria-label="Fechar">×</button></span></div>' +
+        '<table><thead><tr><th>Medida</th><th>Agora</th><th>Meta</th><th></th></tr></thead><tbody class="perf-rows"></tbody></table>' +
+        '<div class="perf-info hint-text"></div>';
+    perfPanel.addEventListener('click', (ev) => {
+        const act = ev.target.closest('[data-perf]')?.dataset.perf;
+        if (act === 'close') togglePerfPanel();
+        if (act === 'copy') {
+            const btn = ev.target.closest('button');
+            navigator.clipboard.writeText(perfPanel?.__text || '').then(() => {
+                btn.textContent = 'Copiado';
+                setTimeout(() => { btn.textContent = 'Copiar números'; }, 1500);
+            }).catch(() => {});
+        }
+    });
+    document.body.append(perfPanel);
+    perfMutations = 0;
+    perfMutSince = performance.now();
+    perfObserver = new MutationObserver((list) => {
+        for (const m of list) if (!perfPanel?.contains(m.target)) perfMutations++;
+    });
+    perfObserver.observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true });
+    void refreshPerfPanel();
+    perfTimer = setInterval(refreshPerfPanel, 2000);
+}
+document.addEventListener('keydown', (ev) => {
+    if (ev.ctrlKey && ev.shiftKey && !ev.altKey && (ev.key === 'D' || ev.key === 'd')) {
+        ev.preventDefault();
+        togglePerfPanel();
+    }
+});
+
 function renderAll() {
+    const t0 = performance.now();
+    try {
+        renderAllInner();
+    } finally {
+        perfRenderMs.push(performance.now() - t0);
+        if (perfRenderMs.length > 120) perfRenderMs.shift();
+    }
+}
+
+function renderAllInner() {
     if (hubHook('isPopout') === true) {
         renderActiveAccountPanel();
         hubHook('afterRender');
@@ -3478,7 +3819,7 @@ function wireEvents() {
     let setPixOpen = () => {};
     if (support && pixKey) {
         support.classList.remove('hidden');
-        $('pixKey').textContent = pixKey;
+        setText($('pixKey'), pixKey);
         const pop = $('pixPopover');
         const toggleBtn = $('btnPixToggle');
         setPixOpen = (open) => {
@@ -3496,9 +3837,9 @@ function wireEvents() {
         $('copyPix').onclick = async () => {
             try {
                 await navigator.clipboard.writeText(pixKey);
-                $('pixStatus').textContent = 'Chave Pix copiada ✓';
+                setText($('pixStatus'), 'Chave Pix copiada ✓');
             } catch {
-                $('pixStatus').textContent = 'Selecione a chave para copiar.';
+                setText($('pixStatus'), 'Selecione a chave para copiar.');
             }
         };
     }
@@ -3677,9 +4018,9 @@ function wireEvents() {
     $('chatReminder').addEventListener('change', event => {
         clearInterval(chatReminderTimer);
         const note = $('chatReminderNote');
-        note.textContent = event.target.checked ? 'Próximo lembrete em 20 minutos.' : '';
+        setText(note, event.target.checked ? 'Próximo lembrete em 20 minutos.' : '');
         if (event.target.checked) chatReminderTimer = setInterval(() => {
-            note.textContent = 'Hora de visitar o chat. Escolha um canal ao vivo.';
+            setText(note, 'Hora de visitar o chat. Escolha um canal ao vivo.');
             if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
                 new Notification('Lives do Nexo PokeBot', { body: note.textContent }).onclick = () => { window.focus(); setSubtab('lives'); };
             }
@@ -3758,6 +4099,34 @@ function wireEvents() {
 
     // Sniper do Mercado
     $('cSniperEnabled')?.addEventListener('change', (ev) => sendAction('set-config', { config: { sniperEnabled: ev.target.checked } }));
+    $('cAdvisorEnabled')?.addEventListener('change', (ev) => sendAction('set-config', { config: { advisorEnabled: ev.target.checked } }));
+    $('cDropRoute')?.addEventListener('change', (ev) => sendAction('set-config', { config: { dropRouteEnabled: ev.target.checked } }));
+    $('cDropSellMarket')?.addEventListener('change', (ev) => sendAction('set-config', { config: { dropSellMarket: ev.target.checked } }));
+    for (const [id, key] of DROP_FIELDS) {
+        $(id)?.addEventListener('change', (ev) => {
+            const n = Number(ev.target.value);
+            if (Number.isFinite(n)) sendAction('set-config', { config: { [key]: n } });
+        });
+    }
+    for (const [id, key] of DROP_SELECTS) {
+        $(id)?.addEventListener('change', (ev) => sendAction('set-config', { config: { [key]: ev.target.value } }));
+    }
+    const rerenderAdvisor = () => {
+        lastAdvisorSig = '';
+        refreshAdvisorLists();
+        if (snapshots[activeAccount]) renderAdvisorCard(snapshots[activeAccount]);
+    };
+    $('advisorPokeFilter')?.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('[data-adv-filter]');
+        if (!btn) return;
+        advisorFilter = btn.dataset.advFilter;
+        advisorShowAll = false;
+        rerenderAdvisor();
+    });
+    $('btnAdvisorMore')?.addEventListener('click', () => {
+        advisorShowAll = !advisorShowAll;
+        rerenderAdvisor();
+    });
     $('btnSniperScanNow')?.addEventListener('click', () => sendAction('sniper-scan-now'));
     $('cSniperInterval')?.addEventListener('change', (ev) => sendAction('set-config', { config: { sniperIntervalSec: Number(ev.target.value) || 30 } }));
     $('cSniperMinGold')?.addEventListener('change', (ev) => sendAction('set-config', { config: { sniperMinGoldReserve: Math.max(0, Number(ev.target.value) || 0) } }));
@@ -3917,7 +4286,7 @@ function wireEvents() {
     // Inline import live tokens
     $('btnImportLiveToggle').addEventListener('click', () => {
         $('importLiveBox').classList.toggle('hidden');
-        $('importLiveStatus').textContent = '';
+        setText($('importLiveStatus'), '');
     });
     $('btnImportLiveCancel').addEventListener('click', () => $('importLiveBox').classList.add('hidden'));
     $('btnImportLiveSubmit').addEventListener('click', async () => {
@@ -3929,14 +4298,14 @@ function wireEvents() {
             $('importKkTok').value = '';
             $('importLiveBox').classList.add('hidden');
         } else {
-            $('importLiveStatus').textContent = res?.error || 'Tokens inválidos.';
+            setText($('importLiveStatus'), res?.error || 'Tokens inválidos.');
         }
     });
 
     // Inline import session
     $('btnImportSessToggle').addEventListener('click', () => {
         $('importSessBox').classList.toggle('hidden');
-        $('importSessStatus').textContent = '';
+        setText($('importSessStatus'), '');
     });
     $('btnImportSessCancel').addEventListener('click', () => $('importSessBox').classList.add('hidden'));
     $('btnImportSessSubmit').addEventListener('click', async () => {
@@ -3946,7 +4315,7 @@ function wireEvents() {
             $('importSessInput').value = '';
             $('importSessBox').classList.add('hidden');
         } else {
-            $('importSessStatus').textContent = res?.error || 'Sessão inválida.';
+            setText($('importSessStatus'), res?.error || 'Sessão inválida.');
         }
     });
 
@@ -4045,10 +4414,15 @@ function startPolling() {
     // Pontos das lives: leitura leve a cada 45s enquanto a aba Lives estiver aberta (evita 429)
     setInterval(requestLivesRefresh, 45_000);
     if (huntCountdownTimer) clearInterval(huntCountdownTimer);
+    // Décimos de segundo só enquanto há trava de centro/troca; sem contagem, um tique por segundo basta.
+    let fastCountdown = true;
+    let lastCountdownAt = 0;
     huntCountdownTimer = setInterval(() => {
-        if (!document.hidden) {
-            refreshHuntAndCenterButtons();
-        }
+        if (document.hidden) return;
+        const now = Date.now();
+        if (!fastCountdown && now - lastCountdownAt < 1000) return;
+        lastCountdownAt = now;
+        fastCountdown = refreshHuntAndCenterButtons();
     }, 120);
 }
 
