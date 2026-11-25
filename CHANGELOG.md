@@ -4,6 +4,15 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+## 1.0.23
+
+- **Hub acompanha o main sem esperar Release**: a cada 15 minutos (e ao abrir) o Hub confere commits novos no GitHub, baixa em segundo plano e mostra "Atualização pronta: N mudanças". Aplica ao reiniciar ou pelo botão "Reiniciar e aplicar". Mudanças de dependências continuam só pelas Releases.
+- **Visual mais limpo**: fonte Segoe UI Variable, rótulos sem caixa alta, menos negrito e números alinhados.
+- **Menos repetição**: saíram os cards "Gasto vs Bruto" e "Shinies sessão", o nick repetido no painel do Headless e buffs/drops duplicados.
+- **Últimos eventos com filtro**: o painel do Headless mostra capturas e você escolhe o que entra.
+- **Fundos novos**: gradientes, tipos de Pokémon e cores próprias (sempre escuro).
+- **Reposição sem teto**: alvo de bolas, poções e revives não para em 5000, e dá para escolher abaixo de quanto o bot compra (vazio usa 35% do alvo).
+- **Telas mais justas**: destaques não encostam nos cards e telas estreitas usam menos colunas.
 ## 1.0.22
 
 - **Ficha completa do shiny de qualquer treinador**: clicar num shiny anunciado no servidor pede a ficha ao jogo (o mesmo pedido do clique no anúncio, sem abrir janela no jogo aberto) e mostra nota, IV, qualidade, potência, HP de combate, poder e os stats atuais com o IV de cada um. Anúncios de antes desta versão seguem só com espécie e nível.
