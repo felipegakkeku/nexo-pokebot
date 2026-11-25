@@ -4,6 +4,10 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+## 1.0.17
+
+- Trocar de conta com o jogo embutido não congela mais a tela: as telas das contas ficam empilhadas e seguem rodando, então a troca é imediata e o jogo não precisa ser redimensionado de novo ao voltar.
+
 ## 1.0.16
 
 - Cards com alça de arrastar: mude a ordem dentro de cada aba. A ordem fica salva (e vai junto nos Layouts); "Ordem padrão" no rodapé da aba desfaz.

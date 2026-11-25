@@ -3137,3 +3137,15 @@ body.dragging-card .tab-panel > .card:not(.card-dragging) { transition: transfor
 @media (prefers-reduced-motion: reduce) {
   .pane-scroll > .tab-panel:not(.hidden), .dock-col-body > .tab-panel:not(.hidden) { animation: none; }
 }
+
+/* ===== Troca de conta sem congelar o jogo =====
+   Fora da grade, as 4 telas ficam empilhadas no mesmo lugar e só a ativa aparece.
+   Antes a inativa ia para display:none: o jogo parava de desenhar e, ao voltar,
+   a tela nascia do zero (canvas redimensionado), mostrando o quadro velho até
+   acordar. Empilhadas, todas seguem vivas e no tamanho certo; trocar é só
+   mudar qual está por cima. */
+.workspace:not(.mode-grid) .browser-stage > .wv-slot {
+  display: flex; position: absolute; inset: 8px;
+  opacity: 0; pointer-events: none; z-index: 0;
+}
+.workspace:not(.mode-grid) .browser-stage > .wv-slot.slot-active { opacity: 1; pointer-events: auto; z-index: 1; }
