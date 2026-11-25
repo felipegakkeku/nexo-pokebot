@@ -252,13 +252,13 @@
     let evSize = LS.get('nexo.stageEvSize', 'auto');
     if (!EV_SIZES.some((x) => x[0] === evSize)) evSize = 'auto';
     function applyEvSize() {
-        document.documentElement.dataset.evSize = evSize;
+        document.documentElement.dataset.evHeight = evSize;
         const label = EV_SIZES.find((x) => x[0] === evSize)[1];
-        document.querySelectorAll('[data-ev-size]').forEach((b) => { b.textContent = label; });
+        document.querySelectorAll('button[data-ev-size]').forEach((b) => { b.textContent = label; });
     }
     applyEvSize();
     document.addEventListener('click', (ev) => {
-        if (!ev.target.closest?.('[data-ev-size]')) return;
+        if (!ev.target.closest?.('button[data-ev-size]')) return;
         evSize = EV_SIZES[(EV_SIZES.findIndex((x) => x[0] === evSize) + 1) % EV_SIZES.length][0];
         LS.set('nexo.stageEvSize', evSize);
         applyEvSize();
@@ -320,7 +320,7 @@
         set('killsSub', `${String(st.killsPerMin || 0).replace('.', ',')}/min · ${st.avgKillSec ? `${String(st.avgKillSec).replace('.', ',')}s cada` : '-'}`);
         set('shiny', `${Number(st.shiniesCaptured || 0)}<small> / ${Number(st.shiniesSeen || 0)}</small>`);
         set('shinySub', Number(st.shiniesMissed || 0) ? `${st.shiniesMissed} escaparam` : `${fmtCompact(st.captures)} capturas`);
-        host.querySelectorAll('[data-ev-size]:empty').forEach((b) => { b.textContent = EV_SIZES.find((x) => x[0] === evSize)[1]; });
+        host.querySelectorAll('button[data-ev-size]:empty').forEach((b) => { b.textContent = EV_SIZES.find((x) => x[0] === evSize)[1]; });
         const evs = recentEvents(acc, 40);
         const evSig = evs.map((e) => e.id).join(',') + Math.floor(Date.now() / 30_000);
         const ul = q('.sl-events');

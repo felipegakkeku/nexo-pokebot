@@ -3511,9 +3511,9 @@ body:has(.dock-col[data-panel="activity"]) #activityDock { display: none; }
 
 /* Altura configuravel do card Ultimos eventos */
 .sl-ev-filter .ev-size { border-style: dashed; }
-:root[data-ev-size="s"] .sl-bottom { flex: 0 0 auto; min-height: 0; }
-:root[data-ev-size="s"] .sl-bottom .sl-col { flex: 0 0 auto; max-height: 170px; }
-:root[data-ev-size="m"] .sl-bottom { flex: 0 0 auto; min-height: 0; }
-:root[data-ev-size="m"] .sl-bottom .sl-col { flex: 0 0 auto; max-height: 300px; }
-:root[data-ev-size="l"] .sl-bottom { flex: 0 0 auto; min-height: 0; }
-:root[data-ev-size="l"] .sl-bottom .sl-col { flex: 0 0 auto; max-height: 480px; }
+:root[data-ev-height="s"] .sl-bottom { flex: 0 0 auto; min-height: 0; }
+:root[data-ev-height="s"] .sl-bottom .sl-col { flex: 0 0 auto; max-height: 170px; }
+:root[data-ev-height="m"] .sl-bottom { flex: 0 0 auto; min-height: 0; }
+:root[data-ev-height="m"] .sl-bottom .sl-col { flex: 0 0 auto; max-height: 300px; }
+:root[data-ev-height="l"] .sl-bottom { flex: 0 0 auto; min-height: 0; }
+:root[data-ev-height="l"] .sl-bottom .sl-col { flex: 0 0 auto; max-height: 480px; }

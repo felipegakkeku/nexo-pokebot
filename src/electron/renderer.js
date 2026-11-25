@@ -1814,20 +1814,12 @@ function renderActiveAccountPanel() {
     // Inventory (bolas + pocoes em uso/estoque + revives)
     const balls = data.inventory?.balls || {};
     const items = data.inventory?.items || {};
-    const selectedPotions = new Set([
-        ...(data.config?.preferredPotionIds || []),
-        ...(data.automation?.potionIds || []),
-        ...(data.config?.restockPotionId ? [Number(data.config.restockPotionId)] : []),
-    ]);
     const chips = [
         ['Poke Ball', balls[1]], ['Great Ball', balls[2]], ['Super Ball', balls[3]],
         ['Ultra Ball', balls[4]], ['Beast Ball', balls[5]],
     ];
     for (const pid of [200, 201, 202, 203, 204, 70070]) {
-        const qty = Number(items[pid] || 0);
-        if (pid === 200 || qty > 0 || selectedPotions.has(pid)) {
-            chips.push([POTION_LABELS[pid], qty]);
-        }
+        chips.push([POTION_LABELS[pid], Number(items[pid] || 0)]);
     }
     chips.push(['Revive', items[205]]);
     if (Number(items[206] || 0) > 0) chips.push(['Max Revive', items[206]]);

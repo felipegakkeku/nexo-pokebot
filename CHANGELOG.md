@@ -4,6 +4,10 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+## 1.0.25
+
+- **Correção urgente**: na 1.0.24 o Hub podia abrir em branco (só aparecia "Altura: média"). Era o botão de altura do card Últimos eventos apagando a página. Corrigido.
+- **Mochila**: a Golden Potion agora aparece sempre, mesmo com quantidade 0.
 ## 1.0.24
 
 - **Novo logo**: Pokébola azul flat com o N personalizado, sem o brilho e o relevo 3D. O ícone do app, da janela e do atalho foram atualizados.
