@@ -1991,27 +1991,47 @@ function renderSniperCard(data) {
         }));
     }
 
+    const spList = Array.isArray(sn.marketSpecies) ? sn.marketSpecies : [];
+    const spDl = $('sniperSpeciesList');
+    if (spDl && spDl.dataset.count !== String(spList.length)) {
+        spDl.dataset.count = String(spList.length);
+        spDl.replaceChildren(...spList.map((sp) => {
+            const opt = document.createElement('option');
+            opt.value = `${sp.name} (#${sp.id})`;
+            return opt;
+        }));
+    }
+
     const rules = Array.isArray(sn.rules) ? sn.rules : [];
     const hits = Array.isArray(sn.recentHits) ? sn.recentHits : [];
-    const snSig = `${activeAccount}|${rules.map((r) => `${r.id}:${r.maxPrice}:${r.maxQty}:${r.boughtQty}:${r.autoBuy}:${r.enabled}:${r.currentMinPrice}`).join(';')}|${hits.length}:${hits[0]?.ts || 0}`;
+    const snSig = `${activeAccount}|${rules.map((r) => `${r.id}:${r.kind || 'item'}:${r.speciesId || 0}:${r.speciesName || ''}:${r.minLevel || 1}:${r.maxLevel || 0}:${r.onlyShiny ? 1 : 0}:${r.maxPrice}:${r.maxQty}:${r.boughtQty}:${r.autoBuy}:${r.enabled}:${r.currentMinPrice}`).join(';')}|${hits.length}:${hits[0]?.ts || 0}`;
     if (snSig !== lastSniperSig) {
         lastSniperSig = snSig;
         const rList = $('sniperRulesList');
         if (rList) {
             if (!rules.length) {
-                rList.innerHTML = '<li class="hint-text">Nenhuma regra de snipe criada. Adicione um item, moeda e preço máximo acima.</li>';
+                rList.innerHTML = '<li class="hint-text">Nenhuma regra de snipe criada. Escolha Item ou Pokémon, moeda e preço máximo acima.</li>';
             } else {
                 rList.innerHTML = rules.map((r) => {
                     const moedaTxt = r.currency === 'orb' ? 'gemas' : 'gold';
                     const minTxt = typeof r.currentMinPrice === 'number' ? ` · menor atual ${fmtNum(r.currentMinPrice)}` : '';
                     const avgTxt = typeof r.avgPrice === 'number' ? ` · média ${fmtNum(r.avgPrice)}` : '';
                     const qtyTxt = r.maxQty > 0 ? ` · ${r.boughtQty || 0}/${r.maxQty} comprados` : (r.boughtQty > 0 ? ` · ${r.boughtQty} comprados` : '');
+                    const isPoke = r.kind === 'pokemon';
+                    const titleTxt = isPoke
+                        ? (r.speciesName || (r.speciesId > 0 ? `Espécie #${r.speciesId}` : 'Qualquer Pokémon'))
+                        : (r.itemName || `Item #${r.itemId}`);
+                    const lvlTxt = isPoke
+                        ? (r.maxLevel > 0 ? `Nv ${fmtNum(r.minLevel || 1)}-${fmtNum(r.maxLevel)} · ` : `Nv ≥ ${fmtNum(r.minLevel || 1)} · `)
+                        : '';
                     return `<li class="sniper-rule-row">` +
                         `<div class="sniper-rule-main">` +
-                        `<div class="sniper-rule-head"><b>${escapeHtml(r.itemName || `Item #${r.itemId}`)}</b>` +
+                        `<div class="sniper-rule-head"><b>${escapeHtml(titleTxt)}</b>` +
+                        `${isPoke ? '<span class="sniper-tag poke">POKÉ</span>' : ''}` +
+                        `${isPoke && r.onlyShiny ? '<span class="sniper-tag shiny">SHINY</span>' : ''}` +
                         `<span class="sniper-tag${r.currency === 'orb' ? ' orb' : ''}">${moedaTxt.toUpperCase()}</span>` +
                         `${r.autoBuy ? '<span class="sniper-tag auto">AUTO</span>' : '<span class="sniper-tag">AVISO</span>'}</div>` +
-                        `<div class="sniper-rule-sub">Máx ${fmtNum(r.maxPrice)} ${moedaTxt}${minTxt}${avgTxt}${qtyTxt}</div></div>` +
+                        `<div class="sniper-rule-sub">${lvlTxt}Máx ${fmtNum(r.maxPrice)} ${moedaTxt}${minTxt}${avgTxt}${qtyTxt}</div></div>` +
                         `<div class="sniper-rule-acts">` +
                         `<button type="button" class="btn sm" data-sn-act="toggle-auto" data-sn-id="${escapeHtml(r.id)}" title="Alternar compra automática / só avisar">${r.autoBuy ? 'Auto' : 'Aviso'}</button>` +
                         `<button type="button" class="btn sm" data-sn-act="toggle-on" data-sn-id="${escapeHtml(r.id)}" title="Ativar/pausar regra">${r.enabled !== false ? 'Ativa' : 'Pausada'}</button>` +
@@ -2025,8 +2045,11 @@ function renderSniperCard(data) {
             hList.innerHTML = hits.slice(0, 6).map((h) => {
                 const tm = h.ts ? new Date(h.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
                 const moedaTxt = h.currency === 'orb' ? 'gemas' : 'gold';
+                const labelTxt = h.kind === 'pokemon'
+                    ? `${h.shiny ? '★ ' : ''}${escapeHtml(h.itemName || `Espécie #${h.speciesId || '?'}`)} Nv ${fmtNum(h.level || 1)}`
+                    : `${escapeHtml(h.itemName || `Item #${h.itemId}`)} x${fmtNum(h.qty)}`;
                 return `<li class="sniper-hit-line${h.bought ? ' bought' : ''}">` +
-                    `<span><b>${h.bought ? 'Comprou' : 'Oferta'}</b> ${escapeHtml(h.itemName || `Item #${h.itemId}`)} x${fmtNum(h.qty)}</span>` +
+                    `<span><b>${h.bought ? 'Comprou' : 'Oferta'}</b> ${labelTxt}</span>` +
                     `<span>${fmtNum(h.price)} ${moedaTxt} · ${tm}</span></li>`;
             }).join('');
         }
@@ -3739,10 +3762,73 @@ function wireEvents() {
     $('cSniperInterval')?.addEventListener('change', (ev) => sendAction('set-config', { config: { sniperIntervalSec: Number(ev.target.value) || 30 } }));
     $('cSniperMinGold')?.addEventListener('change', (ev) => sendAction('set-config', { config: { sniperMinGoldReserve: Math.max(0, Number(ev.target.value) || 0) } }));
     $('cSniperMinOrbs')?.addEventListener('change', (ev) => sendAction('set-config', { config: { sniperMinOrbsReserve: Math.max(0, Number(ev.target.value) || 0) } }));
+    const syncSniperModeInputs = () => {
+        const isPoke = $('sniperTargetKind')?.value === 'pokemon';
+        $('sniperItemInput')?.classList.toggle('hidden', isPoke);
+        $('sniperPokeInput')?.classList.toggle('hidden', !isPoke);
+        $('sniperMinLevel')?.classList.toggle('hidden', !isPoke);
+        $('sniperMaxLevel')?.classList.toggle('hidden', !isPoke);
+        $('sniperOnlyShinyWrap')?.classList.toggle('hidden', !isPoke);
+    };
+    $('sniperTargetKind')?.addEventListener('change', syncSniperModeInputs);
+    syncSniperModeInputs();
     $('btnSniperAdd')?.addEventListener('click', async () => {
-        const rawText = String($('sniperItemInput')?.value || '').trim();
+        const kind = $('sniperTargetKind')?.value === 'pokemon' ? 'pokemon' : 'item';
         const maxPrice = Math.floor(Number($('sniperMaxPrice')?.value || 0));
-        if (!rawText || !Number.isFinite(maxPrice) || maxPrice <= 0) return;
+        if (!Number.isFinite(maxPrice) || maxPrice <= 0) {
+            showToast({ kind: 'warn', title: 'Sniper', text: 'Informe um preço máximo válido.' });
+            return;
+        }
+        const currency = $('sniperCurrency')?.value === 'orb' ? 'orb' : 'gold';
+        const maxQty = Math.max(0, Math.floor(Number($('sniperMaxQty')?.value || 0) || 0));
+        const autoBuy = Boolean($('sniperAutoBuy')?.checked);
+        const curRules = [...(snapshots[activeAccount]?.config?.sniperRules || [])];
+
+        if (kind === 'pokemon') {
+            const rawSp = String($('sniperPokeInput')?.value || '').trim();
+            const minRaw = String($('sniperMinLevel')?.value || '').trim();
+            const maxRaw = String($('sniperMaxLevel')?.value || '').trim();
+            const minLevel = minRaw === '' ? 1 : Math.floor(Number(minRaw));
+            const maxLevel = maxRaw === '' ? 0 : Math.floor(Number(maxRaw));
+            if (!Number.isFinite(minLevel) || minLevel < 1) {
+                showToast({ kind: 'warn', title: 'Sniper Pokémon', text: 'Informe um nível mínimo válido (≥ 1).' });
+                return;
+            }
+            const speciesList = snapshots[activeAccount]?.sniper?.marketSpecies || [];
+            let speciesId = 0;
+            let speciesName = '';
+            if (rawSp) {
+                const idMatch = rawSp.match(/#(\d+)\)?$/) || rawSp.match(/^(\d+)$/);
+                let found = idMatch ? speciesList.find((sp) => Number(sp.id) === Number(idMatch[1])) : null;
+                if (!found) {
+                    const clean = rawSp.toLowerCase();
+                    found = speciesList.find((sp) => sp.name.toLowerCase() === clean) || speciesList.find((sp) => sp.name.toLowerCase().includes(clean));
+                }
+                speciesId = found ? Number(found.id) : (idMatch ? Number(idMatch[1]) : 0);
+                speciesName = found ? found.name : rawSp.replace(/\s*\(#\d+\)$/, '').trim();
+            }
+            curRules.push({
+                id: `sr_pk_${speciesId || 'any'}_${Date.now()}`,
+                kind: 'pokemon',
+                speciesId,
+                speciesName,
+                minLevel,
+                maxLevel: Number.isFinite(maxLevel) && maxLevel >= minLevel ? maxLevel : 0,
+                onlyShiny: Boolean($('sniperOnlyShiny')?.checked),
+                currency,
+                maxPrice,
+                maxQty,
+                boughtQty: 0,
+                autoBuy,
+                enabled: true,
+            });
+            if ($('sniperPokeInput')) $('sniperPokeInput').value = '';
+            await sendAction('set-config', { config: { sniperRules: curRules } });
+            return;
+        }
+
+        const rawText = String($('sniperItemInput')?.value || '').trim();
+        if (!rawText) return;
         const cat = snapshots[activeAccount]?.sniper?.marketItems || [];
         const idMatch = rawText.match(/#(\d+)\)?$/) || rawText.match(/^(\d+)$/);
         let found = idMatch ? cat.find((it) => Number(it.id) === Number(idMatch[1])) : null;
@@ -3756,12 +3842,9 @@ function wireEvents() {
             return;
         }
         const itemName = found ? found.name : rawText.replace(/\s*\(#\d+\)$/, '').trim();
-        const currency = $('sniperCurrency')?.value === 'orb' ? 'orb' : 'gold';
-        const maxQty = Math.max(0, Math.floor(Number($('sniperMaxQty')?.value || 0) || 0));
-        const autoBuy = Boolean($('sniperAutoBuy')?.checked);
-        const curRules = [...(snapshots[activeAccount]?.config?.sniperRules || [])];
         curRules.push({
             id: `sr_${itemId}_${Date.now()}`,
+            kind: 'item',
             itemId,
             itemName,
             currency,

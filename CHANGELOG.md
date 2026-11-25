@@ -4,6 +4,11 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+## 1.0.20
+
+- **Sniper de Pokémon por nível (Gold e Gemas)**: monitoramento automático da vitrine oficial do Mercado da Comunidade (`market.listar` / `vitrine` / `market.comprar`) com filtro de nível mínimo e máximo, espécie opcional (ou qualquer Pokémon), opção **Só Shiny**, teto de preço, proteção contra anúncios da própria conta, respeito às reservas de saldo e reagendamento automático pós-retenção.
+- **HUD do Sniper**: seletor `Item` / `Pokémon` na aba **Automação** para configurar regras por nível e acompanhar ofertas e compras recentes.
+
 ## 1.0.19
 
 - **Treinador Automático (Exp. Share e Casas)**: fila configurável de Pokémon com nível alvo e estratégia em escadinha (de X em X níveis) ou sequencial, trocando Exp. Share (`70050`) respeitando o cooldown oficial de 60s e alocando Pokémon da Equipe/Coleção nos postos livres das Casas ativas sem mexer em Pokémon fora da fila.

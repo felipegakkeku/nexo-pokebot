@@ -44,6 +44,9 @@ import {
     evaluateTrainerPlan,
     evaluateSniperSummary,
     evaluateSniperItemListings,
+    buildPokemonListingFrame,
+    buildSniperPokemonQueries,
+    evaluateSniperPokemonListings,
 } from './trainer-sniper.mjs';
 import {
     liveRewards,
@@ -677,19 +680,51 @@ function normalizeConfigPatch(current, patch = {}) {
         for (let idx = 0; idx < patch.sniperRules.length && cleanedRules.length < 40; idx++) {
             const r = patch.sniperRules[idx];
             if (!r || typeof r !== 'object') continue;
-            const itemId = Number(r.itemId);
             const maxPrice = Number(r.maxPrice);
-            if (!Number.isInteger(itemId) || itemId <= 0 || !Number.isFinite(maxPrice) || maxPrice <= 0) continue;
+            if (!Number.isFinite(maxPrice) || maxPrice <= 0) continue;
+            const currency = r.currency === 'orb' ? 'orb' : 'gold';
+            const maxQty = Math.max(0, Math.floor(Number(r.maxQty || 0) || 0));
+            const boughtQty = Math.max(0, Math.floor(Number(r.boughtQty || 0) || 0));
+            const autoBuy = Boolean(r.autoBuy);
+            const enabled = r.enabled !== false;
+
+            if (r.kind === 'pokemon') {
+                const speciesId = Math.max(0, Math.floor(Number(r.speciesId || 0) || 0));
+                const speciesName = typeof r.speciesName === 'string' ? r.speciesName.trim().slice(0, 64) : '';
+                const minLevel = Math.max(1, Math.min(10000, Math.round(Number(r.minLevel || 1) || 1)));
+                let maxLevel = Math.max(0, Math.min(10000, Math.round(Number(r.maxLevel || 0) || 0)));
+                if (maxLevel > 0 && maxLevel < minLevel) maxLevel = minLevel;
+                cleanedRules.push({
+                    id: typeof r.id === 'string' && r.id.trim() ? r.id.trim().slice(0, 40) : `sr_pk_${speciesId || 'any'}_${idx}_${Date.now()}`,
+                    kind: 'pokemon',
+                    speciesId,
+                    speciesName,
+                    minLevel,
+                    maxLevel,
+                    onlyShiny: Boolean(r.onlyShiny),
+                    currency,
+                    maxPrice: Math.max(1, Math.round(maxPrice)),
+                    maxQty,
+                    boughtQty,
+                    autoBuy,
+                    enabled,
+                });
+                continue;
+            }
+
+            const itemId = Number(r.itemId);
+            if (!Number.isInteger(itemId) || itemId <= 0) continue;
             cleanedRules.push({
                 id: typeof r.id === 'string' && r.id.trim() ? r.id.trim().slice(0, 40) : `sr_${itemId}_${idx}_${Date.now()}`,
+                kind: 'item',
                 itemId,
                 itemName: typeof r.itemName === 'string' ? r.itemName.trim().slice(0, 64) : '',
-                currency: r.currency === 'orb' ? 'orb' : 'gold',
+                currency,
                 maxPrice: Math.max(1, Math.round(maxPrice)),
-                maxQty: Math.max(0, Math.floor(Number(r.maxQty || 0) || 0)),
-                boughtQty: Math.max(0, Math.floor(Number(r.boughtQty || 0) || 0)),
-                autoBuy: Boolean(r.autoBuy),
-                enabled: r.enabled !== false,
+                maxQty,
+                boughtQty,
+                autoBuy,
+                enabled,
             });
         }
         next.sniperRules = cleanedRules;
@@ -2568,6 +2603,7 @@ export function createHeadlessController(options = {}) {
     const sniperTracker = {};
     let marketSummary = {};
     let marketMedias = null;
+    const sniperPokemonStats = {};
     const sniperRecentHits = [];
     let sniperTimer = null;
     const sniperRetentionTimers = new Map();
@@ -2583,16 +2619,32 @@ export function createHeadlessController(options = {}) {
     const requestSniperSummary = ({ force = false } = {}) => {
         const isOnline = status === 'connected' || status === 'bridge';
         if (!isOnline || config.economyPingOnly) return false;
-        const hasActiveRule = (config.sniperRules || []).some(
+        const activeRules = (config.sniperRules || []).filter(
             (r) => r && r.enabled !== false && (Number(r.maxQty || 0) === 0 || Number(r.boughtQty || 0) < Number(r.maxQty))
         );
-        if (!force && (!config.sniperEnabled || !hasActiveRule)) return false;
+        const hasItemRule = activeRules.some((r) => r.kind !== 'pokemon');
+        const hasPokemonRule = activeRules.some((r) => r.kind === 'pokemon');
+        if (!force && (!config.sniperEnabled || (!hasItemRule && !hasPokemonRule))) return false;
         const now = nowFn();
-        if (!force && now - (sniperTracker.lastSummaryReqAt || 0) < Math.max(8_000, Number(config.sniperIntervalSec || 30) * 1000)) {
-            return false;
+        const intervalMs = Math.max(8_000, Number(config.sniperIntervalSec || 30) * 1000);
+        let sentAny = false;
+        if (hasItemRule || (force && !hasPokemonRule)) {
+            if (force || now - (sniperTracker.lastSummaryReqAt || 0) >= intervalMs) {
+                sniperTracker.lastSummaryReqAt = now;
+                if (sendFrame({ t: 'market.itens', elementos: [], categoria: '' })) sentAny = true;
+            }
         }
-        sniperTracker.lastSummaryReqAt = now;
-        return sendFrame({ t: 'market.itens', elementos: [], categoria: '' });
+        if (hasPokemonRule) {
+            const pokeQueries = buildSniperPokemonQueries({
+                rules: config.sniperRules || [],
+                nowMs: now,
+                tracker: sniperTracker,
+                intervalMs,
+                force,
+            });
+            if (pokeQueries.length && sendActions(pokeQueries) > 0) sentAny = true;
+        }
+        return sentAny;
     };
     const scheduleSniperTimer = () => {
         clearSniperTimers();
@@ -4087,6 +4139,52 @@ export function createHeadlessController(options = {}) {
                         sniperRetentionTimers.set(pairKey, rtTimer);
                     }
                 }
+            } else if (m.aba === 'vitrine' && Array.isArray(m.linhas)) {
+                const stateNow = merger.getState();
+                if (config.sniperEnabled && !config.economyPingOnly) {
+                    const evalRes = evaluateSniperPokemonListings({
+                        linhas: m.linhas,
+                        rules: config.sniperRules || [],
+                        state: stateNow,
+                        config,
+                        tracker: sniperTracker,
+                        syncedNowMs: getSyncedNowMs(),
+                    });
+                    for (const [rId, st] of Object.entries(evalRes.matchedRuleStats || {})) {
+                        sniperPokemonStats[rId] = st;
+                    }
+                    if (evalRes.actions.length) sendActions(evalRes.actions);
+                    for (const lg of evalRes.logs) pushLog(lg.kind || 'reward', lg.text);
+                    for (const hit of evalRes.hits) {
+                        sniperRecentHits.unshift(hit);
+                        if (sniperRecentHits.length > 25) sniperRecentHits.pop();
+                    }
+                    if (evalRes.purchases.length > 0) {
+                        const updatedRules = (config.sniperRules || []).map((r) => {
+                            const delta = evalRes.purchases
+                                .filter((p) => p.ruleId === r.id)
+                                .reduce((sum, p) => sum + Number(p.qty || 0), 0);
+                            return delta > 0 ? { ...r, boughtQty: Number(r.boughtQty || 0) + delta } : r;
+                        });
+                        config = normalizeConfigPatch(config, { sniperRules: updatedRules });
+                        persistConfig(configPath, config);
+                    }
+                    if (evalRes.recheckAtMs != null && evalRes.recheckRule) {
+                        const pkKey = `pk:${evalRes.recheckRule.id}`;
+                        const oldTimer = sniperRetentionTimers.get(pkKey);
+                        if (oldTimer) clearTimeout(oldTimer);
+                        const delayMs = Math.max(250, Math.min(60_000, evalRes.recheckAtMs - getSyncedNowMs()));
+                        const recheckRuleSnapshot = evalRes.recheckRule;
+                        const rtTimer = setTimeout(() => {
+                            sniperRetentionTimers.delete(pkKey);
+                            if (!disposed && (status === 'connected' || status === 'bridge')) {
+                                sendFrame(buildPokemonListingFrame(recheckRuleSnapshot));
+                            }
+                        }, delayMs);
+                        rtTimer.unref?.();
+                        sniperRetentionTimers.set(pkKey, rtTimer);
+                    }
+                }
             }
             return;
         }
@@ -5436,12 +5534,32 @@ export function createHeadlessController(options = {}) {
             .slice(0, 150);
 
         const enrichedSniperRules = (config.sniperRules || []).map((r) => {
+            if (r.kind === 'pokemon') {
+                const st = sniperPokemonStats[r.id] || null;
+                return { ...r, currentMinPrice: st ? st.minPrice : null, avgPrice: null };
+            }
             const sum = marketSummary?.[r.itemId] || marketSummary?.[String(r.itemId)] || null;
             const currentMinPrice = sum ? (r.currency === 'orb' ? (sum.minOrb ?? null) : (sum.minGold ?? null)) : null;
             const avgRaw = marketMedias?.[r.itemId] || marketMedias?.[String(r.itemId)] || null;
             const avgPrice = avgRaw ? (r.currency === 'orb' ? (avgRaw.orb ?? null) : (avgRaw.gold ?? null)) : null;
             return { ...r, currentMinPrice, avgPrice };
         });
+
+        const speciesById = new Map();
+        for (const [idStr, nm] of Object.entries(catalog.pokemonNames || {})) {
+            const idNum = Number(idStr);
+            if (Number.isInteger(idNum) && idNum > 0 && nm) speciesById.set(idNum, String(nm));
+        }
+        for (const p of state?.pokemons || []) {
+            const spId = Number(p?.speciesId ?? p?.pokeId ?? 0);
+            const nm = p?.nome || p?.name;
+            if (Number.isInteger(spId) && spId > 0 && nm && !speciesById.has(spId)) {
+                speciesById.set(spId, String(nm));
+            }
+        }
+        const marketSpecies = [...speciesById.entries()]
+            .map(([id, name]) => ({ id, name }))
+            .sort((a, b) => a.name.localeCompare(b.name));
 
         return {
             version: APP_VERSION,
@@ -5470,6 +5588,7 @@ export function createHeadlessController(options = {}) {
                 rules: enrichedSniperRules,
                 recentHits: sniperRecentHits,
                 marketItems: catalog.marketItems || [],
+                marketSpecies,
             },
             session: session ? {
                 nick: session.nick,

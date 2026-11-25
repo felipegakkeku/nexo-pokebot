@@ -301,7 +301,7 @@ export function evaluateSniperSummary({
     const seenPair = new Set();
 
     for (const rule of rules) {
-        if (!rule || rule.enabled === false) continue;
+        if (!rule || rule.enabled === false || rule.kind === 'pokemon') continue;
         const itemId = Number(rule.itemId);
         if (!Number.isInteger(itemId) || itemId <= 0) continue;
         const maxQty = Math.max(0, Math.floor(Number(rule.maxQty || 0) || 0));
@@ -354,7 +354,7 @@ export function evaluateSniperItemListings({
     const currencyLabel = currency === 'orb' ? 'gemas' : 'gold';
 
     const activeRules = (Array.isArray(rules) ? rules : []).filter((r) => {
-        if (!r || r.enabled === false) return false;
+        if (!r || r.enabled === false || r.kind === 'pokemon') return false;
         if (Number(r.itemId) !== cleanId) return false;
         if ((r.currency === 'orb' ? 'orb' : 'gold') !== currency) return false;
         const maxQty = Math.max(0, Math.floor(Number(r.maxQty || 0) || 0));
@@ -497,4 +497,303 @@ export function evaluateSniperItemListings({
     }
 
     return { actions, logs, hits, purchases, recheckAtMs };
+}
+
+/**
+ * Monta o payload oficial `market.listar` para consultar uma regra de snipe de Pokémon.
+ * @param {object} rule Regra de Pokémon configurada na HUD.
+ * @returns {object} Payload pronto para envio no WebSocket.
+ */
+export function buildPokemonListingFrame(rule) {
+    const speciesId = Math.max(0, Math.floor(Number(rule?.speciesId || 0) || 0));
+    const speciesName = typeof rule?.speciesName === 'string' ? rule.speciesName.trim() : '';
+    const minLevel = Math.max(1, Math.floor(Number(rule?.minLevel || 1) || 1));
+    const maxLevel = Math.max(0, Math.floor(Number(rule?.maxLevel || 0) || 0));
+    const maxPrice = Math.max(1, Math.floor(Number(rule?.maxPrice || 1) || 1));
+    return {
+        t: 'market.listar',
+        tipo: 'pokemon',
+        moeda: rule?.currency === 'orb' ? 'orb' : 'gold',
+        busca: speciesId === 0 && speciesName ? speciesName : '',
+        ordem: 'baratos',
+        criterios: [],
+        elementos: [],
+        tiposUnidos: true,
+        categoria: '',
+        soShiny: Boolean(rule?.onlyShiny),
+        soP5: false,
+        soMega: false,
+        soLendario: false,
+        soTmElemental: false,
+        soTmAoe: false,
+        semOutland: false,
+        nivelMin: String(minLevel),
+        nivelMax: maxLevel > 0 ? String(maxLevel) : '',
+        precoMin: '',
+        precoMax: String(maxPrice),
+        pagina: 0,
+        especieId: speciesId,
+    };
+}
+
+/**
+ * Gera comandos `market.listar` deduplicados para as regras ativas de Pokémon no Sniper.
+ * @param {object} params Contexto com rules, nowMs, tracker, intervalMs e force.
+ * @returns {Array<object>} Comandos `market.listar` (máximo 5 por rodada).
+ */
+export function buildSniperPokemonQueries({
+    rules = [],
+    nowMs = Date.now(),
+    tracker = {},
+    intervalMs = 30_000,
+    force = false,
+} = {}) {
+    tracker.pokeQueryAt ??= {};
+    if (!Array.isArray(rules) || rules.length === 0) return [];
+
+    const cooldownMs = Math.max(8_000, Number(intervalMs) || 30_000);
+    const commands = [];
+    const seen = new Set();
+
+    for (const rule of rules) {
+        if (!rule || rule.kind !== 'pokemon' || rule.enabled === false) continue;
+        const maxPrice = Number(rule.maxPrice || 0);
+        if (!Number.isFinite(maxPrice) || maxPrice <= 0) continue;
+        const maxQty = Math.max(0, Math.floor(Number(rule.maxQty || 0) || 0));
+        const boughtQty = Math.max(0, Math.floor(Number(rule.boughtQty || 0) || 0));
+        if (maxQty > 0 && boughtQty >= maxQty) continue;
+
+        const currency = rule.currency === 'orb' ? 'orb' : 'gold';
+        const speciesId = Math.max(0, Math.floor(Number(rule.speciesId || 0) || 0));
+        const speciesNameLow = String(rule.speciesName || '').trim().toLowerCase();
+        const minLevel = Math.max(1, Math.floor(Number(rule.minLevel || 1) || 1));
+        const maxLevel = Math.max(0, Math.floor(Number(rule.maxLevel || 0) || 0));
+        const onlyShiny = rule.onlyShiny ? 1 : 0;
+        const key = `${currency}:${speciesId}:${speciesNameLow}:${minLevel}:${maxLevel}:${Math.round(maxPrice)}:${onlyShiny}`;
+        if (seen.has(key)) continue;
+
+        if (!force && nowMs - (tracker.pokeQueryAt[key] || 0) < cooldownMs) continue;
+        tracker.pokeQueryAt[key] = nowMs;
+        seen.add(key);
+        commands.push(buildPokemonListingFrame(rule));
+        if (commands.length >= 5) break;
+    }
+
+    return commands;
+}
+
+function pokemonMatchesSniperRule(rule, { currency, price, level, speciesId, pokeName, isShiny }) {
+    const ruleCurrency = rule.currency === 'orb' ? 'orb' : 'gold';
+    if (ruleCurrency !== currency) return false;
+    if (price > Number(rule.maxPrice || 0)) return false;
+
+    const minLevel = Math.max(1, Math.floor(Number(rule.minLevel || 1) || 1));
+    const maxLevel = Math.max(0, Math.floor(Number(rule.maxLevel || 0) || 0));
+    if (level < minLevel) return false;
+    if (maxLevel > 0 && level > maxLevel) return false;
+    if (rule.onlyShiny && !isShiny) return false;
+
+    const wantedSpeciesId = Math.max(0, Math.floor(Number(rule.speciesId || 0) || 0));
+    const wantedName = String(rule.speciesName || '').trim().toLowerCase();
+    if (wantedSpeciesId > 0) {
+        if (speciesId > 0) {
+            if (speciesId !== wantedSpeciesId) return false;
+        } else if (wantedName && !pokeName.toLowerCase().includes(wantedName)) {
+            return false;
+        } else if (!wantedName) {
+            return false;
+        }
+    } else if (wantedName && !pokeName.toLowerCase().includes(wantedName)) {
+        return false;
+    }
+
+    return true;
+}
+
+/**
+ * Avalia anúncios de Pokémon retornados na vitrine (`aba === 'vitrine'`) contra as regras
+ * configuradas por nível, espécie opcional, shiny opcional, reservas e retenção.
+ * @param {object} params Contexto com linhas, rules, state, config, tracker e syncedNowMs.
+ * @returns {{ actions: Array<object>, logs: Array<{kind: string, text: string}>, hits: Array<object>, purchases: Array<object>, recheckAtMs: number|null, recheckRule: object|null, matchedRuleStats: object }}
+ */
+export function evaluateSniperPokemonListings({
+    linhas = [],
+    rules = [],
+    state = null,
+    config = {},
+    tracker = {},
+    syncedNowMs = Date.now(),
+} = {}) {
+    tracker.alertedListings ??= new Map();
+    tracker.attemptedListings ??= new Map();
+    tracker.retentionNotified ??= new Map();
+
+    const activeRules = (Array.isArray(rules) ? rules : []).filter((r) => {
+        if (!r || r.kind !== 'pokemon' || r.enabled === false) return false;
+        const maxQty = Math.max(0, Math.floor(Number(r.maxQty || 0) || 0));
+        const boughtQty = Math.max(0, Math.floor(Number(r.boughtQty || 0) || 0));
+        return maxQty === 0 || boughtQty < maxQty;
+    });
+
+    if (activeRules.length === 0 || !Array.isArray(linhas) || linhas.length === 0) {
+        return {
+            actions: [],
+            logs: [],
+            hits: [],
+            purchases: [],
+            recheckAtMs: null,
+            recheckRule: null,
+            matchedRuleStats: {},
+        };
+    }
+
+    const pokeListings = linhas
+        .filter((a) => a && a.tipo === 'pokemon' && a.id != null)
+        .sort((a, b) => Number(a.preco || 0) - Number(b.preco || 0));
+
+    const goldReserve = Math.max(0, Math.floor(Number(config?.sniperMinGoldReserve || 0) || 0));
+    const orbReserve = Math.max(0, Math.floor(Number(config?.sniperMinOrbsReserve || 0) || 0));
+    const availableByCurrency = {
+        gold: Math.max(0, Math.floor(Number(state?.gold ?? 0) || 0) - goldReserve),
+        orb: Math.max(0, Math.floor(Number(state?.orbs ?? 0) || 0) - orbReserve),
+    };
+
+    if (tracker.alertedListings.size > 200) {
+        for (const [k, ts] of tracker.alertedListings) {
+            if (syncedNowMs - ts > 600_000) tracker.alertedListings.delete(k);
+        }
+    }
+    if (tracker.attemptedListings.size > 200) {
+        for (const [k, ts] of tracker.attemptedListings) {
+            if (syncedNowMs - ts > 120_000) tracker.attemptedListings.delete(k);
+        }
+    }
+
+    const actions = [];
+    const logs = [];
+    const hits = [];
+    const purchases = [];
+    const matchedRuleStats = {};
+    let recheckAtMs = null;
+    let recheckRule = null;
+
+    const simulatedBought = new Map(activeRules.map((r) => [r.id, Math.max(0, Math.floor(Number(r.boughtQty || 0) || 0))]));
+
+    for (const listing of pokeListings) {
+        const price = Number(listing.preco || 0);
+        if (!Number.isFinite(price) || price <= 0) continue;
+        if (listing.vendedorId != null && state?.id != null && Number(listing.vendedorId) === Number(state.id)) {
+            continue;
+        }
+
+        const ficha = listing.ficha && typeof listing.ficha === 'object' ? listing.ficha : {};
+        const level = Math.max(0, Math.floor(Number(ficha.level ?? ficha.nivel ?? listing.level ?? listing.nivel ?? 0) || 0));
+        const speciesId = Math.max(0, Math.floor(Number(ficha.speciesId ?? ficha.pokeId ?? listing.speciesId ?? listing.especieId ?? 0) || 0));
+        const pokeName = String(ficha.nome || listing.nome || (speciesId > 0 ? `#${speciesId}` : 'Pokémon'));
+        const isShiny = Boolean(ficha.shiny ?? listing.shiny);
+        const currency = listing.moeda === 'orb' ? 'orb' : 'gold';
+        const currencyLabel = currency === 'orb' ? 'gemas' : 'gold';
+
+        let matchedRule = null;
+        for (const r of activeRules) {
+            if (!pokemonMatchesSniperRule(r, { currency, price, level, speciesId, pokeName, isShiny })) continue;
+            const prevStat = matchedRuleStats[r.id];
+            if (!prevStat || price < prevStat.minPrice) {
+                matchedRuleStats[r.id] = { minPrice: price, bestLevel: level };
+            }
+            const maxQty = Math.max(0, Math.floor(Number(r.maxQty || 0) || 0));
+            const curBought = simulatedBought.get(r.id) || 0;
+            if (maxQty > 0 && curBought >= maxQty) continue;
+            matchedRule = r;
+            break;
+        }
+        if (!matchedRule) continue;
+
+        const shinyTag = isShiny ? '★ ' : '';
+        const compravelEm = Number(listing.compravelEm || 0);
+        if (compravelEm > syncedNowMs) {
+            const candidateRecheck = compravelEm + 150;
+            if (recheckAtMs == null || candidateRecheck < recheckAtMs) {
+                recheckAtMs = candidateRecheck;
+                recheckRule = matchedRule;
+            }
+            if (tracker.retentionNotified.get(listing.id) !== compravelEm) {
+                tracker.retentionNotified.set(listing.id, compravelEm);
+                const waitSec = Math.max(1, Math.ceil((compravelEm - syncedNowMs) / 1000));
+                logs.push({
+                    kind: 'info',
+                    text: `Sniper Pokémon: ${shinyTag}${pokeName} Nv ${level} por ${price.toLocaleString('pt-BR')} ${currencyLabel} em retenção (libera em ${waitSec}s).`,
+                });
+            }
+            continue;
+        }
+
+        const seller = listing.vendedor || 'Desconhecido';
+        if (!matchedRule.autoBuy) {
+            const prevAlertTs = tracker.alertedListings.get(listing.id) || 0;
+            if (syncedNowMs - prevAlertTs >= 120_000) {
+                tracker.alertedListings.set(listing.id, syncedNowMs);
+                const hit = {
+                    ts: syncedNowMs,
+                    kind: 'pokemon',
+                    listingId: listing.id,
+                    speciesId,
+                    itemName: pokeName,
+                    level,
+                    shiny: isShiny,
+                    qty: 1,
+                    price,
+                    currency,
+                    seller,
+                    bought: false,
+                };
+                hits.push(hit);
+                logs.push({
+                    kind: 'reward',
+                    text: `Sniper Pokémon encontrou: ${shinyTag}${pokeName} Nv ${level} por ${price.toLocaleString('pt-BR')} ${currencyLabel} (${seller}).`,
+                });
+            }
+            continue;
+        }
+
+        const prevAttempt = tracker.attemptedListings.get(listing.id) || 0;
+        if (syncedNowMs - prevAttempt < 30_000) continue;
+        if (availableByCurrency[currency] < price) continue;
+
+        availableByCurrency[currency] -= price;
+        const curBought = simulatedBought.get(matchedRule.id) || 0;
+        simulatedBought.set(matchedRule.id, curBought + 1);
+        tracker.attemptedListings.set(listing.id, syncedNowMs);
+
+        actions.push({
+            t: 'market.comprar',
+            id: listing.id,
+            qtd: 1,
+            preco: price,
+            moeda: currency,
+        });
+        const purchase = {
+            ts: syncedNowMs,
+            kind: 'pokemon',
+            ruleId: matchedRule.id,
+            listingId: listing.id,
+            speciesId,
+            itemName: pokeName,
+            level,
+            shiny: isShiny,
+            qty: 1,
+            price,
+            currency,
+            seller,
+            bought: true,
+        };
+        purchases.push(purchase);
+        hits.push(purchase);
+        logs.push({
+            kind: 'reward',
+            text: `Sniper Pokémon comprou: ${shinyTag}${pokeName} Nv ${level} por ${price.toLocaleString('pt-BR')} ${currencyLabel} (${seller}).`,
+        });
+    }
+
+    return { actions, logs, hits, purchases, recheckAtMs, recheckRule, matchedRuleStats };
 }

@@ -8,6 +8,8 @@ import {
     evaluateTrainerPlan,
     evaluateSniperSummary,
     evaluateSniperItemListings,
+    buildSniperPokemonQueries,
+    evaluateSniperPokemonListings,
 } from '../src/headless/trainer-sniper.mjs';
 import { createHeadlessController } from '../src/headless/gui-server.mjs';
 
@@ -223,6 +225,173 @@ test('gui: bridge WS integra Treinador Exp. Share e Sniper de Itens ponta a pont
             const snap = controller.getSnapshot({ includeHunts: false });
             assert.equal(snap.sniper.rules[0].boughtQty, 2);
             assert.equal(snap.sniper.recentHits.length, 1);
+        } finally {
+            controller.stop();
+        }
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('sniper pokemon: filtra por nivel, especie, shiny, retencao, reserva e anuncio proprio', () => {
+    const tracker = {};
+    const rules = [
+        {
+            id: 'pk1',
+            kind: 'pokemon',
+            speciesId: 0,
+            speciesName: '',
+            minLevel: 200,
+            maxLevel: 500,
+            onlyShiny: false,
+            currency: 'gold',
+            maxPrice: 300_000,
+            maxQty: 1,
+            boughtQty: 0,
+            autoBuy: true,
+            enabled: true,
+        },
+        {
+            id: 'pk2',
+            kind: 'pokemon',
+            speciesId: 150,
+            speciesName: 'Mewtwo',
+            minLevel: 100,
+            maxLevel: 0,
+            onlyShiny: true,
+            currency: 'orb',
+            maxPrice: 50,
+            maxQty: 1,
+            boughtQty: 0,
+            autoBuy: false,
+            enabled: true,
+        },
+    ];
+
+    const queries = buildSniperPokemonQueries({ rules, nowMs: 10_000, tracker, intervalMs: 30_000, force: true });
+    assert.equal(queries.length, 2);
+    assert.equal(queries[0].t, 'market.listar');
+    assert.equal(queries[0].tipo, 'pokemon');
+    assert.equal(queries[0].nivelMin, '200');
+    assert.equal(queries[0].nivelMax, '500');
+    assert.equal(queries[0].precoMax, '300000');
+    assert.equal(queries[0].especieId, 0);
+    assert.equal(queries[1].soShiny, true);
+    assert.equal(queries[1].especieId, 150);
+
+    const queriesCooldown = buildSniperPokemonQueries({ rules, nowMs: 15_000, tracker, intervalMs: 30_000, force: false });
+    assert.equal(queriesCooldown.length, 0);
+
+    const state = { id: 7, gold: 400_000, orbs: 100 };
+    const cfg = { sniperMinGoldReserve: 150_000, sniperMinOrbsReserve: 0 }; // gold disp = 250k
+    const syncedNowMs = 1_700_000_000_000;
+    const linhas = [
+        { tipo: 'pokemon', id: 'p_meu', vendedorId: 7, vendedor: 'Eu', preco: 100_000, moeda: 'gold', ficha: { speciesId: 6, nome: 'Charizard', level: 300 } },
+        { tipo: 'pokemon', id: 'p_lvl_baixo', vendedorId: 11, vendedor: 'Joao', preco: 50_000, moeda: 'gold', ficha: { speciesId: 6, nome: 'Charizard', level: 199 } },
+        { tipo: 'pokemon', id: 'p_retido', vendedorId: 12, vendedor: 'Maria', preco: 180_000, moeda: 'gold', compravelEm: syncedNowMs + 6_000, ficha: { speciesId: 149, nome: 'Dragonite', level: 250 } },
+        { tipo: 'pokemon', id: 'p_ok', vendedorId: 13, vendedor: 'Lucas', preco: 220_000, moeda: 'gold', ficha: { speciesId: 248, nome: 'Tyranitar', level: 320 } },
+        { tipo: 'pokemon', id: 'p_mew_nao_shiny', vendedorId: 14, vendedor: 'Ana', preco: 20, moeda: 'orb', ficha: { speciesId: 150, nome: 'Mewtwo', level: 150, shiny: false } },
+        { tipo: 'pokemon', id: 'p_mew_shiny', vendedorId: 15, vendedor: 'Bia', preco: 45, moeda: 'orb', ficha: { speciesId: 150, nome: 'Mewtwo', level: 180, shiny: true } },
+    ];
+
+    const res = evaluateSniperPokemonListings({ linhas, rules, state, config: cfg, tracker, syncedNowMs });
+    assert.deepEqual(res.actions, [{ t: 'market.comprar', id: 'p_ok', qtd: 1, preco: 220_000, moeda: 'gold' }]);
+    assert.equal(res.purchases.length, 1);
+    assert.equal(res.purchases[0].itemName, 'Tyranitar');
+    assert.equal(res.purchases[0].level, 320);
+    assert.equal(res.recheckAtMs, syncedNowMs + 6_150);
+    assert.equal(res.recheckRule?.id, 'pk1');
+    // p_mew_shiny disparou alerta (autoBuy: false)
+    assert.ok(res.hits.some((h) => h.listingId === 'p_mew_shiny' && h.bought === false && h.shiny === true));
+});
+
+test('gui: bridge WS integra Sniper de Pokemon por nivel ponta a ponta', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pokebot-pk-sn-'));
+    try {
+        const sentFrames = [];
+        let fakeWs = null;
+        const controller = createHeadlessController({
+            cwd: dir,
+            autoLoginOnMissingSession: false,
+            disableBrowserProfileSync: true,
+            liveRunner: async () => {},
+            liveDisposer: () => {},
+            resolveSession: () => ({
+                nick: 'Gake',
+                token: 'tok',
+                provedor: 'google',
+                dispositivo: 'uuid-test-2',
+                payload: { nick: 'Gake', contaId: 1, provedor: 'google', exp: Date.now() + 3_600_000 },
+                source: 'cache',
+                cachePath: join(dir, 'sess.json'),
+            }),
+            wsFactory: () => {
+                fakeWs = {
+                    readyState: 1,
+                    send(raw) { sentFrames.push(JSON.parse(raw)); },
+                    close() { this.readyState = 3; this.onclose?.({ code: 1000 }); },
+                };
+                queueMicrotask(() => {
+                    fakeWs.onopen?.();
+                    fakeWs.onmessage?.({
+                        data: JSON.stringify({
+                            t: 'welcome',
+                            especies: [{ id: 248, nome: 'Tyranitar' }],
+                            estado: {
+                                cheio: true,
+                                id: 1,
+                                nick: 'Gake',
+                                level: 50,
+                                gold: 800_000,
+                                orbs: 10,
+                                activeId: 10,
+                                pokemons: [{ id: 10, speciesId: 6, nome: 'Charizard', level: 200, slot: 0 }],
+                            },
+                        }),
+                    });
+                });
+                return fakeWs;
+            },
+        });
+        try {
+            await controller.start();
+            await new Promise((r) => setTimeout(r, 30));
+            controller.updateConfig({
+                sniperEnabled: true,
+                sniperRules: [{
+                    id: 'pk_lvl300',
+                    kind: 'pokemon',
+                    speciesId: 0,
+                    speciesName: '',
+                    minLevel: 300,
+                    maxLevel: 0,
+                    onlyShiny: false,
+                    currency: 'gold',
+                    maxPrice: 500_000,
+                    maxQty: 1,
+                    autoBuy: true,
+                    enabled: true,
+                }],
+            });
+            await new Promise((r) => setTimeout(r, 20));
+            assert.ok(sentFrames.some((f) => f.t === 'market.listar' && f.tipo === 'pokemon' && f.nivelMin === '300' && f.precoMax === '500000'));
+
+            fakeWs.onmessage?.({
+                data: JSON.stringify({
+                    t: 'market',
+                    aba: 'vitrine',
+                    linhas: [
+                        { tipo: 'pokemon', id: 'pk_low', vendedorId: 88, vendedor: 'Seller1', preco: 200_000, moeda: 'gold', ficha: { speciesId: 248, nome: 'Tyranitar', level: 250 } },
+                        { tipo: 'pokemon', id: 'pk_hit', vendedorId: 89, vendedor: 'Seller2', preco: 420_000, moeda: 'gold', ficha: { speciesId: 248, nome: 'Tyranitar', level: 350 } },
+                    ],
+                }),
+            });
+            assert.ok(sentFrames.some((f) => f.t === 'market.comprar' && f.id === 'pk_hit' && f.qtd === 1 && f.preco === 420_000 && f.moeda === 'gold'));
+            const snap = controller.getSnapshot({ includeHunts: false });
+            assert.equal(snap.sniper.rules[0].boughtQty, 1);
+            assert.equal(snap.sniper.recentHits.length, 1);
+            assert.equal(snap.sniper.recentHits[0].kind, 'pokemon');
+            assert.equal(snap.sniper.recentHits[0].level, 350);
         } finally {
             controller.stop();
         }

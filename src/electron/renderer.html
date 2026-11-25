@@ -586,8 +586,17 @@
                 <div class="field"><label for="cSniperMinOrbs">Reserva Gemas</label><input type="number" id="cSniperMinOrbs" min="0" step="10" value="0" /></div>
               </div>
               <div class="sniper-add-row">
+                <select id="sniperTargetKind" aria-label="Tipo de alvo">
+                  <option value="item">Item</option>
+                  <option value="pokemon">Pokémon</option>
+                </select>
                 <input type="text" id="sniperItemInput" list="sniperItemsList" placeholder="Item (ex: Fire Stone ou Ovo Shiny)" spellcheck="false" aria-label="Nome do item no mercado" />
                 <datalist id="sniperItemsList"></datalist>
+                <input type="text" id="sniperPokeInput" class="hidden" list="sniperSpeciesList" placeholder="Pokémon (vazio = qualquer)" spellcheck="false" aria-label="Espécie do Pokémon (opcional)" />
+                <datalist id="sniperSpeciesList"></datalist>
+                <input type="number" id="sniperMinLevel" class="hidden sniper-lvl-input" min="1" max="10000" step="10" placeholder="Nv mín." title="Nível mínimo do Pokémon" aria-label="Nível mínimo" />
+                <input type="number" id="sniperMaxLevel" class="hidden sniper-lvl-input" min="0" max="10000" step="10" placeholder="Nv máx." title="Nível máximo opcional (0 = sem limite)" aria-label="Nível máximo" />
+                <label class="pill-chk hidden" id="sniperOnlyShinyWrap"><input type="checkbox" id="sniperOnlyShiny" /> Só Shiny</label>
                 <select id="sniperCurrency" aria-label="Moeda">
                   <option value="gold">Gold</option>
                   <option value="orb">Gemas</option>
