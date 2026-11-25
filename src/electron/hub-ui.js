@@ -118,13 +118,13 @@
           <div class="hero xp" title="XP do Pokémon por hora desde o início da sessão. A curva mostra o ritmo a cada 30 s.">
             <div class="hero-top"><span class="hero-lbl">${IC('zap')}XP por hora</span>${trendHtml(trendOf(acc, 'xpRate'))}</div>
             <div class="hero-val">${fmtCompact(st.xpPerHour)}</div>
-            <div class="hero-sub">${fmtCompact(st.xpGained)} XP na sessão · treinador ${fmtCompact(st.xpTrainerPerHour)}/h</div>
+            <div class="hero-sub">Treinador ${fmtCompact(st.xpTrainerPerHour)}/h</div>
             ${sparkSvg(xpVals, 'xp')}
           </div>
           <div class="hero gold ${gold < 0 ? 'neg' : 'pos'}" title="Ouro ganho menos o gasto em itens, por hora.">
             <div class="hero-top"><span class="hero-lbl">${IC('coins')}Lucro por hora</span>${trendHtml(trendOf(acc, 'goldRate'))}</div>
             <div class="hero-val">${signed(gold)}</div>
-            <div class="hero-sub">${signed(st.netGold)} na sessão · gasto ${fmtCompact(st.spentGold)}</div>
+            <div class="hero-sub">Bruto +${fmtCompact(st.goldGained)} · gasto ${fmtCompact(st.spentGold)}</div>
             ${sparkSvg(goldVals, gold < 0 ? 'neg' : 'gold')}
           </div>
           <div class="hero shiny${missed ? ' has-miss' : ''}" title="Shinies capturados e vistos nesta sessão.">
@@ -202,6 +202,17 @@
     }
 
     // ===== S7: painel vivo no lugar do aviso de Headless =====
+    // O que entra em "Últimos eventos": a pessoa escolhe (fica salvo).
+    const EV_FILTERS = [
+        { id: 'catch', label: 'Capturas', kinds: ['catch'] },
+        { id: 'shiny', label: 'Shiny', kinds: ['shiny', 'shiny-miss'] },
+        { id: 'reward', label: 'Drops e bônus', kinds: ['reward'] },
+        { id: 'farm', label: 'Hunt e loja', kinds: ['hunt', 'shop', 'prey'] },
+        { id: 'live', label: 'Lives', kinds: ['live'] },
+        { id: 'alert', label: 'Avisos', kinds: ['warn', 'error'] },
+    ];
+    let evFilter = LS.get('nexo.stageEvFilter', ['catch', 'shiny', 'reward', 'alert']);
+    if (!Array.isArray(evFilter)) evFilter = ['catch', 'shiny', 'reward', 'alert'];
     const STAGE_HTML = `
       <div class="sl-hero">
         <div class="sl-poke">
@@ -210,7 +221,7 @@
           <div class="sl-poke-hp"></div>
         </div>
         <div class="sl-main">
-          <div class="sl-title"><span class="acc-dot"></span><b class="sl-nick"></b><span class="sl-pill"></span></div>
+          <div class="sl-title"><span class="acc-dot"></span><span class="sl-pill"></span></div>
           <div class="sl-hunt"></div>
           <div class="sl-kpis">
             <div class="sl-kpi xp"><span>${IC('zap')}XP/h</span><b data-k="xp"></b><i data-k="xpSpark"></i></div>
@@ -221,22 +232,33 @@
         </div>
       </div>
       <div class="sl-bottom">
-        <div class="sl-col"><h4>${IC('activity')}Últimos eventos</h4><ul class="sl-events"></ul></div>
-        <div class="sl-col sl-side">
-          <h4>${IC('tv')}Buffs das lives</h4><div class="sl-buffs lb-box"></div>
-          <h4>${IC('package')}Drops da sessão</h4><div class="sl-drops"></div>
+        <div class="sl-col">
+          <div class="sl-ev-head"><h4>${IC('activity')}Últimos eventos</h4><div class="sl-ev-filter" role="group" aria-label="O que aparece aqui">${EV_FILTERS.map((f) => `<button type="button" data-ev-f="${f.id}" aria-pressed="false">${f.label}</button>`).join('')}</div></div>
+          <ul class="sl-events"></ul>
         </div>
       </div>`;
-    const IMPORTANT_KINDS = new Set(['shiny', 'shiny-miss', 'live', 'reward', 'error', 'warn', 'ok']);
     const MISS_BALL_LABELS = { 1: 'Poke Ball', 2: 'Great Ball', 3: 'Super Ball', 4: 'Ultra Ball', 5: 'Beast Ball' };
     function recentEvents(acc, n) {
         const logs = snapshots[acc]?.logs || [];
+        const kinds = new Set(EV_FILTERS.filter((f) => evFilter.includes(f.id)).flatMap((f) => f.kinds));
         const out = [];
         for (let i = logs.length - 1; i >= 0 && out.length < n; i--) {
-            if (IMPORTANT_KINDS.has(logs[i].kind)) out.push(logs[i]);
+            if (kinds.has(classifyLogEntry(logs[i]).vKind)) out.push(logs[i]);
         }
         return out;
     }
+    document.addEventListener('click', (ev) => {
+        const b = ev.target.closest?.('[data-ev-f]');
+        if (!b) return;
+        const id = b.dataset.evF;
+        evFilter = evFilter.includes(id) ? evFilter.filter((x) => x !== id) : [...evFilter, id];
+        LS.set('nexo.stageEvFilter', evFilter);
+        for (const acc of ACCOUNTS) {
+            const ul = $(`stageLive-${acc}`)?.querySelector('.sl-events');
+            if (ul) ul.dataset.sig = '';
+            renderStageLive(acc);
+        }
+    });
     function renderStageLive(acc) {
         const host = $(`stageLive-${acc}`);
         const ph = $(`wv-ph-${acc}`);
@@ -261,7 +283,7 @@
         const poke = s.activePokemon;
         const hunt = s.trainer?.huntName && s.trainer.huntName !== '-' ? s.trainer.huntName : '';
         q('.acc-dot').className = `acc-dot ${status}`;
-        q('.sl-nick').textContent = `Conta ${acc} · ${nickOf(acc)}`;
+        host.querySelectorAll('[data-ev-f]').forEach((b) => b.setAttribute('aria-pressed', evFilter.includes(b.dataset.evF) ? 'true' : 'false'));
         q('.sl-pill').textContent = status === 'connected' ? 'Farmando em Headless' : (STATUS_LABELS[status] || status);
         q('.sl-pill').className = `sl-pill ${status}`;
         q('.sl-hunt').textContent = [hunt ? `Hunt ${hunt}` : 'Sem hunt', s.trainer?.level ? `Nv ${s.trainer.level}` : '', s.trainer?.gold != null ? `${fmtCompact(s.trainer.gold)} gold` : '', s.huntGuide?.note ? `/hunt: ${s.huntGuide.note}` : ''].filter(Boolean).join(' · ');
@@ -282,15 +304,9 @@
         set('killsSub', `${String(st.killsPerMin || 0).replace('.', ',')}/min · ${st.avgKillSec ? `${String(st.avgKillSec).replace('.', ',')}s cada` : '-'}`);
         set('shiny', `${Number(st.shiniesCaptured || 0)}<small> / ${Number(st.shiniesSeen || 0)}</small>`);
         set('shinySub', Number(st.shiniesMissed || 0) ? `${st.shiniesMissed} escaparam` : `${fmtCompact(st.captures)} capturas`);
-        const bbox = q('.sl-buffs');
-        const bHtml = buffsHtml(acc, true);
-        if (bbox.dataset.sig !== bHtml) { bbox.dataset.sig = bHtml; bbox.innerHTML = bHtml || '<span class="hint-text">Sem dados das lives ainda.</span>'; }
         const evs = recentEvents(acc, 40);
         const evSig = evs.map((e) => e.id).join(',') + Math.floor(Date.now() / 30_000);
         const ul = q('.sl-events');
-        if (evs.length) {
-            // já tratamos abaixo com classifyLogEntry
-        }
         const accColor = window.nexoIcons?.accountAccent?.(acc) || 'azul';
         if (ul.dataset.sig !== `${evSig}|${accColor}`) {
             ul.dataset.sig = `${evSig}|${accColor}`;
@@ -299,16 +315,7 @@
                     const meta = classifyLogEntry(e);
                     return `<li class="ev ${esc(meta.vKind)}" data-acc="${acc}" data-acc-color="${esc(accColor)}">${IC(meta.icon)}<span class="ev-text">${escapeHtml(meta.cleanText)}</span><time title="${clockOf(e.ts)}">${relTime(e.ts)}</time></li>`;
                 }).join('')
-                : '<li class="ev empty">Nada importante ainda.</li>';
-        }
-        const drops = (s.drops?.featured || []).filter((d) => d.qty > 0).slice(0, 6);
-        const dropSig = drops.map((d) => `${d.key}:${d.qty}`).join(',');
-        const dbox = q('.sl-drops');
-        if (dbox.dataset.sig !== dropSig || !dbox.dataset.sig) {
-            dbox.dataset.sig = dropSig || '-';
-            dbox.innerHTML = drops.length
-                ? drops.map((d) => `<span class="sl-drop${d.rare ? ' rare' : ''}" title="${esc(d.name)}: ${d.qty} na sessão (${String(d.perHour).replace('.', ',')}/h)">${IC(d.rare ? 'gift' : 'package')}<span>${escapeHtml(d.name)}</span><b>${fmtNum(d.qty)}</b></span>`).join('')
-                : `<span class="hint-text">${escapeHtml(s.drops?.focusLabel ? 'Nenhum drop ainda nesta sessão.' : 'Nenhum drop ainda nesta sessão.')}</span>`;
+                : `<li class="ev empty">${evFilter.length ? 'Nada desse tipo ainda nesta sessão.' : 'Escolha acima o que mostrar aqui.'}</li>`;
         }
     }
 
@@ -755,7 +762,7 @@
                 return `<li class="log-row ${esc(m.vKind)}" data-acc="${r.acc}" data-acc-color="${esc(accColor)}">
                 <span class="log-ico">${IC(m.icon)}</span>
                 ${state.scope === 'all' ? `<span class="log-acc" data-acc="${r.acc}" data-acc-color="${esc(accColor)}" title="${esc(`Conta ${r.acc} · ${nickOf(r.acc)}`)}">${r.acc}</span>` : ''}
-                <span class="log-text"><span class="log-cat ${esc(m.vKind)}">${escapeHtml(m.tag)}</span>${hl(m.cleanText)}${r.count > 1 ? `<span class="log-count" title="Repetiu ${r.count} vezes">×${r.count}</span>` : ''}</span>
+                <span class="log-text"><span class="log-cat ${esc(m.vKind)}">${escapeHtml(m.tag.charAt(0) + m.tag.slice(1).toLowerCase())}</span>${hl(m.cleanText)}${r.count > 1 ? `<span class="log-count" title="Repetiu ${r.count} vezes">×${r.count}</span>` : ''}</span>
                 <time class="log-time" title="${clockOf(r.ts)}${r.count > 1 ? ` (primeira às ${clockOf(r.firstTs)})` : ''}">${relTime(r.ts)}</time>
               </li>`;
             }).join('')
@@ -913,6 +920,7 @@
                 const col = document.createElement('section');
                 col.className = 'dock-col';
                 col.dataset.col = String(i);
+                col.dataset.panel = p;
                 col.innerHTML = `<header class="dock-col-head">
                     <select aria-label="Painel da coluna ${i + 1}">${PANELS.map((x) => `<option value="${x}"${x === p ? ' selected' : ''}>${PANEL_LABEL[x]}</option>`).join('')}</select>
                     <button type="button" class="icon-btn" data-col-act="popout" title="Soltar numa janela" aria-label="Soltar este painel numa janela">${IC('external')}</button>

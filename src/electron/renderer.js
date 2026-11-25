@@ -3,13 +3,13 @@
 const GAME_URL = 'https://pokeidle.io/app';
 const ACCOUNTS = [1, 2, 3, 4];
 const STATUS_LABELS = {
-    connected: 'FARMANDO',
-    bridge: 'EMBUTIDO · ON',
-    connecting: 'CONECTANDO',
-    standby: 'STANDBY',
-    paused: 'PAUSADO',
-    error: 'ERRO',
-    disconnected: 'OFFLINE',
+    connected: 'Farmando',
+    bridge: 'Embutido',
+    connecting: 'Conectando',
+    standby: 'Em espera',
+    paused: 'Pausado',
+    error: 'Erro',
+    disconnected: 'Offline',
 };
 
 let activeAccount = 1;
@@ -1745,10 +1745,6 @@ function renderActiveAccountPanel() {
     setText($('eCapKillSub'), st.killsPerCapture > 0 ? `1 a cada ${fmtDec(st.killsPerCapture)} abates` : 'sem capturas');
     setText($('eBallCap'), st.ballsPerCapture > 0 ? fmtDec(st.ballsPerCapture) : '-');
     setText($('eBallCapSub'), `${fmtDec(st.catchPerBallPct || 0)}% acerto/bola`);
-    setText($('eSpent'), `-${fmtNum(st.spentGold || 0)}`);
-    setText($('eBrutoSub'), `bruto: +${fmtNum(st.goldGained || 0)}`);
-    setText($('eShinies'), `${fmtNum(st.shiniesCaptured || 0)} / ${fmtNum(st.shiniesSeen || 0)}`);
-    setText($('eShiniesSub'), 'cap / vistos');
     setText($('eSurv'), `${fmtNum(st.heals || 0)} poções · ${fmtNum(st.revivesUsed || 0)} revives`);
     setText($('eSurvSub'), `${fmtNum(st.playerDeaths || 0)} mortes · ${fmtDec(st.potionsPerHour || 0)} poç/h`);
 
