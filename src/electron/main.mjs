@@ -1833,17 +1833,30 @@ function stopLiveWatchJobs() {
 function registerIpcHandlers() {
     ipcMain.handle('hub:get-all-snapshots', () => getAllSnapshots());
     ipcMain.handle('hub:get-perf', () => perf.read());
-    ipcMain.handle('hub:inspect-shiny', (_ev, { account, entry } = {}) => {
+    ipcMain.handle('hub:inspect-shiny', async (_ev, { account, entry } = {}) => {
         // O shiny pode ser de qualquer conta do Hub: a que tem o Pokémon responde; senão, a conta ativa.
         let fallback = null;
         for (const acc of ACCOUNT_IDS) {
             const ctrl = servers.get(acc)?.instance?.controller;
             if (!ctrl?.inspectShiny) continue;
             try {
-                const res = ctrl.inspectShiny(entry || {});
+                const res = await ctrl.inspectShiny(entry || {});
                 if (res?.found) return res;
                 if (res?.mine || (!fallback && acc === Number(account))) fallback = res;
             } catch { /* conta sem estado ainda */ }
+        }
+        // Não é de nenhuma conta: pede a ficha ao servidor pela conta ativa e, se ela estiver fora, pelas outras.
+        if (entry?.pokemonId) {
+            const order = [Number(account), ...ACCOUNT_IDS.filter((a) => a !== Number(account))];
+            for (const acc of order) {
+                const ctrl = servers.get(acc)?.instance?.controller;
+                if (!ctrl?.inspectShiny) continue;
+                try {
+                    const res = await ctrl.inspectShiny(entry, { fetchRemote: true });
+                    if (res?.found) return res;
+                    if (!fallback || acc === Number(account)) fallback = res;
+                } catch { /* conta sem conexão */ }
+            }
         }
         return fallback;
     });

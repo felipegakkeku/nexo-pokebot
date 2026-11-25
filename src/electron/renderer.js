@@ -2763,7 +2763,9 @@ function openShinyInspectCard(entry) {
             rows: [...(info?.rows || []), ...extra],
             maxRows: 16,
         }));
-        const txt = info ? info.hint : 'Buscando os dados do Pokémon...';
+        const stats = Array.isArray(info?.stats) ? info.stats : [];
+        if (stats.length) bodyEl.append(buildShinyStats(stats));
+        const txt = info ? info.hint : 'Buscando a ficha do Pokémon...';
         if (txt) {
             const hint = document.createElement('div');
             setClass(hint, 'hint-text');
@@ -2782,6 +2784,39 @@ function openShinyInspectCard(entry) {
         .catch(() => {
             if (token === openShinyInspectCard.token) paint({ rows: [], hint: 'Não consegui ler os dados agora.' });
         });
+}
+
+/** Stats atuais com a barra e o IV de cada um (1 a 32), no estilo da ficha do jogo. */
+function buildShinyStats(stats) {
+    const box = document.createElement('div');
+    setClass(box, 'shiny-stats');
+    const title = document.createElement('div');
+    setClass(title, 'shiny-stats-title');
+    const ivSum = stats.reduce((s, r) => s + (Number(r.iv) || 0), 0);
+    setText(title, stats.some((r) => r.iv != null) ? `Stats atuais · IV ${ivSum}/192` : 'Stats atuais');
+    box.append(title);
+    const top = Math.max(1, ...stats.map((r) => Number(r.value) || 0));
+    for (const r of stats) {
+        const row = document.createElement('div');
+        setClass(row, 'shiny-stat');
+        const lbl = document.createElement('span');
+        setClass(lbl, 'shiny-stat-lbl');
+        setText(lbl, r.label);
+        const bar = document.createElement('i');
+        setClass(bar, 'shiny-stat-bar');
+        const fill = document.createElement('u');
+        fill.style.width = `${Math.round(((Number(r.value) || 0) / top) * 100)}%`;
+        bar.append(fill);
+        const val = document.createElement('b');
+        setText(val, r.value != null ? String(r.value) : '-');
+        const iv = document.createElement('small');
+        const ivN = Number(r.iv);
+        setClass(iv, `shiny-stat-iv${r.iv == null ? ' none' : ivN >= 24 ? ' hi' : ivN <= 8 ? ' lo' : ''}`);
+        setText(iv, r.iv != null ? `IV ${ivN}` : '');
+        row.append(lbl, bar, val, iv);
+        box.append(row);
+    }
+    return box;
 }
 
 function buildToastCard(card) {

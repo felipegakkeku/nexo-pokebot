@@ -3359,3 +3359,15 @@ select option:checked {
 select option:disabled {
   color: var(--dim);
 }
+
+/* Ficha do shiny: stats atuais com barra e IV de cada stat. */
+.shiny-stats { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--tile); }
+.shiny-stats-title { font-size: var(--fs-xs); font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--dim); margin-bottom: 6px; }
+.shiny-stat { display: grid; grid-template-columns: 52px minmax(0, 1fr) 36px 44px; align-items: center; gap: 8px; font-size: var(--fs-sm); padding: 2px 0; }
+.shiny-stat-lbl { color: var(--text-soft); font-weight: 700; }
+.shiny-stat-bar { display: block; height: 7px; border-radius: 4px; background: color-mix(in srgb, var(--border-hi) 60%, transparent); overflow: hidden; }
+.shiny-stat-bar u { display: block; height: 100%; border-radius: 4px; background: var(--accent-hi); }
+.shiny-stat b { text-align: right; color: var(--text-strong); }
+.shiny-stat-iv { font-size: var(--fs-xs); font-weight: 800; color: var(--text-soft); text-align: right; }
+.shiny-stat-iv.hi { color: var(--green, #22c55e); }
+.shiny-stat-iv.lo { color: var(--red); }

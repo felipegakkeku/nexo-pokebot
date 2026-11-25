@@ -244,6 +244,7 @@ function appendShinyHistoryRecord(cwd, record) {
         egg: Boolean(record.egg),
         name: record.name,
         speciesId: record.speciesId ?? null,
+        pokemonId: record.pokemonId ?? null,
         spriteDex: record.spriteDex ?? null,
         level: record.level ?? '?',
         hunt: record.hunt || '',
@@ -2999,7 +3000,43 @@ export function createHeadlessController(options = {}) {
     // da base de mercado e, quando o shiny é desta conta, do Pokémon de verdade.
     const RARIDADE_PT = { COMMON: 'Comum', UNCOMMON: 'Incomum', RARE: 'Raro', EPIC: 'Épico', LEGENDARY: 'Lendário', MYTHIC: 'Mítico' };
     const fmtBR = (n) => Number(n || 0).toLocaleString('pt-BR');
-    const inspectShiny = (entry = {}) => {
+    // Ficha pública de um Pokémon de outro treinador: o mesmo pedido que o jogo faz ao clicar no anúncio.
+    // Vai com dica:true para o jogo aberto no navegador só guardar a resposta, sem abrir janela por cima do bot.
+    const publicSheetWaits = new Map();
+    const publicSheetCache = new Map();
+    const fetchPublicSheet = (trainer, pokemonId) => {
+        const pid = Number(pokemonId) || 0;
+        if (!pid || !trainer) return Promise.resolve(null);
+        const hit = publicSheetCache.get(pid);
+        if (hit && nowFn() - hit.at < 10 * 60_000) return Promise.resolve(hit.pk);
+        const old = publicSheetWaits.get(pid);
+        if (old) return old.promise;
+        let resolveFn;
+        const promise = new Promise((res) => { resolveFn = res; });
+        const waiting = { promise, resolve: resolveFn, timer: null };
+        waiting.timer = setTimeout(() => {
+            if (publicSheetWaits.get(pid) === waiting) publicSheetWaits.delete(pid);
+            resolveFn(null);
+        }, 6_000);
+        publicSheetWaits.set(pid, waiting);
+        if (!sendFrame({ t: 'chat.verPokemon', nick: String(trainer), pokemonId: pid, dica: true })) {
+            clearTimeout(waiting.timer);
+            publicSheetWaits.delete(pid);
+            resolveFn(null);
+        }
+        if (publicSheetCache.size > 60) publicSheetCache.delete(publicSheetCache.keys().next().value);
+        return promise;
+    };
+
+    const STAT_ROWS = [['hp', 'HP'], ['atk', 'ATK'], ['def', 'DEF'], ['spAtk', 'SP.ATK'], ['spDef', 'SP.DEF'], ['speed', 'SPD']];
+    const statOf = (obj, key) => {
+        if (!obj || typeof obj !== 'object') return null;
+        const alt = { spAtk: ['spAtk', 'spatk', 'sp_atk', 'spa'], spDef: ['spDef', 'spdef', 'sp_def', 'spd_def'], speed: ['speed', 'spd', 'vel'] }[key] || [key];
+        for (const k of alt) if (Number.isFinite(Number(obj[k])) && obj[k] !== null && obj[k] !== '') return Number(obj[k]);
+        return null;
+    };
+
+    const inspectShiny = async (entry = {}, { fetchRemote = false } = {}) => {
         if (!advisorSpecies) {
             try {
                 const cached = marketBase.readSpeciesCache();
@@ -3018,6 +3055,12 @@ export function createHeadlessController(options = {}) {
                 && Number(p.especieOrigem) === spId);
             pk = evolved.sort((a, b) => Number(b.id) - Number(a.id))[0] || null;
         }
+        const localPk = pk;
+        let remoteTried = false;
+        if (!pk && fetchRemote && entry.pokemonId && entry.trainer) {
+            remoteTried = true;
+            pk = await fetchPublicSheet(entry.trainer, entry.pokemonId);
+        }
         const esp = advisorSpecies?.byId?.get(Number(pk?.speciesId) || spId) || null;
         const level = Number(pk?.level ?? pk?.nivel ?? entry.level) || 1;
         const rows = [];
@@ -3033,12 +3076,18 @@ export function createHeadlessController(options = {}) {
             if (pk.potencia != null) rows.push(['Potência', `${pk.potencia} / 5`]);
             const nat = pk.natureza ?? pk.nature;
             if (nat) rows.push(['Natureza', String(nat)]);
+            if (pk.maxHp != null) rows.push(['HP de combate', fmtBR(pk.maxHp)]);
+            if (pk.poder != null) rows.push(['Poder', fmtBR(pk.poder)]);
             if (Number(pk.speciesId) !== spId && esp?.name) rows.push(['Hoje', `${esp.name} Nv ${fmtBR(level)}`]);
-            try {
-                const loc = getPokemonLocation(pk, state);
-                rows.push(['Onde está', loc === 'equipe' ? 'Equipe' : (loc === 'colecao' ? 'Coleção' : 'Depot')]);
-            } catch { /* sem local */ }
+            if (localPk) {
+                try {
+                    const loc = getPokemonLocation(pk, state);
+                    rows.push(['Onde está', loc === 'equipe' ? 'Equipe' : (loc === 'colecao' ? 'Coleção' : 'Depot')]);
+                } catch { /* sem local */ }
+            }
         }
+        const stats = pk ? STAT_ROWS.map(([k, label]) => ({ key: k, label, value: statOf(pk.stats, k), iv: statOf(pk.ivs, k) }))
+            .filter((r) => r.value != null || r.iv != null) : [];
         if (esp) {
             const rar = isLegendary(esp, esp.pokeId) && !['LEGENDARY', 'MYTHIC'].includes(esp.rarity) ? 'Lendário' : (RARIDADE_PT[esp.rarity] || esp.rarity);
             if (rar) rows.push(['Raridade', rar]);
@@ -3059,10 +3108,14 @@ export function createHeadlessController(options = {}) {
         } else {
             rows.push(['Mercado', 'Sem vendas de shiny desta espécie nos últimos 30 dias']);
         }
-        const hint = pk ? '' : (mine
-            ? 'Não achei este shiny entre os Pokémon da conta (pode ter sido vendido ou ainda não sincronizou).'
-            : 'IV e nota só aparecem nos shinies das suas contas: o servidor anuncia só a espécie e o nível.');
-        return { mine, found: Boolean(pk), rows, hint };
+        let hint = '';
+        if (!pk) {
+            if (mine && !entry.pokemonId) hint = 'Não achei este shiny entre os Pokémon da conta (pode ter sido vendido ou ainda não sincronizou).';
+            else if (remoteTried) hint = 'O servidor não devolveu a ficha agora (o Pokémon pode ter sido solto, vendido ou a conta está offline).';
+            else if (!entry.pokemonId) hint = 'Este anúncio é de antes da ficha completa: só a espécie e o nível foram guardados.';
+            else hint = 'Ficha completa indisponível: nenhuma conta conectada para pedir ao servidor.';
+        }
+        return { mine, found: Boolean(pk), remote: Boolean(pk && !localPk), rows, stats, nota, hint };
     };
 
     /** Resumo leve do consultor para o snapshot de 1,25 s; as listas saem só por getAdvisor(). */
@@ -4324,8 +4377,21 @@ export function createHeadlessController(options = {}) {
             return;
         }
 
+        if (m.t === 'ranking.ficha') {
+            const pid = Number(m.pokemon?.id ?? m.pokemonId) || 0;
+            const waiting = pid ? publicSheetWaits.get(pid) : null;
+            if (waiting) {
+                publicSheetWaits.delete(pid);
+                clearTimeout(waiting.timer);
+                if (m.pokemon && typeof m.pokemon === 'object') publicSheetCache.set(pid, { pk: m.pokemon, at: nowFn() });
+                waiting.resolve(m.pokemon && typeof m.pokemon === 'object' ? m.pokemon : null);
+            }
+            return;
+        }
+
         if (m.t === 'shiny.captura' && typeof m.pokemon?.nome === 'string') {
             const spId = Number(m.pokemon.speciesId ?? m.pokemon.pokeId) || null;
+            const pokemonId = Number(m.pokemon.id) || null;
             const spriteDex = resolvePokemonSpriteDex(spId, m.pokemon.nome, catalog.pokemonDexByName) || null;
             const trainerNick = m.nick || 'Desconhecido';
             const level = m.pokemon.level ?? m.pokemon.nivel ?? '?';
@@ -4338,6 +4404,7 @@ export function createHeadlessController(options = {}) {
                 ts: lastMsgAt,
                 name: m.pokemon.nome,
                 speciesId: spId,
+                pokemonId,
                 spriteDex,
                 level,
                 trainer: trainerNick,
@@ -4354,6 +4421,7 @@ export function createHeadlessController(options = {}) {
                 egg: Boolean(m.ovo),
                 name: m.pokemon.nome,
                 speciesId: spId,
+                pokemonId,
                 spriteDex,
                 level,
                 hunt: huntLabel,
@@ -4374,6 +4442,7 @@ export function createHeadlessController(options = {}) {
                     ownShinies.unshift({
                         ts: lastMsgAt,
                         speciesId: spId,
+                        pokemonId,
                         spriteDex,
                         name: m.pokemon.nome,
                         level,
