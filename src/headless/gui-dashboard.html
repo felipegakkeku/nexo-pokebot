@@ -209,7 +209,6 @@
           <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;padding-top:8px;border-top:1px solid #1e293b;">
             <div class="sub" id="voteStatusLine">Vote &amp; Ganhe (IdleHub.io): aguardando...</div>
             <div style="display:flex;gap:6px;flex-shrink:0;">
-              <button type="button" id="btnOpenVoteDash" onclick="postAction('open-vote')" style="padding:4px 9px;font-size:11px;">Votar</button>
               <button type="button" onclick="postAction('refresh-vote')" style="padding:4px 8px;font-size:11px;" title="Atualizar voto">↻</button>
             </div>
           </div>
@@ -834,23 +833,19 @@
         }
       }
       const voteLine = document.getElementById('voteStatusLine');
-      const voteBtn = document.getElementById('btnOpenVoteDash');
       const vData = data.vote;
-      if (voteLine && voteBtn) {
+      if (voteLine) {
         if (!vData || !vData.checkedAt) {
           voteLine.textContent = 'Vote & Ganhe (IdleHub.io): conecte ou clique em ↻';
-          voteBtn.disabled = false;
         } else if (!vData.ativo) {
           voteLine.textContent = 'Vote & Ganhe: inativo no servidor';
-          voteBtn.disabled = true;
         } else {
           const vRem = vData.availableAt > nowDash ? vData.availableAt - nowDash : Number(vData.remainingMs || 0);
           const vReady = vData.ativo && vRem <= 0 && Boolean(vData.url);
           const vMin = Math.ceil(vRem / 60000);
-          const vWhen = vReady ? 'DISPONIVEL AGORA' : (vMin >= 60 ? `em ${Math.floor(vMin / 60)}h ${vMin % 60}m` : `em ${Math.max(1, vMin)}m`);
+          const vWhen = vReady ? 'DISPONIVEL AGORA (vote pelo jogo)' : (vMin >= 60 ? `em ${Math.floor(vMin / 60)}h ${vMin % 60}m` : `em ${Math.max(1, vMin)}m`);
           voteLine.textContent = `Vote & Ganhe: ${vWhen} (${vData.noPar || 0}/${vData.votosPorDiamante || 2} p/ diamante · ${vData.votos || 0} votos)`;
           voteLine.style.color = vReady ? '#6ee7b7' : '';
-          voteBtn.disabled = !vData.url;
         }
       }
 

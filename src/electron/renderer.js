@@ -1683,7 +1683,6 @@ function renderActiveAccountPanel() {
     }
     refreshHuntAndCenterButtons();
     renderCollectionCard(data);
-    renderVoteBar(data);
 
     // KPIs e Eficiência
     setText($('kKills'), fmtNum(st.kills));
@@ -3221,11 +3220,9 @@ function processActivityToasts(allSnaps) {
                 showToast({
                     kind: 'reward',
                     title: `Vote & Ganhe · ${accLabel}`,
-                    text: 'Voto diário liberado no IdleHub.io.',
+                    text: 'Voto diário liberado. Vote pelo jogo, no menu Vote & Ganhe.',
                     account: acc,
-                    actionLabel: 'Abrir voto',
                     event: 'vote',
-                    onClick: () => void sendAction('open-vote-embedded', {}, acc),
                 });
             }
             base.voteReady = voteReadyNow;
@@ -3306,15 +3303,6 @@ function processActivityToasts(allSnaps) {
     } else if (!serverShinyToastBaselineDone) {
         serverShinyToastBaselineDone = true;
     }
-}
-
-function fmtShortDuration(ms) {
-    const totalSec = Math.max(0, Math.ceil(Number(ms || 0) / 1000));
-    const h = Math.floor(totalSec / 3600);
-    const m = Math.floor((totalSec % 3600) / 60);
-    if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
-    if (m > 0) return `${m}m`;
-    return `${Math.max(1, totalSec)}s`;
 }
 
 function fmtEventCountdown(ms) {
@@ -3453,48 +3441,6 @@ function renderCollectionCard(data = snapshots[activeAccount]) {
     }
 }
 
-function renderVoteBar(data = snapshots[activeAccount]) {
-    const bar = $('voteBar');
-    if (!bar) return;
-    const pill = $('votePill');
-    const sub = $('voteSub');
-    const btn = $('btnOpenVote');
-    const btnExt = $('btnOpenVoteExt');
-    const v = data?.vote;
-    if (!v || !v.checkedAt) {
-        bar.classList.remove('ready');
-        btn.classList.remove('ready');
-        const noSession = !data?.session?.nick && (!data?.trainer?.nick || data.trainer.nick === '-');
-        btn.disabled = noSession;
-        if (btnExt) btnExt.disabled = noSession;
-        setText(pill, 'IdleHub.io');
-        sub.textContent = v?.error
-            ? `Erro: ${v.error}`
-            : 'Conecte a conta ou clique em ↻ para verificar';
-        return;
-    }
-    const now = Date.now();
-    const remMs = v.availableAt > now ? v.availableAt - now : (v.availableAt > 0 ? 0 : Number(v.remainingMs || 0));
-    const ready = Boolean(v.ativo && remMs <= 0 && v.url);
-    bar.classList.toggle('ready', ready);
-    btn.classList.toggle('ready', ready);
-    btn.disabled = !v.url;
-    if (btnExt) btnExt.disabled = !v.url;
-    if (!v.ativo) {
-        setText(pill, 'Desligado');
-        setText(sub, 'Vote & Ganhe inativo no servidor');
-        return;
-    }
-    const progress = `${v.noPar || 0}/${v.votosPorDiamante || 2} p/ 💎 · ${fmtNum(v.votos || 0)} votos (${fmtNum(v.diamantes || 0)} 💎)`;
-    if (ready) {
-        setText(pill, 'Disponível agora');
-        setText(sub, `${progress}`);
-    } else {
-        setText(pill, `Em ${fmtShortDuration(remMs)}`);
-        setText(sub, progress);
-    }
-}
-
 function formatBytesMb(bytes) {
     const n = Number(bytes || 0);
     if (n <= 0) return '';
@@ -3539,9 +3485,11 @@ function renderUpdateBanner(st) {
         mode = 'error';
         setText(title, `A atualização para v${shortVer(st.failedTarget)} não foi aplicada`);
         setText(sub, `Clique em Tentar de novo. Detalhes em ${st.logPath || 'nexo-pokebot-last-update.log'}`);
-    } else if (st.hasUpdate && readUpdateSnooze() !== st.latestVersion) {
+    } else if (st.hasUpdate && readUpdateSnooze() !== (st.updateId || st.latestVersion)) {
         mode = 'available';
-        setText(title, `Nova versão disponível: v${shortVer(st.latestVersion)}`);
+        setText(title, st.rebuild
+            ? `Correção da v${shortVer(st.latestVersion)} disponível`
+            : `Nova versão disponível: v${shortVer(st.latestVersion)}`);
         const size = st.assetSize ? ` · ${formatBytesMb(st.assetSize)}` : '';
         sub.textContent = st.isGitRepo
             ? 'Pasta de desenvolvimento: atualize com git pull.'
@@ -3637,7 +3585,7 @@ function renderUpdateUi(st) {
         setText(progTxt, 'Reiniciando...');
         btnInstall.classList.add('hidden');
     } else if (hasUpd) {
-        setText(title, `Nova Release: v${st.latestVersion}`);
+        setText(title, st.rebuild ? `Correção da v${st.latestVersion}` : `Nova Release: v${st.latestVersion}`);
         const sizeLabel = st.assetSize ? ` (${formatBytesMb(st.assetSize)})` : '';
         desc.textContent = st.isGitRepo
             ? 'Ambiente Git (.git) detectado. Use git pull ou abra a Release no GitHub.'
@@ -3645,11 +3593,12 @@ function renderUpdateUi(st) {
         progWrap.classList.add('hidden');
         btnInstall.classList.toggle('hidden', Boolean(st.isGitRepo) || !st.assetName);
         btnInstall.disabled = false;
-        if (st.latestVersion && st.latestVersion !== lastNotifiedUpdateVersion) {
-            lastNotifiedUpdateVersion = st.latestVersion;
+        const updId = st.updateId || st.latestVersion;
+        if (updId && updId !== lastNotifiedUpdateVersion) {
+            lastNotifiedUpdateVersion = updId;
             showToast({
                 kind: 'ok',
-                title: `Nova versão: v${st.latestVersion}`,
+                title: st.rebuild ? `Correção da v${st.latestVersion}` : `Nova versão: v${st.latestVersion}`,
                 text: 'Clique em Atualizar agora na faixa do topo. Suas contas ficam preservadas.',
             });
         }
@@ -3868,7 +3817,7 @@ function wireEvents() {
         });
         $('btnBannerLater')?.addEventListener('click', () => {
             const st = currentUpdateState || {};
-            if (st.hasUpdate) writeUpdateSnooze(st.latestVersion);
+            if (st.hasUpdate) writeUpdateSnooze(st.updateId || st.latestVersion);
             updateDoneBannerDismissed = true;
             renderUpdateBanner(st);
         });
@@ -4011,9 +3960,6 @@ function wireEvents() {
     $('btnPassNow').addEventListener('click', () => sendAction('claim-pass'));
     $('btnPreyNow').addEventListener('click', () => sendAction('roll-prey'));
     $('btnLivesNow').addEventListener('click', () => sendAction('run-lives'));
-    $('btnOpenVote')?.addEventListener('click', () => sendAction('open-vote-embedded'));
-    $('btnOpenVoteExt')?.addEventListener('click', () => sendAction('open-vote'));
-    $('btnRefreshVote')?.addEventListener('click', () => sendAction('refresh-vote'));
     $('btnOpenLives').addEventListener('click', () => sendAction('open-lives'));
     $('chatReminder').addEventListener('change', event => {
         clearInterval(chatReminderTimer);

@@ -61,6 +61,28 @@ export function readInstalledVersion(rootDir = DEFAULT_APP_ROOT) {
     }
 }
 
+/** Arquivo que o pacote da Release leva com o commit de onde foi gerado. */
+export const BUILD_INFO_FILE = 'build-info.json';
+
+/** Commit e versão do pacote instalado (null quando a pasta não tem o arquivo, ex.: versões antigas ou git). */
+export function readInstalledBuild(rootDir = DEFAULT_APP_ROOT) {
+    try {
+        const info = JSON.parse(readFileSync(join(rootDir, BUILD_INFO_FILE), 'utf8'));
+        const commit = String(info?.commit || '').trim().toLowerCase();
+        return { version: String(info?.version || ''), commit: /^[0-9a-f]{7,40}$/.test(commit) ? commit : '' };
+    } catch {
+        return { version: '', commit: '' };
+    }
+}
+
+/** Mesmo commit? Aceita um dos lados abreviado. */
+export function sameCommit(a, b) {
+    const x = String(a || '').toLowerCase();
+    const y = String(b || '').toLowerCase();
+    if (!x || !y) return true; // sem os dois lados não dá para afirmar que mudou
+    return x.startsWith(y) || y.startsWith(x);
+}
+
 /**
  * Escolhe o asset ZIP principal do Windows em uma Release do GitHub.
  * @param {object} release JSON da GitHub Releases API.
@@ -115,7 +137,24 @@ export async function checkForUpdate(options = {}) {
         const tagName = String(release?.tag_name || '').trim();
         const latestVersion = parseSemver(tagName || release?.name || currentVersion).raw || currentVersion;
         const asset = selectReleaseZipAsset(release);
-        const hasUpdate = compareSemver(latestVersion, currentVersion) > 0;
+        const cmp = compareSemver(latestVersion, currentVersion);
+        // Além do número: mesma versão publicada de novo a partir de outro commit também é atualização.
+        const installedCommit = String(options.installedCommit ?? readInstalledBuild(rootDir).commit ?? '');
+        let latestCommit = '';
+        if (cmp === 0 && installedCommit && tagName) {
+            try {
+                const r = await fetchImpl(`https://api.github.com/repos/${repo}/commits/${encodeURIComponent(tagName)}`, {
+                    headers: { Accept: 'application/vnd.github.sha', 'User-Agent': `Nexo-PokeBot/${currentVersion}` },
+                    signal: ac.signal,
+                });
+                const txt = r?.ok && typeof r.text === 'function' ? String(await r.text()).trim().toLowerCase() : '';
+                if (/^[0-9a-f]{40}$/.test(txt)) latestCommit = txt;
+            } catch {
+                // sem o commit da tag, vale só a versão
+            }
+        }
+        const rebuild = cmp === 0 && Boolean(latestCommit) && !sameCommit(latestCommit, installedCommit);
+        const hasUpdate = cmp > 0 || rebuild;
         const releaseUrl = typeof release?.html_url === 'string' && /^https:\/\//i.test(release.html_url)
             ? release.html_url
             : `https://github.com/${repo}/releases/latest`;
@@ -129,6 +168,10 @@ export async function checkForUpdate(options = {}) {
             releaseUrl,
             publishedAt: release?.published_at || null,
             hasUpdate,
+            rebuild,
+            installedCommit,
+            latestCommit,
+            updateId: rebuild ? `${latestVersion}+${latestCommit.slice(0, 7)}` : latestVersion,
             isGitRepo,
             asset,
         };

@@ -1173,65 +1173,6 @@ select:focus, input:focus, textarea:focus {
   flex-wrap: wrap;
 }
 .update-pop-actions .hidden { display: none; }
-.vote-bar {
-  margin-top: 10px;
-  padding: 9px 10px;
-  border-radius: var(--r-md);
-  background: color-mix(in srgb, var(--bg-elev) 72%, transparent);
-  border: 1px solid var(--raise);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-.vote-bar.ready {
-  border-color: color-mix(in srgb, var(--green) 45%, transparent);
-  background: color-mix(in srgb, var(--green) 8%, transparent);
-}
-.vote-bar-info {
-  min-width: 0;
-  flex: 1;
-}
-.vote-bar-title {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: var(--fs-md);
-  color: var(--text-soft);
-}
-.vote-pill {
-  font-size: var(--fs-xs);
-  padding: 1px 6px;
-  border-radius: var(--r-pill);
-  background: color-mix(in srgb, var(--muted) 14%, transparent);
-  color: var(--text-soft);
-}
-.vote-bar.ready .vote-pill {
-  background: color-mix(in srgb, var(--green) 22%, transparent);
-  color: var(--ok-text);
-}
-.vote-bar-sub {
-  font-size: var(--fs-sm);
-  color: var(--muted);
-  margin-top: 2px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.vote-bar-actions {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  flex-shrink: 0;
-}
-.btn.vote-btn.ready {
-  border-color: color-mix(in srgb, var(--green) 60%, transparent);
-  background: color-mix(in srgb, var(--green) 22%, transparent);
-  color: var(--ok-text);
-}
-.btn.vote-btn.ready:hover {
-  background: color-mix(in srgb, var(--green) 34%, transparent);
-}
 .channel-smart-note {
   font-size: var(--fs-xs);
   color: var(--accent-text);

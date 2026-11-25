@@ -4,6 +4,12 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+## 1.0.21
+
+- **/hunt já vem no Hub**: na primeira abertura o Hub baixa o /hunt da Chrome Web Store oficial para a pasta `.pokebot-hunt-ext`, carrega em todos os navegadores das contas e no avaliador headless, e confere atualização uma vez por dia. Não precisa mais instalar a extensão no Chrome. Sem internet, segue com a cópia que já tiver (ou com a do Chrome, se houver).
+- **Vote & Ganhe só no aviso**: a barra saiu de Ações rápidas e os botões que abriam o IdleHub.io num navegador sem login foram retirados. Quando o voto libera, chega a notificação e o aviso no sino pedindo para votar pelo jogo.
+- **Auto-update enxerga correções na mesma versão**: o pacote da Release agora leva o commit de onde saiu (`build-info.json`). Se a mesma versão for publicada de novo a partir de outro commit, o Hub oferece a correção ("Correção da vX disponível"). Vale a partir das instalações que já tiverem esse arquivo.
+
 ## 1.0.20
 
 - **Sniper de Pokémon por nível (Gold e Gemas)**: monitoramento automático da vitrine oficial do Mercado da Comunidade (`market.listar` / `vitrine` / `market.comprar`) com filtro de nível mínimo e máximo, espécie opcional (ou qualquer Pokémon), opção **Só Shiny**, teto de preço, proteção contra anúncios da própria conta, respeito às reservas de saldo e reagendamento automático pós-retenção.

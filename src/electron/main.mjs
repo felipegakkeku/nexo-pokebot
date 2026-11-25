@@ -1,5 +1,5 @@
 // Processo principal Electron do Nexo PokeBot: 1 janela, 1 bandeja, 4 contas isoladas + navegador embutido por conta.
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, Notification, powerSaveBlocker, session, shell, Tray } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, net, Notification, powerSaveBlocker, session, shell, Tray } from 'electron';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startGuiServer } from '../headless/gui-server.mjs';
 import { createPerfSampler } from './perf-meter.mjs';
+import { ensureHuntExtension } from '../headless/hunt-ext-install.mjs';
 import { createHeadlessHuntGuideEvaluator, findHuntExtensionDir } from '../headless/hunt-guide.mjs';
 import { loadAppIconBuffer } from '../desktop/build-exe.mjs';
 import {
@@ -14,7 +15,9 @@ import {
     compareSemver,
     downloadAndStageUpdate,
     launchApplyUpdateScript,
+    readInstalledBuild,
     readInstalledVersion,
+    sameCommit,
 } from '../desktop/updater.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -88,7 +91,9 @@ function verifyPendingUpdateMarker() {
     if (!target) return;
     // Marcador velho (mais de 1 dia) nao diz nada sobre este boot
     if (Date.now() - Number(marker?.at || 0) > 24 * 3600 * 1000) return;
-    if (compareSemver(installedVersion, target) >= 0) {
+    const targetCommit = String(marker?.toCommit || '');
+    const commitOk = !targetCommit || sameCommit(readInstalledBuild(ROOT).commit, targetCommit);
+    if (compareSemver(installedVersion, target) >= 0 && commitOk) {
         updateState.justUpdatedFrom = String(marker?.from || '');
     } else {
         updateState.failedTarget = target;
@@ -106,14 +111,14 @@ function broadcastUpdateState() {
 }
 
 // Aviso nativo do Windows (aparece mesmo com o Hub minimizado na bandeja)
-function notifyUpdateAvailable(version) {
-    if (!version || version === lastNativeUpdateNotice) return;
-    lastNativeUpdateNotice = version;
+function notifyUpdateAvailable(version, key = version, rebuild = false) {
+    if (!version || key === lastNativeUpdateNotice) return;
+    lastNativeUpdateNotice = key;
     try {
         if (!Notification.isSupported()) return;
         const icon = getAppIcon();
         const n = new Notification({
-            title: `Nexo PokeBot v${version} disponível`,
+            title: rebuild ? `Correção do Nexo PokeBot v${version} disponível` : `Nexo PokeBot v${version} disponível`,
             body: 'Clique para abrir e atualizar. Suas contas e sessões ficam preservadas.',
             ...(icon ? { icon } : {}),
         });
@@ -147,7 +152,7 @@ async function runUpdateCheck() {
             });
         }
         latestReleaseInfo = res;
-        if (res.hasUpdate && !res.isGitRepo) notifyUpdateAvailable(res.latestVersion);
+        if (res.hasUpdate && !res.isGitRepo) notifyUpdateAvailable(res.latestVersion, res.updateId || res.latestVersion, Boolean(res.rebuild));
         return patchUpdateState({
             status: res.hasUpdate ? 'available' : 'up-to-date',
             currentVersion: res.currentVersion,
@@ -157,6 +162,8 @@ async function runUpdateCheck() {
             releaseNotes: res.releaseNotes,
             releaseUrl: res.releaseUrl,
             hasUpdate: res.hasUpdate,
+            rebuild: Boolean(res.rebuild),
+            updateId: res.updateId || res.latestVersion,
             isGitRepo: res.isGitRepo,
             assetName: res.asset?.name || '',
             assetSize: Number(res.asset?.size || 0),
@@ -213,6 +220,7 @@ async function runUpdateInstall() {
             writeFileSync(UPDATE_MARKER_PATH, JSON.stringify({
                 from: installedVersion,
                 to: staged.version,
+                toCommit: latestReleaseInfo?.latestCommit || '',
                 at: Date.now(),
             }), 'utf8');
         } catch { /* sem marcador o update segue igual */ }
@@ -315,22 +323,44 @@ async function startAccountServer(account) {
     return entry;
 }
 
-async function loadHuntExtensionIntoPartitions() {
-    const extDir = findHuntExtensionDir({ cwd: ROOT });
-    if (!extDir) return null;
+let loadedHuntExtDir = null;
+async function loadHuntExtensionIntoPartitions(dir = null) {
+    const extDir = dir || findHuntExtensionDir({ cwd: ROOT });
+    if (!extDir || extDir === loadedHuntExtDir) return extDir;
     for (const acc of ACCOUNT_IDS) {
         const ses = session.fromPartition(`persist:conta${acc}`);
+        const api = ses.extensions || ses;
         try {
-            if (typeof ses.extensions?.loadExtension === 'function') {
-                await ses.extensions.loadExtension(extDir, { allowFileAccess: false });
-            } else if (typeof ses.loadExtension === 'function') {
-                await ses.loadExtension(extDir, { allowFileAccess: false });
-            }
+            // Troca de versão: tira a antiga antes de carregar a nova (mesmo id).
+            const old = (api.getAllExtensions?.() || []).find((e) => e?.path === loadedHuntExtDir || /\/hunt/i.test(e?.name || ''));
+            if (old?.id && loadedHuntExtDir) api.removeExtension?.(old.id);
+            await api.loadExtension?.(extDir, { allowFileAccess: false });
         } catch {
             // Extensao opcional; o avaliador /hunt headless no Node continua ativo mesmo sem carregar no webview
         }
     }
+    loadedHuntExtDir = extDir;
     return extDir;
+}
+
+/** Baixa ou atualiza o /hunt da Chrome Web Store e carrega nas contas; repete uma vez por dia. */
+async function syncHuntExtension({ force = false } = {}) {
+    try {
+        const res = await ensureHuntExtension({
+            root: ROOT,
+            fetchImpl: (url, opts) => net.fetch(url, opts),
+            prodVersion: process.versions.chrome,
+            force,
+        });
+        if (res.dir && res.dir !== loadedHuntExtDir) {
+            await loadHuntExtensionIntoPartitions(res.dir);
+            console.log(`[hunt] /hunt ${res.version} pronto em ${res.dir}`);
+        } else if (res.error && !res.dir) {
+            console.warn(`[hunt] não consegui baixar o /hunt: ${res.error}`);
+        }
+    } catch (err) {
+        console.warn('[hunt] falha ao preparar o /hunt:', err?.message || err);
+    }
 }
 
 const perf = createPerfSampler({
@@ -2190,6 +2220,9 @@ registerIpcHandlers();
 app.whenReady().then(async () => {
     await Promise.all(ACCOUNT_IDS.map((acc) => startAccountServer(acc)));
     await loadHuntExtensionIntoPartitions();
+    // Garante o /hunt mesmo para quem nunca instalou a extensão no navegador (roda em segundo plano).
+    void syncHuntExtension();
+    setInterval(() => void syncHuntExtension(), 6 * 3600_000).unref?.();
     await createMainWindow();
     setupTray();
     startAutoChestWatcher();

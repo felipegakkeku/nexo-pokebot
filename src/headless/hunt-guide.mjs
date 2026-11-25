@@ -34,7 +34,7 @@ function compareVersionNames(a, b) {
     return String(b || '').localeCompare(String(a || ''));
 }
 
-function isValidHuntExtensionVersionDir(dir) {
+export function isValidHuntExtensionVersionDir(dir) {
     return Boolean(dir) &&
         existsSync(join(dir, 'manifest.json')) &&
         HUNT_REQUIRED_FILES.every((rel) => existsSync(join(dir, rel)));
@@ -80,6 +80,8 @@ export function findHuntExtensionDir(options = {}) {
         const baseCwd = options.cwd || process.cwd();
         const localAppData = options.localAppData || process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local');
         roots.push(
+            // cópia que o próprio Hub baixa da Chrome Web Store (hunt-ext-install.mjs)
+            join(baseCwd, '.pokebot-hunt-ext'),
             join(localAppData, 'Google', 'Chrome', 'User Data'),
             join(localAppData, 'Microsoft', 'Edge', 'User Data'),
             join(localAppData, 'BraveSoftware', 'Brave-Browser', 'User Data'),

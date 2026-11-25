@@ -515,8 +515,7 @@
             if (s.vote?.available) {
                 items.push({
                     key: `vote:${acc}:${new Date().toDateString()}`, sev: 'reward', icon: 'thumbs', acc,
-                    title: 'Voto diário liberado', text: `${who} pode votar no IdleHub.io.`,
-                    actions: [['Votar', () => void sendAction('open-vote-embedded', {}, acc)]],
+                    title: 'Voto diário liberado', text: `${who} pode votar pelo jogo, no menu Vote & Ganhe.`,
                 });
             }
             for (const m of s.missedShinies || []) {
@@ -530,7 +529,7 @@
         }
         if (typeof currentUpdateState === 'object' && currentUpdateState?.hasUpdate) {
             items.push({
-                key: `upd:${currentUpdateState.latestVersion}`, sev: 'info', icon: 'download', acc: 0,
+                key: `upd:${currentUpdateState.updateId || currentUpdateState.latestVersion}`, sev: 'info', icon: 'download', acc: 0,
                 title: `Versão ${String(currentUpdateState.latestVersion || '').replace(/\.0$/, '')} disponível`, text: 'Contas e sessões ficam preservadas.',
                 actions: [['Ver atualização', () => $('btnUpdateToggle')?.click()]],
             });

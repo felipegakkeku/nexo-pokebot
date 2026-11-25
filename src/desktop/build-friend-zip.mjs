@@ -130,6 +130,12 @@ export function buildFriendPackage(options = {}) {
         });
 
         writeFileSync(join(pkgRoot, 'LEIA-ME.txt'), buildFriendReadme(shortVersion), 'utf8');
+        // Commit de onde o pacote saiu: o auto-update compara com o da tag para achar republicações da mesma versão.
+        let commit = String(process.env.GITHUB_SHA || '').trim();
+        if (!commit) {
+            try { commit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).trim(); } catch { commit = ''; }
+        }
+        writeFileSync(join(pkgRoot, 'build-info.json'), JSON.stringify({ version: fullVersion, commit, builtAt: new Date().toISOString() }), 'utf8');
 
         // Verificacao de seguranca: garante zero arquivos pessoais no pacote
         assertNoPrivateFiles(pkgRoot);
