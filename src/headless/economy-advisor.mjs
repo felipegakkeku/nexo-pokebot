@@ -291,6 +291,12 @@ export function advisePokemons({
         const nowValue = Math.max(depot, marketNet || 0);
         const finalGain = finalMarket?.currency === 'gold' && finalMarket.confidence !== 'baixa'
             ? finalMarket.price - (best?.stoneCostKnown ? best.stoneCost : 0) : null;
+        // Nota máxima: a da melhor forma final, ou a de agora quando ele já é a forma final (ou não evolui).
+        const maxNota = Math.max(best?.nota ?? -1, nota ?? -1);
+        const maxNotaRef = best?.nota != null && best.nota >= (nota ?? -1) ? best : null;
+        // As duas regras de guardar são independentes: basta uma.
+        const keepByNota = maxNota >= 0 && maxNota >= keepNota - 1e-9;
+        const keepByValue = keepFinalMult > 0 && finalGain != null && finalGain >= nowValue * keepFinalMult;
         let action = 'depot';
         let reason = `Depot paga ${fmt(depot)} gold.`;
         if (pk.shiny || legend || Number(pk.potencia) === 5) {
@@ -300,18 +306,20 @@ export function advisePokemons({
         } else if (busy) {
             action = 'manter';
             reason = 'Em uso (ativo, casa, Exp. Share ou fila do Treinador).';
+        } else if (r.loc === 'depot' && keepByNota) {
+            action = 'guardar';
+            reason = maxNotaRef
+                ? `Na forma final (${maxNotaRef.name}${maxNotaRef.level ? `, Nv ${fmt(maxNotaRef.level)}` : ''}) chega a nota ${maxNota.toFixed(1)}. Vale guardar na coleção para treinar.`
+                : `Nota ${maxNota.toFixed(1)} já na forma final. Vale guardar na coleção.`;
+            if (finalMarket?.currency === 'gold') reason += ` Lá vende ~${fmt(finalMarket.price)} gold.`;
+        } else if (r.loc === 'depot' && keepByValue) {
+            action = 'guardar';
+            const pedraTxt = best.stoneCostKnown && best.stoneCost ? ` (já tirando ~${fmt(best.stoneCost)} de pedras)` : '';
+            reason = `Evoluído até ${best.name} (Nv ${fmt(best.level)}) vende ~${fmt(finalMarket.price)} gold${pedraTxt}; hoje vale ~${fmt(nowValue)}.`;
         } else if (evolveGain && evolveGain.price - (evolveGain.stone || 0) > nowValue * 1.2) {
             action = 'evoluir';
             const pedraTxt = evolveGain.stone ? ` menos ~${fmt(evolveGain.stone)} da ${evolveGain.stoneName || 'pedra'}` : '';
             reason = `Evoluído para ${evolveGain.name} sai por ~${fmt(evolveGain.price)} gold (${evolveGain.n} vendas)${pedraTxt}. Do jeito que está vale ~${fmt(nowValue)}.`;
-        } else if (r.loc === 'depot' && keepFinalMult > 0 && finalGain != null && finalGain >= nowValue * keepFinalMult) {
-            action = 'guardar';
-            const pedraTxt = best.stoneCostKnown && best.stoneCost ? ` (já tirando ~${fmt(best.stoneCost)} de pedras)` : '';
-            reason = `Evoluído até ${best.name} (Nv ${fmt(best.level)}) vende ~${fmt(finalMarket.price)} gold${pedraTxt}; hoje vale ~${fmt(nowValue)}.`;
-        } else if (r.loc === 'depot' && best?.nota != null && best.nota >= keepNota - 1e-9) {
-            action = 'guardar';
-            reason = `Na forma final (${best.name}${best.level ? `, Nv ${fmt(best.level)}` : ''}) chega a nota ${best.nota.toFixed(1)}. Vale guardar na coleção para treinar.`;
-            if (finalMarket?.currency === 'gold') reason += ` Lá vende ~${fmt(finalMarket.price)} gold.`;
         } else if (eligible && marketNet != null && marketNet >= depot * 1.5) {
             action = 'mercado';
             reason = `Vendas parecidas saem por ~${fmt(market.price)} gold (${market.n} vendas, confiança ${market.confidence}); tirando taxa e diária sobra ~${fmt(marketNet)}. Depot paga ${fmt(depot)}.`;
@@ -346,6 +354,7 @@ export function advisePokemons({
                 stones: (best.stones || []).map((x) => x.nome), stoneCost: best.stoneCostKnown ? best.stoneCost : null,
                 market: finalMarket,
             } : null,
+            maxNota: maxNota >= 0 ? maxNota : null,
             nowValue,
             action,
             reason,

@@ -52,12 +52,18 @@ export function decideDrop(row, cfg = {}, rules = marketRulesOf(null)) {
         return { action: 'guardar', reason: `${why}: vai para a coleção.` };
     }
     const best = row.potential;
-    if (best?.nota != null && best.nota >= Number(c.dropKeepNota) - 1e-9) {
+    // Regra 1 (sozinha basta): nota máxima. Vale a da forma final ou a de agora, quando ele já é a forma final.
+    const maxNota = Math.max(row.maxNota ?? -1, best?.nota ?? -1, row.nota ?? -1);
+    if (maxNota >= 0 && maxNota >= Number(c.dropKeepNota) - 1e-9) {
+        const viaFinal = best?.nota != null && best.nota >= maxNota - 1e-9;
         return {
             action: 'guardar',
-            reason: `Na forma final (${best.name}${best.level ? `, Nv ${fmt(best.level)}` : ''}) chega a nota ${best.nota.toFixed(1)}.`,
+            reason: viaFinal
+                ? `Na forma final (${best.name}${best.level ? `, Nv ${fmt(best.level)}` : ''}) chega a nota ${maxNota.toFixed(1)}.`
+                : `Nota ${maxNota.toFixed(1)} já na forma final.`,
         };
     }
+    // Regra 2 (independente da nota): valor da forma final.
     // A forma final vende muito mais do que ele vale hoje, mesmo pagando as pedras: guarda para treinar.
     const fm = best?.market;
     const mult = Number(c.dropKeepFinalMult) || 0;
