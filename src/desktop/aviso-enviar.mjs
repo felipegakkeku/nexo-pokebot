@@ -2,6 +2,7 @@
 //
 //   npm run aviso -- "Texto do aviso" [--titulo "Título"] [--tipo info|ok|aviso|erro]
 //                    [--ate 2026-12-31] [--link https://...] [--versao-min 1.0.26] [--versao-max 1.0.30] [--id meu-id]
+//   npm run aviso -- --contar      (Hubs conectados agora e uso dos últimos 7 dias)
 //
 // Precisa de ~/.nexo-pokebot/aviso-chave.pem (chave privada Ed25519, fica só no PC do dono) e
 // ~/.nexo-pokebot/avisos.json com { "publicar": "http://localhost:3334", "tunnelLog": "<log do cloudflared>" }.
@@ -48,12 +49,34 @@ function syncPointer(url) {
     return true;
 }
 
-const args = parseArgs(process.argv.slice(2));
+const argv = process.argv.slice(2);
+let cfg = {};
+try { cfg = JSON.parse(readFileSync(join(CFG_DIR, 'avisos.json'), 'utf8')); } catch { /* usa o padrão */ }
+
+// npm run aviso -- --contar: Hubs conectados agora e o uso dos últimos dias, lidos do servidor.
+if (argv.includes('--contar')) {
+    const dados = process.env.AVISO_DADOS || cfg.dados || (cfg.tunnelLog ? dirname(cfg.tunnelLog) : '');
+    const file = join(dados, 'nexo-avisos-uso.json');
+    if (!dados || !existsSync(file)) fail(`contagem ainda não existe em ${file || '(sem pasta de dados)'}.`);
+    const s = JSON.parse(readFileSync(file, 'utf8'));
+    const quando = s.atualizado ? new Date(s.atualizado).toLocaleString('pt-BR') : '-';
+    console.log(`Hubs conectados agora: ${s.agora ?? 0} (atualizado ${quando})`);
+    const dias = Object.keys(s.dias || {}).sort().slice(-7).reverse();
+    if (dias.length) {
+        console.log('\nDia          Pico   Diferentes   Conexões');
+        for (const d of dias) {
+            const x = s.dias[d];
+            console.log(`${d}   ${String(x.pico).padStart(4)}   ${String(x.unicos).padStart(10)}   ${String(x.conexoes).padStart(8)}`);
+        }
+        console.log('\nPico: mais Hubs ao mesmo tempo. Diferentes: endereços de internet distintos no dia (aproximado).');
+    }
+    process.exit(0);
+}
+
+const args = parseArgs(argv);
 if (!args.texto && !args.titulo) fail('passe o texto do aviso entre aspas.');
 const keyPath = join(CFG_DIR, 'aviso-chave.pem');
 if (!existsSync(keyPath)) fail(`chave não encontrada em ${keyPath}.`);
-let cfg = {};
-try { cfg = JSON.parse(readFileSync(join(CFG_DIR, 'avisos.json'), 'utf8')); } catch { /* usa o padrão */ }
 const publicar = String(process.env.AVISO_PUBLICAR || cfg.publicar || 'http://localhost:3334').replace(/\/+$/, '');
 
 const tunnel = currentTunnel(process.env.AVISO_TUNNEL_LOG || cfg.tunnelLog);
