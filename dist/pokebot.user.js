@@ -5604,11 +5604,11 @@
                         </label>
                         <label class="pb-cfg-field">
                             <span class="pb-lbl">Alvo Bolas</span>
-                            <input type="number" min="10" max="5000" step="10" data-pb-cfg="targetBalls" />
+                            <input type="number" min="10" step="10" data-pb-cfg="targetBalls" />
                         </label>
                         <label class="pb-cfg-field">
                             <span class="pb-lbl">Alvo Poções</span>
-                            <input type="number" min="0" max="5000" step="10" data-pb-cfg="targetPotions" />
+                            <input type="number" min="0" step="10" data-pb-cfg="targetPotions" />
                         </label>
                         <label class="pb-cfg-field">
                             <span class="pb-lbl">Reserva Gold</span>
@@ -5898,10 +5898,10 @@
                 if (!Number.isNaN(v)) CONFIG.caidos.highLevelUltraThreshold = Math.max(1, Math.min(200, v));
             } else if (key === 'targetBalls') {
                 const v = parseInt(cfgEl.value, 10);
-                if (!Number.isNaN(v)) CONFIG.restock.targetBalls = Math.max(10, Math.min(5000, v));
+                if (!Number.isNaN(v)) CONFIG.restock.targetBalls = Math.max(10, Math.min(1000000, v));
             } else if (key === 'targetPotions') {
                 const v = parseInt(cfgEl.value, 10);
-                if (!Number.isNaN(v)) CONFIG.restock.targetPotions = Math.max(0, Math.min(5000, v));
+                if (!Number.isNaN(v)) CONFIG.restock.targetPotions = Math.max(0, Math.min(1000000, v));
             } else if (key === 'minGoldReserve') {
                 const v = parseInt(cfgEl.value, 10);
                 if (!Number.isNaN(v)) CONFIG.restock.minGoldReserve = Math.max(0, v);

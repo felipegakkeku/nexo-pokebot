@@ -471,7 +471,7 @@ function normalizeConfigPatch(current, patch = {}) {
     }
     if (patch.targetBalls !== undefined) {
         const n = Number(patch.targetBalls);
-        if (Number.isFinite(n)) next.targetBalls = Math.max(10, Math.min(5000, Math.round(n)));
+        if (Number.isFinite(n)) next.targetBalls = Math.max(10, Math.min(1000000, Math.round(n)));
     }
     if (patch.minBalls !== undefined) {
         const n = Number(patch.minBalls);
@@ -481,7 +481,7 @@ function normalizeConfigPatch(current, patch = {}) {
     }
     if (patch.targetPotions !== undefined) {
         const n = Number(patch.targetPotions);
-        if (Number.isFinite(n)) next.targetPotions = Math.max(0, Math.min(5000, Math.round(n)));
+        if (Number.isFinite(n)) next.targetPotions = Math.max(0, Math.min(1000000, Math.round(n)));
     }
     if (patch.preferredPotionIds !== undefined) {
         next.preferredPotionIds = normalizePotionIds(patch.preferredPotionIds);
@@ -501,7 +501,7 @@ function normalizeConfigPatch(current, patch = {}) {
     }
     if (patch.targetRevives !== undefined) {
         const n = Number(patch.targetRevives);
-        if (Number.isFinite(n)) next.targetRevives = Math.max(0, Math.min(5000, Math.round(n)));
+        if (Number.isFinite(n)) next.targetRevives = Math.max(0, Math.min(1000000, Math.round(n)));
     }
     if (patch.restockRevive !== undefined) {
         next.restockRevive = Boolean(patch.restockRevive);
