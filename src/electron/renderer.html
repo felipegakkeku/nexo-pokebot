@@ -115,10 +115,12 @@
             <div class="menu-sec">
               <div class="menu-label" data-icon="palette">Tema</div>
               <div class="swatch-row" id="themeSwatches" role="radiogroup" aria-label="Tema">
-                <button type="button" class="swatch theme-sw" data-theme-pick="marinho" role="radio" title="Marinho" aria-label="Tema marinho"></button>
-                <button type="button" class="swatch theme-sw" data-theme-pick="grafite" role="radio" title="Grafite" aria-label="Tema grafite"></button>
-                <button type="button" class="swatch theme-sw" data-theme-pick="oled" role="radio" title="Preto OLED" aria-label="Tema preto OLED"></button>
-                <button type="button" class="swatch theme-sw" data-theme-pick="contraste" role="radio" title="Alto contraste" aria-label="Tema alto contraste"></button>
+                <button type="button" class="swatch theme-sw" data-theme-pick="marinho" role="radio" title="Tema Marinho" aria-label="Tema Marinho">Marinho</button>
+                <button type="button" class="swatch theme-sw" data-theme-pick="grafite" role="radio" title="Tema Grafite" aria-label="Tema Grafite">Grafite</button>
+                <button type="button" class="swatch theme-sw" data-theme-pick="oled" role="radio" title="Tema Preto OLED" aria-label="Tema Preto OLED">Preto OLED</button>
+                <button type="button" class="swatch theme-sw" data-theme-pick="contraste" role="radio" title="Tema Contraste" aria-label="Tema Contraste">Contraste</button>
+                <button type="button" class="swatch theme-sw" data-theme-pick="indigo" role="radio" title="Tema Índigo" aria-label="Tema Índigo">Índigo</button>
+                <button type="button" class="swatch theme-sw" data-theme-pick="floresta" role="radio" title="Tema Floresta" aria-label="Tema Floresta">Floresta</button>
               </div>
               <div class="menu-label accent-acc-label">Cor da <b id="accentAccName">Conta 1</b><button type="button" class="link-btn" id="btnAccentAll" title="Aplica esta cor a todas as contas">Usar em todas</button></div>
               <div class="swatch-row" id="accentSwatches" role="radiogroup" aria-label="Cor de destaque da conta">
@@ -133,30 +135,47 @@
             <div class="menu-sec">
               <div class="menu-label" data-icon="sparkles">Fundo</div>
               <div class="bg-grid" id="bgSwatches" role="radiogroup" aria-label="Fundo">
-                <button type="button" class="bg-sw" data-bg-pick="liso" role="radio" title="Liso: usa as cores do tema">Liso</button>
+                <button type="button" class="bg-sw" data-bg-pick="liso" role="radio" title="Liso: só as cores do tema">Liso</button>
                 <button type="button" class="bg-sw" data-bg-pick="aurora" role="radio" title="Aurora">Aurora</button>
                 <button type="button" class="bg-sw" data-bg-pick="nebulosa" role="radio" title="Nebulosa">Nebulosa</button>
                 <button type="button" class="bg-sw" data-bg-pick="crepusculo" role="radio" title="Crepúsculo">Crepúsculo</button>
                 <button type="button" class="bg-sw" data-bg-pick="oceano" role="radio" title="Oceano">Oceano</button>
-                <button type="button" class="bg-sw" data-bg-pick="fogo" role="radio" title="Fogo">Fogo</button>
-                <button type="button" class="bg-sw" data-bg-pick="agua" role="radio" title="Água">Água</button>
-                <button type="button" class="bg-sw" data-bg-pick="planta" role="radio" title="Planta">Planta</button>
-                <button type="button" class="bg-sw" data-bg-pick="eletrico" role="radio" title="Elétrico">Elétrico</button>
-                <button type="button" class="bg-sw" data-bg-pick="gelo" role="radio" title="Gelo">Gelo</button>
-                <button type="button" class="bg-sw" data-bg-pick="psiquico" role="radio" title="Psíquico">Psíquico</button>
-                <button type="button" class="bg-sw" data-bg-pick="fantasma" role="radio" title="Fantasma">Fantasma</button>
-                <button type="button" class="bg-sw" data-bg-pick="dragao" role="radio" title="Dragão">Dragão</button>
-                <button type="button" class="bg-sw" data-bg-pick="sombrio" role="radio" title="Sombrio">Sombrio</button>
-                <button type="button" class="bg-sw" data-bg-pick="fada" role="radio" title="Fada">Fada</button>
-                <button type="button" class="bg-sw" data-bg-pick="pokebola" role="radio" title="Pokébola">Pokébola</button>
+                <button type="button" class="bg-sw" data-bg-pick="estrelas" role="radio" title="Estrelas">Estrelas</button>
                 <button type="button" class="bg-sw" data-bg-pick="custom" role="radio" title="Escolha as suas cores">Seu</button>
+              </div>
+              <div class="bg-group">Tipos de Pokémon</div>
+              <div class="bg-grid types" role="radiogroup" aria-label="Fundo por tipo">
+                <button type="button" class="bg-sw" data-bg-pick="normal" role="radio" title="Tipo Normal">Normal</button>
+                <button type="button" class="bg-sw" data-bg-pick="fogo" role="radio" title="Tipo Fogo">Fogo</button>
+                <button type="button" class="bg-sw" data-bg-pick="agua" role="radio" title="Tipo Água">Água</button>
+                <button type="button" class="bg-sw" data-bg-pick="planta" role="radio" title="Tipo Planta">Planta</button>
+                <button type="button" class="bg-sw" data-bg-pick="eletrico" role="radio" title="Tipo Elétrico">Elétrico</button>
+                <button type="button" class="bg-sw" data-bg-pick="gelo" role="radio" title="Tipo Gelo">Gelo</button>
+                <button type="button" class="bg-sw" data-bg-pick="lutador" role="radio" title="Tipo Lutador">Lutador</button>
+                <button type="button" class="bg-sw" data-bg-pick="venenoso" role="radio" title="Tipo Venenoso">Venenoso</button>
+                <button type="button" class="bg-sw" data-bg-pick="terra" role="radio" title="Tipo Terra">Terra</button>
+                <button type="button" class="bg-sw" data-bg-pick="voador" role="radio" title="Tipo Voador">Voador</button>
+                <button type="button" class="bg-sw" data-bg-pick="psiquico" role="radio" title="Tipo Psíquico">Psíquico</button>
+                <button type="button" class="bg-sw" data-bg-pick="inseto" role="radio" title="Tipo Inseto">Inseto</button>
+                <button type="button" class="bg-sw" data-bg-pick="pedra" role="radio" title="Tipo Pedra">Pedra</button>
+                <button type="button" class="bg-sw" data-bg-pick="fantasma" role="radio" title="Tipo Fantasma">Fantasma</button>
+                <button type="button" class="bg-sw" data-bg-pick="dragao" role="radio" title="Tipo Dragão">Dragão</button>
+                <button type="button" class="bg-sw" data-bg-pick="sombrio" role="radio" title="Tipo Sombrio">Sombrio</button>
+                <button type="button" class="bg-sw" data-bg-pick="aco" role="radio" title="Tipo Aço">Aço</button>
+                <button type="button" class="bg-sw" data-bg-pick="fada" role="radio" title="Tipo Fada">Fada</button>
+                <button type="button" class="bg-sw" data-bg-pick="pokebola" role="radio" title="Pokébola">Pokébola</button>
               </div>
               <div class="bg-custom hidden" id="bgCustom">
                 <label>Cor 1 <input type="color" id="bgC1" value="#8b5cf6" /></label>
                 <label>Cor 2 <input type="color" id="bgC2" value="#0ea5e9" /></label>
-                <select id="bgElem" aria-label="Desenho do fundo"><option value="">Sem desenho</option><option value="fogo">Fogo</option><option value="agua">Água</option><option value="planta">Planta</option><option value="eletrico">Elétrico</option><option value="gelo">Gelo</option><option value="psiquico">Psíquico</option><option value="fantasma">Fantasma</option><option value="dragao">Dragão</option><option value="sombrio">Sombrio</option><option value="fada">Fada</option><option value="pokebola">Pokébola</option></select>
+                <select id="bgElem" aria-label="Desenho do fundo"><option value="">Sem desenho</option><option value="normal">Normal</option><option value="fogo">Fogo</option><option value="agua">Água</option><option value="planta">Planta</option><option value="eletrico">Elétrico</option><option value="gelo">Gelo</option><option value="lutador">Lutador</option><option value="venenoso">Venenoso</option><option value="terra">Terra</option><option value="voador">Voador</option><option value="psiquico">Psíquico</option><option value="inseto">Inseto</option><option value="pedra">Pedra</option><option value="fantasma">Fantasma</option><option value="dragao">Dragão</option><option value="sombrio">Sombrio</option><option value="aco">Aço</option><option value="fada">Fada</option><option value="pokebola">Pokébola</option><option value="estrelas">Estrelas</option></select>
               </div>
-              <div class="menu-hint">As cores claras viram só um brilho: o fundo continua escuro.</div>
+              <div class="mini-seg bg-int hidden" id="bgIntSeg" role="radiogroup" aria-label="Intensidade do fundo">
+                <button type="button" data-bgint-pick="sutil" role="radio">Sutil</button>
+                <button type="button" data-bgint-pick="medio" role="radio">Médio</button>
+                <button type="button" data-bgint-pick="forte" role="radio">Forte</button>
+              </div>
+              <div class="menu-hint">O fundo combina com o tema acima e continua sempre escuro.</div>
             </div>
             <div class="menu-sec">
               <div class="menu-label" data-icon="hud">Barra sobre o jogo</div>
@@ -443,6 +462,7 @@
                     <option value="202">Ultra Potion (400g)</option>
                     <option value="203">Hyper Potion (800g)</option>
                     <option value="204">Ultimate Potion (1.500g)</option>
+                    <option value="70070">Golden Potion</option>
                   </select>
                 </div>
                 <div class="field"><label for="cReserve">Reserva mínima gold</label><input type="number" id="cReserve" min="0" max="100000000" step="5000" /></div>

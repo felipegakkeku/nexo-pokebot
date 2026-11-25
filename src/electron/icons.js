@@ -3,7 +3,7 @@
 // e injeta um único conjunto de ícones SVG (traço 2px, grade 24x24).
 (function () {
     const root = document.documentElement;
-    const THEMES = ['marinho', 'grafite', 'oled', 'contraste'];
+    const THEMES = ['marinho', 'grafite', 'oled', 'contraste', 'indigo', 'floresta'];
     const ACCENTS = ['azul', 'ciano', 'violeta', 'rosa', 'esmeralda', 'laranja'];
     const read = (k, fallback) => {
         try { return localStorage.getItem(k) || fallback; } catch { return fallback; }
@@ -13,8 +13,9 @@
     if (THEMES.includes(theme) && theme !== 'marinho') root.dataset.theme = theme;
 
     // Fundo (gradiente, tipo de Pokémon ou cores próprias). Sempre escuro: a cor vira brilho.
-    const BACKDROPS = ['liso', 'aurora', 'nebulosa', 'crepusculo', 'oceano', 'fogo', 'agua', 'planta', 'eletrico', 'gelo', 'psiquico', 'fantasma', 'dragao', 'sombrio', 'fada', 'pokebola', 'custom'];
-    const BG_ELEMS = ['fogo', 'agua', 'planta', 'eletrico', 'gelo', 'psiquico', 'fantasma', 'dragao', 'sombrio', 'fada', 'pokebola'];
+    const BACKDROPS = ['liso', 'aurora', 'nebulosa', 'crepusculo', 'oceano', 'estrelas', 'normal', 'fogo', 'agua', 'planta', 'eletrico', 'gelo', 'lutador', 'venenoso', 'terra', 'voador', 'psiquico', 'inseto', 'pedra', 'fantasma', 'dragao', 'sombrio', 'aco', 'fada', 'pokebola', 'custom'];
+    const BG_ELEMS = ['normal', 'fogo', 'agua', 'planta', 'eletrico', 'gelo', 'lutador', 'venenoso', 'terra', 'voador', 'psiquico', 'inseto', 'pedra', 'fantasma', 'dragao', 'sombrio', 'aco', 'fada', 'pokebola', 'estrelas'];
+    const BG_INTS = ['sutil', 'medio', 'forte'];
     const HEX = /^#[0-9a-f]{6}$/i;
     function readBgCustom() {
         let c = null;
@@ -27,6 +28,8 @@
     }
     function applyBackdrop() {
         const b = read('nexo.backdrop', 'liso');
+        const bi = read('nexo.backdropInt', 'medio');
+        root.dataset.bgInt = BG_INTS.includes(bi) ? bi : 'medio';
         const cus = readBgCustom();
         root.style.setProperty('--bgc1', cus.c1);
         root.style.setProperty('--bgc2', cus.c2);
@@ -172,6 +175,10 @@
         try { localStorage.setItem('nexo.backdrop', BACKDROPS.includes(b) ? b : 'liso'); } catch { /* ignore */ }
         applyBackdrop();
     }
+    function setBackdropIntensity(v) {
+        try { localStorage.setItem('nexo.backdropInt', BG_INTS.includes(v) ? v : 'medio'); } catch { /* ignore */ }
+        applyBackdrop();
+    }
     function setBackdropCustom(patch) {
         const next = { ...readBgCustom(), ...(patch || {}) };
         try { localStorage.setItem('nexo.backdropCustom', JSON.stringify(next)); } catch { /* ignore */ }
@@ -201,7 +208,8 @@
         getTheme: () => root.dataset.theme || 'marinho',
         getAccent: () => root.dataset.accent || 'azul',
         accountAccent, setAccountAccent, applyAccountAccent,
-        BACKDROPS, setBackdrop, setBackdropCustom,
+        BACKDROPS, setBackdrop, setBackdropCustom, setBackdropIntensity,
+        getBackdropIntensity: () => root.dataset.bgInt || 'medio',
         getBackdrop: () => root.dataset.bg || 'liso',
         getBackdropCustom: readBgCustom,
     };
@@ -215,6 +223,6 @@
         if (ev.key === 'nexo.theme') setTheme(ev.newValue || 'marinho');
         if (ev.key === 'nexo.accent' && !document.querySelector('.acc-tab, .popout-acc')) setAccent(ev.newValue || 'azul');
         if (ev.key === 'nexo.accentByAcc') accMap = readAccMap();
-        if (ev.key === 'nexo.backdrop' || ev.key === 'nexo.backdropCustom') applyBackdrop();
+        if (ev.key === 'nexo.backdrop' || ev.key === 'nexo.backdropCustom' || ev.key === 'nexo.backdropInt') applyBackdrop();
     });
 })();

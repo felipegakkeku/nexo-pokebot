@@ -1391,6 +1391,9 @@
         const bg = window.nexoIcons?.getBackdrop?.() || 'liso';
         document.querySelectorAll('[data-bg-pick]').forEach((b) => b.setAttribute('aria-checked', b.dataset.bgPick === bg ? 'true' : 'false'));
         $('bgCustom')?.classList.toggle('hidden', bg !== 'custom');
+        $('bgIntSeg')?.classList.toggle('hidden', bg === 'liso');
+        const bgi = window.nexoIcons?.getBackdropIntensity?.() || 'medio';
+        document.querySelectorAll('[data-bgint-pick]').forEach((b) => b.setAttribute('aria-checked', b.dataset.bgintPick === bgi ? 'true' : 'false'));
         const cus = window.nexoIcons?.getBackdropCustom?.();
         if (cus) {
             if ($('bgC1') && document.activeElement !== $('bgC1')) $('bgC1').value = cus.c1;
@@ -1958,6 +1961,7 @@
         for (const [id, key] of [['bgC1', 'c1'], ['bgC2', 'c2']]) {
             $(id)?.addEventListener('input', (ev) => window.nexoIcons?.setBackdropCustom?.({ [key]: ev.target.value }));
         }
+        document.querySelectorAll('[data-bgint-pick]').forEach((b) => b.addEventListener('click', () => { window.nexoIcons?.setBackdropIntensity?.(b.dataset.bgintPick); syncMenuState(); }));
         $('bgElem')?.addEventListener('change', (ev) => window.nexoIcons?.setBackdropCustom?.({ elem: ev.target.value }));
         document.querySelectorAll('[data-accent-pick]').forEach((b) => b.addEventListener('click', () => {
             const ni = window.nexoIcons;
