@@ -1730,17 +1730,16 @@ function renderActiveAccountPanel() {
     setText($('kKills'), fmtNum(st.kills));
     setText($('kKillsSub'), `${st.killsPerMin || 0}/min`);
     setText($('kXp'), fmtNum(st.xpGained));
-    setText($('kXpSub'), `${fmtNum(st.xpPerHour)}/h · treinador ${fmtNum(st.xpTrainerPerHour)}/h`);
+    setText($('kXpSub'), `treinador +${fmtNum(st.xpTrainerGained || 0)}`);
     const netGold = st.netGold ?? st.goldGained ?? 0;
-    const netPerH = st.netGoldPerHour ?? st.goldPerHour ?? 0;
     setText($('kGold'), `${netGold >= 0 ? '' : '-'}${fmtNum(Math.abs(netGold))}`);
-    setText($('kGoldSub'), `${netPerH >= 0 ? '+' : '-'}${fmtNum(Math.abs(netPerH))}/h líq.`);
+    setText($('kGoldSub'), `bruto +${fmtNum(st.goldGained || 0)} · gasto ${fmtNum(st.spentGold || 0)}`);
     setText($('kCaps'), fmtNum(st.captures));
     setText($('kCapsSub'), `${Number(st.shiniesCaptured || 0) === 1 ? '1 shiny' : `${st.shiniesCaptured || 0} shinies`} · ${fmtNum(st.ballsThrown)} bolas`);
 
     const fmtDec = (n) => String(Number(n || 0)).replace('.', ',');
     setText($('eAvgKill'), st.avgKillSec > 0 ? `${fmtDec(st.avgKillSec)}s` : '-');
-    setText($('eAvgKillSub'), `${fmtDec(st.killsPerMin || 0)} abates/min`);
+    setText($('eAvgKillSub'), '');
     setText($('eCapKill'), st.kills > 0 ? `${fmtDec(st.capturePerKillPct || 0)}%` : '-');
     setText($('eCapKillSub'), st.killsPerCapture > 0 ? `1 a cada ${fmtDec(st.killsPerCapture)} abates` : 'sem capturas');
     setText($('eBallCap'), st.ballsPerCapture > 0 ? fmtDec(st.ballsPerCapture) : '-');

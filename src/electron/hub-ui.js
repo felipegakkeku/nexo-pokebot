@@ -124,7 +124,7 @@
           <div class="hero gold ${gold < 0 ? 'neg' : 'pos'}" title="Ouro ganho menos o gasto em itens, por hora.">
             <div class="hero-top"><span class="hero-lbl">${IC('coins')}Lucro por hora</span>${trendHtml(trendOf(acc, 'goldRate'))}</div>
             <div class="hero-val">${signed(gold)}</div>
-            <div class="hero-sub">Bruto +${fmtCompact(st.goldGained)} · gasto ${fmtCompact(st.spentGold)}</div>
+            <div class="hero-sub">Já descontado o gasto em itens</div>
             ${sparkSvg(goldVals, gold < 0 ? 'neg' : 'gold')}
           </div>
           <div class="hero shiny${missed ? ' has-miss' : ''}" title="Shinies capturados e vistos nesta sessão.">
