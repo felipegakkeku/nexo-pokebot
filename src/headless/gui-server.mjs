@@ -3362,9 +3362,18 @@ export function createHeadlessController(options = {}) {
     const ownShinies = []; // ficha dos shinies capturados por esta conta (para o cartao na HUD)
     let lastBallThrown = null;
 
+    // Nome do shiny: tira o prefixo "Shiny" que o jogo às vezes manda e cai no catálogo pela espécie.
+    const shinyMobName = (rawName, speciesId) => {
+        const clean = String(rawName || '').replace(/^\s*shiny\b[\s:-]*/i, '').trim();
+        if (clean) return clean;
+        const sp = speciesId != null ? catalog.pokemonNames?.[speciesId] : '';
+        return sp || '';
+    };
+
     const recordMissedShiny = (pending, ts) => {
         const curSlug = merger.getState()?.huntSlug || '';
-        const name = pending.name || 'Shiny';
+        const name = shinyMobName(pending.name, pending.speciesId)
+            || (pending.speciesId != null ? `#${pending.speciesId}` : 'Pokémon desconhecido');
         stats.shiniesMissed = Number(stats.shiniesMissed || 0) + 1;
         missedShinies.unshift({
             id: nextMissedShinyId++,
@@ -3431,14 +3440,16 @@ export function createHeadlessController(options = {}) {
             const slotKey = `slot:${slot}`;
             activeSlotKeys.add(slotKey);
             const p = pendingShinies.get(slot);
-            if (!p || (p.name && mob.nome && p.name !== mob.nome)) {
+            const mobName = shinyMobName(mob.nome, mob.speciesId);
+            if (!p || (p.name && mobName && p.name !== mobName)) {
                 if (p) recordMissedShiny(p, ts);
-                pendingShinies.set(slot, { seenAt: ts, name: mob.nome || '', level: mob.level ?? null, goneAt: 0 });
+                pendingShinies.set(slot, { seenAt: ts, name: shinyMobName(mob.nome, mob.speciesId), speciesId: mob.speciesId ?? null, level: mob.level ?? null, goneAt: 0 });
                 seenShinySlots.add(slotKey);
                 stats.shiniesSeen += 1;
             } else {
                 p.goneAt = 0;
-                if (!p.name && mob.nome) p.name = mob.nome;
+                if (!p.name && mobName) p.name = mobName;
+                if (p.speciesId == null && mob.speciesId != null) p.speciesId = mob.speciesId;
                 if (p.level == null && mob.level != null) p.level = mob.level;
                 if (!seenShinySlots.has(slotKey)) {
                     seenShinySlots.add(slotKey);
@@ -4136,7 +4147,7 @@ export function createHeadlessController(options = {}) {
                 if (e.shiny && !isNonWildScene(merger.getState())) {
                     if (e.slot != null) {
                         const p = pendingShinies.get(e.slot)
-                            || { seenAt: ts, name: e.nome || '', level: e.level ?? e.nivel ?? null, goneAt: 0 };
+                            || { seenAt: ts, name: shinyMobName(e.nome, e.speciesId ?? e.p), speciesId: e.speciesId ?? e.p ?? null, level: e.level ?? e.nivel ?? null, goneAt: 0 };
                         p.touchAt = ts;
                         p.ballId = bId;
                         pendingShinies.set(e.slot, p);
