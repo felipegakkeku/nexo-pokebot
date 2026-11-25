@@ -31,6 +31,8 @@ let lastLiveChanSig = '';
 let lastShinySig = '';
 let chatReminderTimer = null;
 let lastDropsSig = '';
+let lastTrainerSig = '';
+let lastSniperSig = '';
 let pollTimer = null;
 let huntCountdownTimer = null;
 let toastPos = (() => {
@@ -1850,6 +1852,8 @@ function renderActiveAccountPanel() {
             allowInp.value = Array.isArray(cfg.dropNotifyAllowItems) ? cfg.dropNotifyAllowItems.join(', ') : '';
         }
     }
+    renderTrainerCard(data);
+    renderSniperCard(data);
 
     // Connections
     const profSel = $('cBrowserProfile');
@@ -1887,6 +1891,146 @@ function renderActiveAccountPanel() {
     if (!$('tab-lives').classList.contains('hidden')) renderLives(lv);
     if ($('tab-activity').classList.contains('hidden')) return;
     renderActivity(data);
+}
+
+function renderTrainerCard(data) {
+    const tr = data?.xpTrainer;
+    const cfg = data?.config || {};
+    if (!tr) return;
+
+    const badge = $('trainerBadge');
+    if (badge) {
+        badge.textContent = `${tr.expShareBag ?? 0} livre${tr.expShareBag === 1 ? '' : 's'} · ${tr.expShareEquipped ?? 0} Exp. Share · ${tr.houseSlotsOccupied ?? 0}/${tr.houseSlotsTotal ?? 0} Casa`;
+    }
+    if ($('cTrainerEnabled')) $('cTrainerEnabled').checked = Boolean(cfg.trainerEnabled);
+    if ($('cTrainerUseExpShare')) $('cTrainerUseExpShare').checked = cfg.trainerUseExpShare !== false;
+    if ($('cTrainerUseHouses')) $('cTrainerUseHouses').checked = cfg.trainerUseHouses !== false;
+    const modeEl = $('cTrainerMode');
+    if (modeEl && document.activeElement !== modeEl) modeEl.value = cfg.trainerMode === 'sequential' ? 'sequential' : 'step';
+    const stepEl = $('cTrainerStep');
+    if (stepEl && document.activeElement !== stepEl) stepEl.value = String(cfg.trainerStepLevels ?? 50);
+
+    const pokes = Array.isArray(tr.availablePokemons) ? tr.availablePokemons : [];
+    const sel = $('trainerPokeSelect');
+    if (sel && document.activeElement !== sel) {
+        const queuedIds = new Set((tr.queue || []).map((q) => String(q.pokemonId)));
+        const selList = pokes.filter((p) => !queuedIds.has(String(p.id)));
+        const selSig = `${activeAccount}|${selList.map((p) => `${p.id}:${p.level}:${p.location}`).join(';')}`;
+        if (sel.dataset.sig !== selSig) {
+            sel.dataset.sig = selSig;
+            sel.replaceChildren(
+                ...(selList.length
+                    ? selList.map((p) => {
+                        const locLabel = p.location === 'equipe' ? 'Equipe' : (p.location === 'colecao' ? 'Coleção' : 'Depot');
+                        return new Option(`${p.shiny ? '★ ' : ''}${p.name} (Nv ${p.level} · ${locLabel})`, String(p.id));
+                    })
+                    : [new Option(pokes.length ? 'Todos os listados já estão na fila' : 'Conecte a conta para listar Pokémon', '')])
+            );
+        }
+    }
+
+    const qList = Array.isArray(tr.queue) ? tr.queue : [];
+    const trSig = `${activeAccount}|${tr.mode}|${tr.stepLevels}|${tr.currentStepCeiling}|${qList.map((q) => `${q.idStr}:${q.level}:${q.targetLevel}:${q.hasExpShare}:${q.inHouse}:${q.isActive}:${q.done}`).join(';')}`;
+    if (trSig !== lastTrainerSig) {
+        lastTrainerSig = trSig;
+        const ul = $('trainerQueueList');
+        if (ul) {
+            if (!qList.length) {
+                ul.innerHTML = '<li class="hint-text">Nenhum Pokémon na fila de treino. Escolha um acima e defina o nível alvo.</li>';
+            } else {
+                ul.innerHTML = qList.map((q, idx) => {
+                    const pct = q.level != null && q.targetLevel > 0 ? Math.min(100, Math.round((q.level / q.targetLevel) * 100)) : 0;
+                    const locTxt = q.location === 'equipe' ? 'Equipe' : (q.location === 'colecao' ? 'Coleção' : (q.location === 'depot' ? 'Depot' : 'Fora'));
+                    let tagHtml = '<span class="trainer-tag">Na fila</span>';
+                    if (q.done) tagHtml = '<span class="trainer-tag done">Concluído</span>';
+                    else if (q.inHouse) tagHtml = '<span class="trainer-tag house">Na Casa</span>';
+                    else if (q.hasExpShare) tagHtml = '<span class="trainer-tag">Exp. Share 5%</span>';
+                    else if (q.isActive) tagHtml = '<span class="trainer-tag">Ativo</span>';
+                    const stepNote = tr.mode === 'step' && !q.done && q.stepGoal && q.stepGoal < q.targetLevel ? ` · degrau ${q.stepGoal}` : '';
+                    return `<li class="trainer-row${q.done ? ' done' : ''}">` +
+                        `<div class="trainer-row-main">` +
+                        `<div class="trainer-row-head"><b>${q.shiny ? '★ ' : ''}${escapeHtml(q.name)}</b>${tagHtml}</div>` +
+                        `<div class="trainer-row-sub">Nv ${q.level ?? '?'} / alvo Nv ${q.targetLevel}${stepNote} · ${locTxt}</div>` +
+                        `<div class="trainer-bar"><span style="width:${pct}%"></span></div></div>` +
+                        `<div class="trainer-row-acts">` +
+                        `<button type="button" class="btn sm" data-tr-act="up" data-tr-id="${escapeHtml(q.idStr)}" ${idx === 0 ? 'disabled' : ''} title="Subir">↑</button>` +
+                        `<button type="button" class="btn sm" data-tr-act="down" data-tr-id="${escapeHtml(q.idStr)}" ${idx === qList.length - 1 ? 'disabled' : ''} title="Descer">↓</button>` +
+                        `<button type="button" class="btn sm danger" data-tr-act="del" data-tr-id="${escapeHtml(q.idStr)}" title="Remover">×</button>` +
+                        `</div></li>`;
+                }).join('');
+            }
+        }
+    }
+}
+
+function renderSniperCard(data) {
+    const sn = data?.sniper;
+    const cfg = data?.config || {};
+    if (!sn) return;
+
+    const badge = $('sniperSaldoBadge');
+    if (badge) {
+        badge.textContent = `Gold ${fmtNum(sn.gold || 0)} · Gemas ${fmtNum(sn.orbs || 0)}`;
+    }
+    if ($('cSniperEnabled')) $('cSniperEnabled').checked = Boolean(cfg.sniperEnabled);
+    const intEl = $('cSniperInterval');
+    if (intEl && document.activeElement !== intEl) intEl.value = String(cfg.sniperIntervalSec ?? 30);
+    const mgEl = $('cSniperMinGold');
+    if (mgEl && document.activeElement !== mgEl) mgEl.value = String(cfg.sniperMinGoldReserve ?? 0);
+    const moEl = $('cSniperMinOrbs');
+    if (moEl && document.activeElement !== moEl) moEl.value = String(cfg.sniperMinOrbsReserve ?? 0);
+
+    const catList = Array.isArray(sn.marketItems) ? sn.marketItems : [];
+    const dl = $('sniperItemsList');
+    if (dl && dl.dataset.count !== String(catList.length)) {
+        dl.dataset.count = String(catList.length);
+        dl.replaceChildren(...catList.map((it) => {
+            const opt = document.createElement('option');
+            opt.value = `${it.name} (#${it.id})`;
+            return opt;
+        }));
+    }
+
+    const rules = Array.isArray(sn.rules) ? sn.rules : [];
+    const hits = Array.isArray(sn.recentHits) ? sn.recentHits : [];
+    const snSig = `${activeAccount}|${rules.map((r) => `${r.id}:${r.maxPrice}:${r.maxQty}:${r.boughtQty}:${r.autoBuy}:${r.enabled}:${r.currentMinPrice}`).join(';')}|${hits.length}:${hits[0]?.ts || 0}`;
+    if (snSig !== lastSniperSig) {
+        lastSniperSig = snSig;
+        const rList = $('sniperRulesList');
+        if (rList) {
+            if (!rules.length) {
+                rList.innerHTML = '<li class="hint-text">Nenhuma regra de snipe criada. Adicione um item, moeda e preço máximo acima.</li>';
+            } else {
+                rList.innerHTML = rules.map((r) => {
+                    const moedaTxt = r.currency === 'orb' ? 'gemas' : 'gold';
+                    const minTxt = typeof r.currentMinPrice === 'number' ? ` · menor atual ${fmtNum(r.currentMinPrice)}` : '';
+                    const avgTxt = typeof r.avgPrice === 'number' ? ` · média ${fmtNum(r.avgPrice)}` : '';
+                    const qtyTxt = r.maxQty > 0 ? ` · ${r.boughtQty || 0}/${r.maxQty} comprados` : (r.boughtQty > 0 ? ` · ${r.boughtQty} comprados` : '');
+                    return `<li class="sniper-rule-row">` +
+                        `<div class="sniper-rule-main">` +
+                        `<div class="sniper-rule-head"><b>${escapeHtml(r.itemName || `Item #${r.itemId}`)}</b>` +
+                        `<span class="sniper-tag${r.currency === 'orb' ? ' orb' : ''}">${moedaTxt.toUpperCase()}</span>` +
+                        `${r.autoBuy ? '<span class="sniper-tag auto">AUTO</span>' : '<span class="sniper-tag">AVISO</span>'}</div>` +
+                        `<div class="sniper-rule-sub">Máx ${fmtNum(r.maxPrice)} ${moedaTxt}${minTxt}${avgTxt}${qtyTxt}</div></div>` +
+                        `<div class="sniper-rule-acts">` +
+                        `<button type="button" class="btn sm" data-sn-act="toggle-auto" data-sn-id="${escapeHtml(r.id)}" title="Alternar compra automática / só avisar">${r.autoBuy ? 'Auto' : 'Aviso'}</button>` +
+                        `<button type="button" class="btn sm" data-sn-act="toggle-on" data-sn-id="${escapeHtml(r.id)}" title="Ativar/pausar regra">${r.enabled !== false ? 'Ativa' : 'Pausada'}</button>` +
+                        `<button type="button" class="btn sm danger" data-sn-act="del" data-sn-id="${escapeHtml(r.id)}" title="Remover regra">×</button>` +
+                        `</div></li>`;
+                }).join('');
+            }
+        }
+        const hList = $('sniperHitsList');
+        if (hList) {
+            hList.innerHTML = hits.slice(0, 6).map((h) => {
+                const tm = h.ts ? new Date(h.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+                const moedaTxt = h.currency === 'orb' ? 'gemas' : 'gold';
+                return `<li class="sniper-hit-line${h.bought ? ' bought' : ''}">` +
+                    `<span><b>${h.bought ? 'Comprou' : 'Oferta'}</b> ${escapeHtml(h.itemName || `Item #${h.itemId}`)} x${fmtNum(h.qty)}</span>` +
+                    `<span>${fmtNum(h.price)} ${moedaTxt} · ${tm}</span></li>`;
+            }).join('');
+        }
+    }
 }
 
 function fmtAgo(ts) {
@@ -2487,11 +2631,16 @@ function toastVisualMeta({ kind = 'info', text = '', event = '', card = null } =
     }
     if (k === 'reward' || event === 'rareDrop' || event === 'vote') {
         let tag = 'BÔNUS';
+        let icon = 'gift';
         if (event === 'rareDrop' || /^Drop\b/i.test(txt)) tag = 'DROP RARO';
+        else if (/^Sniper/i.test(txt)) { tag = 'SNIPER'; icon = 'cart'; }
         else if (event === 'vote' || /voto|diamante/i.test(txt)) tag = 'VOTO';
         else if (/top catch/i.test(txt)) tag = 'TOP CATCH';
         else if (/passe/i.test(txt)) tag = 'PASSE';
-        return { tone: 'reward', cat: 'reward', tag, icon: 'gift', cleanText: txt };
+        return { tone: 'reward', cat: 'reward', tag, icon, cleanText: txt };
+    }
+    if (/^(?:Treinador|Exp\. Share):/i.test(txt)) {
+        return { tone: 'ok', cat: 'hunt', tag: 'TREINO', icon: 'trend', cleanText: txt };
     }
     const isHunt = /hunt|centro m[eé]dico|equipe curada|pok[eé]dex|top catch/i.test(txt);
     if (k === 'ok') {
@@ -2721,7 +2870,7 @@ function isToastWorthyLog(entry, cfg = null) {
     if (k === 'shiny' || k === 'shiny-miss' || k === 'reward' || k === 'error') return true;
     if (k === 'live') return /caixinha|ba[úu] \+\d+|resgatad|coletad|b[ôo]nus|cookies|sincronizad|429/i.test(txt);
     if (k === 'warn') return /sess[aã]o|combate|falha|desconect|expir|erro|morreu|morte|cancelad|limita|shiny|captura|somente ping|feed de campo|429|live/i.test(txt);
-    if (k === 'ok') return /troca de hunt|centro m[eé]dico|equipe curada|conectad|cookies|sincronizad|salva|pok[eé]dex|top catch/i.test(txt);
+    if (k === 'ok') return /troca de hunt|centro m[eé]dico|equipe curada|conectad|cookies|sincronizad|salva|pok[eé]dex|top catch|treinador: .* (?:atingiu|concluiu|equipado)/i.test(txt);
     if (k === 'info') return /\/hunt recomenda|troca .* agendada|indo para o centro|pok[eé]dex|top catch/i.test(txt);
     return false;
 }
@@ -3546,6 +3695,102 @@ function wireEvents() {
     $('cfgFields').addEventListener('input', () => setConfigDirty(true));
     $('cfgChips').addEventListener('change', () => setConfigDirty(true));
     $('btnSaveCfg').addEventListener('click', saveConfig);
+
+    // Treinador (Exp. Share + Casas)
+    $('cTrainerEnabled')?.addEventListener('change', (ev) => sendAction('set-config', { config: { trainerEnabled: ev.target.checked } }));
+    $('cTrainerUseExpShare')?.addEventListener('change', (ev) => sendAction('set-config', { config: { trainerUseExpShare: ev.target.checked } }));
+    $('cTrainerUseHouses')?.addEventListener('change', (ev) => sendAction('set-config', { config: { trainerUseHouses: ev.target.checked } }));
+    $('cTrainerMode')?.addEventListener('change', (ev) => sendAction('set-config', { config: { trainerMode: ev.target.value } }));
+    $('cTrainerStep')?.addEventListener('change', (ev) => sendAction('set-config', { config: { trainerStepLevels: Number(ev.target.value) || 50 } }));
+    $('btnTrainerAdd')?.addEventListener('click', async () => {
+        const idRaw = $('trainerPokeSelect')?.value;
+        const targetLvl = Math.max(2, Math.floor(Number($('trainerTargetLvl')?.value || 200) || 200));
+        if (!idRaw) return;
+        const tr = snapshots[activeAccount]?.xpTrainer;
+        const pk = (tr?.availablePokemons || []).find((p) => String(p.id) === String(idRaw));
+        const curQueue = [...(snapshots[activeAccount]?.config?.trainerQueue || [])];
+        if (curQueue.some((q) => String(q.pokemonId) === String(idRaw))) return;
+        curQueue.push({
+            pokemonId: pk ? pk.id : (Number.isFinite(Number(idRaw)) ? Number(idRaw) : idRaw),
+            name: pk?.name || '',
+            speciesId: pk?.speciesId ?? null,
+            targetLevel: targetLvl,
+        });
+        await sendAction('set-config', { config: { trainerQueue: curQueue } });
+    });
+    $('trainerQueueList')?.addEventListener('click', async (ev) => {
+        const btn = ev.target.closest('[data-tr-act]');
+        if (!btn) return;
+        const act = btn.dataset.trAct;
+        const idStr = String(btn.dataset.trId || '');
+        const curQueue = [...(snapshots[activeAccount]?.config?.trainerQueue || [])];
+        const idx = curQueue.findIndex((q) => String(q.pokemonId) === idStr);
+        if (idx === -1) return;
+        if (act === 'del') curQueue.splice(idx, 1);
+        else if (act === 'up' && idx > 0) [curQueue[idx - 1], curQueue[idx]] = [curQueue[idx], curQueue[idx - 1]];
+        else if (act === 'down' && idx < curQueue.length - 1) [curQueue[idx + 1], curQueue[idx]] = [curQueue[idx], curQueue[idx + 1]];
+        else return;
+        await sendAction('set-config', { config: { trainerQueue: curQueue } });
+    });
+
+    // Sniper do Mercado
+    $('cSniperEnabled')?.addEventListener('change', (ev) => sendAction('set-config', { config: { sniperEnabled: ev.target.checked } }));
+    $('btnSniperScanNow')?.addEventListener('click', () => sendAction('sniper-scan-now'));
+    $('cSniperInterval')?.addEventListener('change', (ev) => sendAction('set-config', { config: { sniperIntervalSec: Number(ev.target.value) || 30 } }));
+    $('cSniperMinGold')?.addEventListener('change', (ev) => sendAction('set-config', { config: { sniperMinGoldReserve: Math.max(0, Number(ev.target.value) || 0) } }));
+    $('cSniperMinOrbs')?.addEventListener('change', (ev) => sendAction('set-config', { config: { sniperMinOrbsReserve: Math.max(0, Number(ev.target.value) || 0) } }));
+    $('btnSniperAdd')?.addEventListener('click', async () => {
+        const rawText = String($('sniperItemInput')?.value || '').trim();
+        const maxPrice = Math.floor(Number($('sniperMaxPrice')?.value || 0));
+        if (!rawText || !Number.isFinite(maxPrice) || maxPrice <= 0) return;
+        const cat = snapshots[activeAccount]?.sniper?.marketItems || [];
+        const idMatch = rawText.match(/#(\d+)\)?$/) || rawText.match(/^(\d+)$/);
+        let found = idMatch ? cat.find((it) => Number(it.id) === Number(idMatch[1])) : null;
+        if (!found) {
+            const clean = rawText.toLowerCase();
+            found = cat.find((it) => it.name.toLowerCase() === clean) || cat.find((it) => it.name.toLowerCase().includes(clean));
+        }
+        const itemId = found ? Number(found.id) : (idMatch ? Number(idMatch[1]) : 0);
+        if (!itemId || itemId <= 0) {
+            showToast({ kind: 'warn', title: 'Sniper', text: 'Escolha um item válido da lista ou informe #ID.' });
+            return;
+        }
+        const itemName = found ? found.name : rawText.replace(/\s*\(#\d+\)$/, '').trim();
+        const currency = $('sniperCurrency')?.value === 'orb' ? 'orb' : 'gold';
+        const maxQty = Math.max(0, Math.floor(Number($('sniperMaxQty')?.value || 0) || 0));
+        const autoBuy = Boolean($('sniperAutoBuy')?.checked);
+        const curRules = [...(snapshots[activeAccount]?.config?.sniperRules || [])];
+        curRules.push({
+            id: `sr_${itemId}_${Date.now()}`,
+            itemId,
+            itemName,
+            currency,
+            maxPrice,
+            maxQty,
+            boughtQty: 0,
+            autoBuy,
+            enabled: true,
+        });
+        if ($('sniperItemInput')) $('sniperItemInput').value = '';
+        await sendAction('set-config', { config: { sniperRules: curRules } });
+    });
+    $('sniperRulesList')?.addEventListener('click', async (ev) => {
+        const btn = ev.target.closest('[data-sn-act]');
+        if (!btn) return;
+        const act = btn.dataset.snAct;
+        const id = btn.dataset.snId;
+        let curRules = [...(snapshots[activeAccount]?.config?.sniperRules || [])];
+        if (act === 'del') {
+            curRules = curRules.filter((r) => r.id !== id);
+        } else if (act === 'toggle-auto') {
+            curRules = curRules.map((r) => (r.id === id ? { ...r, autoBuy: !r.autoBuy } : r));
+        } else if (act === 'toggle-on') {
+            curRules = curRules.map((r) => (r.id === id ? { ...r, enabled: r.enabled === false } : r));
+        } else {
+            return;
+        }
+        await sendAction('set-config', { config: { sniperRules: curRules } });
+    });
 
     $('liveChannelList').addEventListener('change', async (ev) => {
         const sel = ev.target;

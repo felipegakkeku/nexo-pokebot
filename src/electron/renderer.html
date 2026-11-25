@@ -540,6 +540,67 @@
               </div>
             </div>
 
+            <div class="card" id="trainerCard" data-card="trainer">
+              <div class="card-head-row">
+                <h3>Treinador (Exp. Share e Casas)</h3>
+                <span class="scope-badge" id="trainerBadge">0 Exp. Share · 0 Casa</span>
+              </div>
+              <div class="toggle-list">
+                <label class="toggle-item with-sub"><input type="checkbox" id="cTrainerEnabled" /><span class="toggle-copy"><span>Ativar treinador automático</span><span class="toggle-sub">Equipa Exp. Share (5%) e preenche os postos das Casas seguindo a fila e metas de nível abaixo.</span></span></label>
+                <div class="trainer-flags-row">
+                  <label class="pill-chk"><input type="checkbox" id="cTrainerUseExpShare" checked /> Usar Exp. Share</label>
+                  <label class="pill-chk"><input type="checkbox" id="cTrainerUseHouses" checked /> Usar Casas</label>
+                </div>
+              </div>
+              <div class="form-grid" style="margin-top:8px;">
+                <div class="field"><label for="cTrainerMode">Estratégia da fila</label>
+                  <select id="cTrainerMode">
+                    <option value="step">Escadinha (sobe em degraus iguais)</option>
+                    <option value="sequential">Sequencial (1 até o alvo, depois próximo)</option>
+                  </select>
+                </div>
+                <div class="field"><label for="cTrainerStep">Degrau (níveis por rodada)</label><input type="number" id="cTrainerStep" min="5" max="1000" step="5" value="50" /></div>
+              </div>
+              <div class="trainer-add-row">
+                <select id="trainerPokeSelect" aria-label="Escolher Pokémon para treinar"></select>
+                <input type="number" id="trainerTargetLvl" min="2" max="10000" step="10" value="200" title="Nível alvo" aria-label="Nível alvo" />
+                <button type="button" class="btn sm primary" id="btnTrainerAdd">Adicionar</button>
+              </div>
+              <ul class="trainer-queue" id="trainerQueueList"></ul>
+            </div>
+
+            <div class="card" id="sniperCard" data-card="sniper">
+              <div class="card-head-row">
+                <h3>Sniper do Mercado (Gold e Gemas)</h3>
+                <span class="scope-badge" id="sniperSaldoBadge">Gold 0 · Gemas 0</span>
+              </div>
+              <div class="toggle-list">
+                <div class="sniper-top-row">
+                  <label class="toggle-item"><input type="checkbox" id="cSniperEnabled" /> Ativar Sniper do Mercado</label>
+                  <button type="button" class="btn sm" id="btnSniperScanNow" data-icon="refresh">Buscar agora</button>
+                </div>
+              </div>
+              <div class="form-grid" style="margin-top:8px;">
+                <div class="field"><label for="cSniperInterval">Varredura (seg)</label><input type="number" id="cSniperInterval" min="10" max="300" step="5" value="30" /></div>
+                <div class="field"><label for="cSniperMinGold">Reserva Gold</label><input type="number" id="cSniperMinGold" min="0" step="10000" value="0" /></div>
+                <div class="field"><label for="cSniperMinOrbs">Reserva Gemas</label><input type="number" id="cSniperMinOrbs" min="0" step="10" value="0" /></div>
+              </div>
+              <div class="sniper-add-row">
+                <input type="text" id="sniperItemInput" list="sniperItemsList" placeholder="Item (ex: Fire Stone ou Ovo Shiny)" spellcheck="false" aria-label="Nome do item no mercado" />
+                <datalist id="sniperItemsList"></datalist>
+                <select id="sniperCurrency" aria-label="Moeda">
+                  <option value="gold">Gold</option>
+                  <option value="orb">Gemas</option>
+                </select>
+                <input type="number" id="sniperMaxPrice" min="1" step="100" placeholder="Preço máx." aria-label="Preço máximo por unidade" />
+                <input type="number" id="sniperMaxQty" min="0" step="1" placeholder="Qtd (0=ilimit.)" title="Quantidade máxima a comprar (0 = sem limite)" aria-label="Quantidade máxima" />
+                <label class="pill-chk"><input type="checkbox" id="sniperAutoBuy" /> Auto-comprar</label>
+                <button type="button" class="btn sm primary" id="btnSniperAdd">Adicionar</button>
+              </div>
+              <ul class="sniper-rules" id="sniperRulesList"></ul>
+              <ul class="sniper-hits" id="sniperHitsList"></ul>
+            </div>
+
             <div class="card sound-card" id="soundCard" data-card="alerts">
               <div class="card-head-row">
                 <h3>Alertas</h3>

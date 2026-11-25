@@ -3289,3 +3289,48 @@ body.dragging-card .tab-panel > .card:not(.card-dragging) { transition: transfor
 .shiny-modal-title { font-size: var(--fs-lg); font-weight: 800; color: var(--shiny-text); }
 .shiny-modal-meta { font-size: var(--fs-sm); color: var(--muted); margin-bottom: 10px; }
 .drop-prefs-box .field input[type="text"] { width: 100%; }
+
+/* ===== Treinador (Exp. Share / Casas) & Sniper do Mercado ===== */
+.trainer-flags-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+.trainer-add-row, .sniper-add-row {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border);
+}
+.trainer-add-row select { flex: 1 1 200px; min-width: 0; }
+.trainer-add-row input[type="number"] { width: 84px; }
+.sniper-top-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sniper-add-row input[type="text"] { flex: 1 1 180px; min-width: 0; }
+.sniper-add-row select { width: 90px; }
+.sniper-add-row input[type="number"] { width: 96px; }
+.trainer-queue, .sniper-rules, .sniper-hits {
+  list-style: none; margin: 10px 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.trainer-row, .sniper-rule-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center;
+  padding: 8px 10px; border-radius: var(--r-md);
+  background: var(--tile); border: 1px solid var(--border);
+}
+.trainer-row.done { border-color: color-mix(in srgb, var(--green) 45%, var(--border)); opacity: 0.85; }
+.trainer-row-main, .sniper-rule-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.trainer-row-head, .sniper-rule-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.trainer-row-head b, .sniper-rule-head b { font-size: var(--fs-md); color: var(--text-strong); }
+.trainer-row-sub, .sniper-rule-sub { font-size: var(--fs-xs); color: var(--muted); }
+.trainer-bar { height: 4px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--muted) 16%, transparent); overflow: hidden; margin-top: 2px; }
+.trainer-bar > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), var(--green-hi)); }
+.trainer-tag, .sniper-tag {
+  font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: var(--r-pill);
+  background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent-text);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.trainer-tag.house { background: color-mix(in srgb, var(--purple) 18%, transparent); color: #ddd6fe; border-color: color-mix(in srgb, var(--purple) 40%, transparent); }
+.trainer-tag.done { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--ok-text); border-color: color-mix(in srgb, var(--green) 40%, transparent); }
+.sniper-tag.orb { background: color-mix(in srgb, var(--sky) 18%, transparent); color: #bae6fd; border-color: color-mix(in srgb, var(--sky) 40%, transparent); }
+.sniper-tag.auto { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--ok-text); border-color: color-mix(in srgb, var(--green) 40%, transparent); }
+.trainer-row-acts, .sniper-rule-acts { display: flex; align-items: center; gap: 4px; }
+.sniper-hit-line {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: var(--fs-xs); color: var(--text-soft); padding: 4px 8px;
+  border-radius: var(--r-sm); background: color-mix(in srgb, var(--purple) 8%, var(--bg-deep));
+}
+.sniper-hit-line.bought { background: color-mix(in srgb, var(--green) 10%, var(--bg-deep)); }

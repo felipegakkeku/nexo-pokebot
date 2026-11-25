@@ -4,6 +4,12 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+## 1.0.19
+
+- **Treinador Automático (Exp. Share e Casas)**: fila configurável de Pokémon com nível alvo e estratégia em escadinha (de X em X níveis) ou sequencial, trocando Exp. Share (`70050`) respeitando o cooldown oficial de 60s e alocando Pokémon da Equipe/Coleção nos postos livres das Casas ativas sem mexer em Pokémon fora da fila.
+- **Sniper do Mercado da Comunidade (Gold e Gemas)**: monitoramento automático de anúncios em `market.itens` e `market.item` com teto de preço, limite de quantidade, modo compra automática ou alerta, reservas mínimas de Gold e Gemas, reagendamento automático pós-retenção (`compravelEm`) e proteção contra anúncios da própria conta.
+- **Interface e logs**: novos cards dedicados na aba **Automação** para gerenciar fila de treino e regras do sniper, além de categorias de registro e notificações específicas.
+
 ## 1.0.18
 
 - **Notificações, categorias e cor por conta**: separação da categoria **Lives** no registro e nos avisos, remoção do alerta obsoleto de `"exige clique no navegador"`, toasts reposicionadas no topo direito (com escolha de posição no menu `⋯` e desvio automático do painel fixado), e destaque pela cor selecionada de cada conta.

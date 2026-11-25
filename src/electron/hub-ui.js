@@ -642,11 +642,16 @@
         }
         if (k === 'reward') {
             let tag = 'BÔNUS';
+            let icon = 'gift';
             if (/^Drop:/i.test(txt)) tag = 'DROP';
+            else if (/^Sniper/i.test(txt)) { tag = 'SNIPER'; icon = 'cart'; }
             else if (/top catch/i.test(txt)) tag = 'TOP CATCH';
             else if (/passe/i.test(txt)) tag = 'PASSE';
             else if (/diamante|voto/i.test(txt)) tag = 'VOTO';
-            return { vKind: 'reward', cats: ['reward'], tag, icon: 'gift', cleanText: txt };
+            return { vKind: 'reward', cats: ['reward'], tag, icon, cleanText: txt };
+        }
+        if (/^(?:Treinador|Exp\. Share):/i.test(txt)) {
+            return { vKind: 'hunt', cats: ['farm'], tag: 'TREINO', icon: 'trend', cleanText: txt };
         }
         if (k === 'catch') {
             return { vKind: 'catch', cats: ['farm'], tag: 'CAPTURA', icon: 'pokeball', cleanText: txt };
@@ -1625,7 +1630,8 @@
     const CARD_LABEL = {
         poke: 'Pokémon ativo', buffs: 'Buffs das lives', collection: 'Pokédex e Top Catch', perf: 'Desempenho',
         drops: 'Drops', inv: 'Mochila', quick: 'Ações rápidas', hunt: 'Hunt e objetivo', routines: 'Rotinas',
-        prefs: 'Preferências', alerts: 'Alertas', conn: 'Contas vinculadas', liveStats: 'Recompensas da conta',
+        prefs: 'Preferências', trainer: 'Treinador (Exp. Share e Casas)', sniper: 'Sniper do Mercado',
+        alerts: 'Alertas', conn: 'Contas vinculadas', liveStats: 'Recompensas da conta',
         channels: 'Canais e chat', shinyFeed: 'Shinies do servidor',
     };
     let cardState = LS.get('nexo.cards', null);
