@@ -12,6 +12,39 @@
     const accent = read('nexo.accent', 'azul');
     if (THEMES.includes(theme) && theme !== 'marinho') root.dataset.theme = theme;
 
+    // Fundo (gradiente, tipo de Pokémon ou cores próprias). Sempre escuro: a cor vira brilho.
+    const BACKDROPS = ['liso', 'aurora', 'nebulosa', 'crepusculo', 'oceano', 'fogo', 'agua', 'planta', 'eletrico', 'gelo', 'psiquico', 'fantasma', 'dragao', 'sombrio', 'fada', 'pokebola', 'custom'];
+    const BG_ELEMS = ['fogo', 'agua', 'planta', 'eletrico', 'gelo', 'psiquico', 'fantasma', 'dragao', 'sombrio', 'fada', 'pokebola'];
+    const HEX = /^#[0-9a-f]{6}$/i;
+    function readBgCustom() {
+        let c = null;
+        try { c = JSON.parse(localStorage.getItem('nexo.backdropCustom') || 'null'); } catch { c = null; }
+        return {
+            c1: HEX.test(c?.c1 || '') ? c.c1 : '#8b5cf6',
+            c2: HEX.test(c?.c2 || '') ? c.c2 : '#0ea5e9',
+            elem: BG_ELEMS.includes(c?.elem) ? c.elem : '',
+        };
+    }
+    function applyBackdrop() {
+        const b = read('nexo.backdrop', 'liso');
+        const cus = readBgCustom();
+        root.style.setProperty('--bgc1', cus.c1);
+        root.style.setProperty('--bgc2', cus.c2);
+        if (!BACKDROPS.includes(b) || b === 'liso') delete root.dataset.bg;
+        else root.dataset.bg = b;
+        if (b === 'custom') {
+            root.style.setProperty('--bt1', cus.c1);
+            root.style.setProperty('--bt2', cus.c2);
+            if (cus.elem) root.dataset.bgElem = cus.elem;
+            else delete root.dataset.bgElem;
+        } else {
+            root.style.removeProperty('--bt1');
+            root.style.removeProperty('--bt2');
+            delete root.dataset.bgElem;
+        }
+    }
+    applyBackdrop();
+
     // Cada conta tem a própria cor de destaque. Sem nada salvo, a conta 1 herda
     // a cor antiga do app e as outras pegam cores bem diferentes entre si.
     const ACC_DEFAULT = ['azul', 'esmeralda', 'laranja', 'violeta', 'rosa', 'ciano'];
@@ -135,6 +168,15 @@
         else root.dataset.theme = t;
         try { localStorage.setItem('nexo.theme', t); } catch { /* ignore */ }
     }
+    function setBackdrop(b) {
+        try { localStorage.setItem('nexo.backdrop', BACKDROPS.includes(b) ? b : 'liso'); } catch { /* ignore */ }
+        applyBackdrop();
+    }
+    function setBackdropCustom(patch) {
+        const next = { ...readBgCustom(), ...(patch || {}) };
+        try { localStorage.setItem('nexo.backdropCustom', JSON.stringify(next)); } catch { /* ignore */ }
+        applyBackdrop();
+    }
     function setAccent(accent) {
         const a = ACCENTS.includes(accent) ? accent : 'azul';
         paintAccent(a);
@@ -159,6 +201,9 @@
         getTheme: () => root.dataset.theme || 'marinho',
         getAccent: () => root.dataset.accent || 'azul',
         accountAccent, setAccountAccent, applyAccountAccent,
+        BACKDROPS, setBackdrop, setBackdropCustom,
+        getBackdrop: () => root.dataset.bg || 'liso',
+        getBackdropCustom: readBgCustom,
     };
 
     const ready = () => { injectSprite(); hydrate(); };
@@ -170,5 +215,6 @@
         if (ev.key === 'nexo.theme') setTheme(ev.newValue || 'marinho');
         if (ev.key === 'nexo.accent' && !document.querySelector('.acc-tab, .popout-acc')) setAccent(ev.newValue || 'azul');
         if (ev.key === 'nexo.accentByAcc') accMap = readAccMap();
+        if (ev.key === 'nexo.backdrop' || ev.key === 'nexo.backdropCustom') applyBackdrop();
     });
 })();
