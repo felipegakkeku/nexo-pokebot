@@ -4,6 +4,15 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+## 1.0.22
+
+- **Ficha completa do shiny de qualquer treinador**: clicar num shiny anunciado no servidor pede a ficha ao jogo (o mesmo pedido do clique no anúncio, sem abrir janela no jogo aberto) e mostra nota, IV, qualidade, potência, HP de combate, poder e os stats atuais com o IV de cada um. Anúncios de antes desta versão seguem só com espécie e nível.
+- **Nome certo no aviso de shiny que escapou**: o aviso mostra o nome do Pokémon em vez de "Shiny", tirando o prefixo que o jogo às vezes manda e buscando pela espécie quando o nome vem vazio.
+- **Sem falso "Shiny escapou" no centro**: em centro, casa, praça ou arena a contagem de fuga fica parada e recomeça quando o bot volta ao campo.
+- **Gráficos na cor da própria conta**: telas da grade, cartões dos Painéis 2x2 e o painel do Headless usam a cor da sua conta, não a da conta selecionada.
+- **Clique na conta troca o foco da grade**: no layout Foco a conta clicada vira a tela grande; com uma tela maximizada, ela passa a ser a maximizada; nos outros layouts uma conta oculta entra no lugar da ativa.
+- **Listas suspensas no tema escuro**: as opções dos seletores abriam brancas com texto claro; agora seguem o tema.
+
 ## 1.0.21
 
 - **/hunt já vem no Hub**: na primeira abertura o Hub baixa o /hunt da Chrome Web Store oficial para a pasta `.pokebot-hunt-ext`, carrega em todos os navegadores das contas e no avaliador headless, e confere atualização uma vez por dia. Não precisa mais instalar a extensão no Chrome. Sem internet, segue com a cópia que já tiver (ou com a do Chrome, se houver).
