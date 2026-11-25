@@ -378,6 +378,48 @@ function loadGridState() {
     return st;
 }
 
+/**
+ * Clique na aba da conta com a grade aberta: a conta clicada entra no lugar de quem está em foco.
+ * Maximizada: troca a tela maximizada. Layout Foco: troca a tela grande (1 + 3 vira 2 + 3).
+ * Outros layouts: uma conta oculta entra no lugar da conta ativa.
+ */
+function focusAccountInGrid(acc) {
+    if (viewMode !== 'grid' || !ACCOUNTS.includes(acc)) return;
+    const visible = gridState.order.filter((a) => !gridState.hidden.includes(a));
+    const swapWith = (cur) => {
+        if (!cur || cur === acc) return false;
+        const order = [...gridState.order];
+        const i = order.indexOf(acc);
+        const j = order.indexOf(cur);
+        [order[i], order[j]] = [order[j], order[i]];
+        gridState.order = order;
+        if (gridState.hidden.includes(acc)) {
+            gridState.hidden = [...gridState.hidden.filter((a) => a !== acc), cur];
+        }
+        return true;
+    };
+    let changed = false;
+    if (gridState.max && visible.includes(gridState.max)) {
+        if (gridState.max !== acc) {
+            gridState.max = acc;
+            gridState.hidden = gridState.hidden.filter((a) => a !== acc);
+            changed = true;
+        }
+    } else if (gridState.layout === 'focus') {
+        changed = swapWith(visible[0]);
+    } else if (gridState.hidden.includes(acc)) {
+        changed = swapWith(visible.includes(activeAccount) ? activeAccount : visible[0]);
+        if (!changed && !visible.length) {
+            gridState.hidden = gridState.hidden.filter((a) => a !== acc);
+            changed = true;
+        }
+    }
+    if (!changed) return;
+    saveGridState();
+    applyGridLayout();
+    renderGridToolbar();
+}
+
 function saveGridState() {
     try { localStorage.setItem(GRID_STATE_KEY, JSON.stringify(gridState)); } catch { /* ignore */ }
 }
@@ -3900,7 +3942,11 @@ function wireEvents() {
         setToastPos(btn.dataset.toastPos || 'top-right');
     });
     document.querySelectorAll('.acc-tab').forEach((btn) => {
-        btn.addEventListener('click', () => selectAccount(Number(btn.dataset.acc)));
+        btn.addEventListener('click', () => {
+            const acc = Number(btn.dataset.acc);
+            focusAccountInGrid(acc);
+            selectAccount(acc);
+        });
     });
 
     document.querySelectorAll('.seg-btn').forEach((btn) => {

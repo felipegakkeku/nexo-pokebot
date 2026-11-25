@@ -3371,3 +3371,12 @@ select option:disabled {
 .shiny-stat-iv { font-size: var(--fs-xs); font-weight: 800; color: var(--text-soft); text-align: right; }
 .shiny-stat-iv.hi { color: var(--green, #22c55e); }
 .shiny-stat-iv.lo { color: var(--red); }
+
+/* Cada tela e cada cartão de conta usam a cor da própria conta (gráficos, barras e destaques),
+   não a cor da conta selecionada no topo. */
+.wv-slot[data-acc-color],
+.pcard[data-acc-color] {
+  --accent: var(--acc-c);
+  --accent-hi: var(--acc-c);
+  --accent-text: var(--acc-text);
+}
