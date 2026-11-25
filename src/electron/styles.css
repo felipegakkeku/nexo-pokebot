@@ -1,4 +1,6 @@
 :root {
+  /* lista nativa do select, barras de rolagem e campos seguem o tema escuro */
+  color-scheme: dark;
   /* superfícies (mudam por tema) */
   --bg: #080d17;
   --bg-deep: #050811;
@@ -3343,3 +3345,17 @@ body.dragging-card .tab-panel > .card:not(.card-dragging) { transition: transfor
 .perf-panel tr.over td { color: var(--err-text); }
 .perf-panel tr.over td:last-child { font-weight: 700; }
 .perf-info { margin-top: 6px; }
+
+/* Opções das listas suspensas: fundo escuro e texto claro (o Windows desenhava a lista branca com texto claro). */
+select option,
+select optgroup {
+  background-color: var(--bg-elev);
+  color: var(--text);
+}
+select option:checked {
+  background-color: var(--accent-deep);
+  color: var(--on-accent);
+}
+select option:disabled {
+  color: var(--dim);
+}
