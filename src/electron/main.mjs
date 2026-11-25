@@ -10,7 +10,8 @@ import { createPerfSampler } from './perf-meter.mjs';
 import { ensureHuntExtension } from '../headless/hunt-ext-install.mjs';
 import { createHeadlessHuntGuideEvaluator, findHuntExtensionDir } from '../headless/hunt-guide.mjs';
 import { loadAppIconBuffer } from '../desktop/build-exe.mjs';
-import { checkMainAhead, discardStagedMain, markMainApplyAttempt, readMainSyncState, stageMainCommit, stagedMainReady } from '../desktop/main-sync.mjs';
+import { fetchAvisos, pickNewAvisos, readSeenAvisos, saveSeenAvisos } from '../desktop/avisos.mjs';
+import { checkMainAhead,discardStagedMain, markMainApplyAttempt, readMainSyncState, stageMainCommit, stagedMainReady } from '../desktop/main-sync.mjs';
 import {
     checkForUpdate,
     compareSemver,
@@ -206,6 +207,43 @@ async function runUpdateCheck() {
 // ===== Sincronização com o main =====
 const MAIN_SYNC_INTERVAL_MS = 15 * 60 * 1000;
 let mainSyncTimer = null;
+
+// ===== Avisos do repositório (avisos.json no main) =====
+const AVISOS_INTERVAL_MS = 10 * 60 * 1000;
+let avisosTimer = null;
+let avisosBusy = false;
+async function runAvisosCheck() {
+    if (avisosBusy || !mainWindow || mainWindow.isDestroyed()) return;
+    avisosBusy = true;
+    try {
+        const json = await fetchAvisos({ fetchImpl: (u, o) => net.fetch(u, o), signal: AbortSignal.timeout(15_000) });
+        if (!json) return;
+        const dataDir = app.getPath('userData');
+        const seen = readSeenAvisos(dataDir);
+        const fresh = pickNewAvisos(json, { version: installedVersion, seen });
+        if (!fresh.length) return;
+        const focused = mainWindow.isVisible() && mainWindow.isFocused();
+        for (const a of fresh.slice(0, 3)) {
+            seen.add(a.id);
+            mainWindow.webContents.send('hub:aviso', a);
+            if (focused) continue;
+            try {
+                if (!Notification.isSupported()) continue;
+                const icon = getAppIcon();
+                const n = new Notification({ title: a.title, body: a.text, ...(icon ? { icon } : {}) });
+                n.on('click', () => {
+                    showMainWindow();
+                    if (a.link) void shell.openExternal(a.link);
+                });
+                n.show();
+            } catch { /* notificação é opcional */ }
+        }
+        for (const a of fresh.slice(3)) seen.add(a.id);
+        saveSeenAvisos(dataDir, seen);
+    } finally {
+        avisosBusy = false;
+    }
+}
 let mainSyncBusy = false;
 
 /** Aplica o commit do main já baixado: fecha o Hub, troca os arquivos e reabre. */
@@ -2348,6 +2386,7 @@ app.on('before-quit', (ev) => {
     if (updateBootTimer) clearTimeout(updateBootTimer);
     if (updateCheckTimer) clearInterval(updateCheckTimer);
     if (mainSyncTimer) clearInterval(mainSyncTimer);
+    if (avisosTimer) clearInterval(avisosTimer);
     try { sharedHuntGuide?.dispose?.(); } catch { /* ignore */ }
     Promise.allSettled(closing).finally(() => app.exit(0));
 });
@@ -2386,6 +2425,10 @@ app.whenReady().then(async () => {
     updateCheckTimer.unref?.();
     mainSyncTimer = setInterval(() => void runMainSync(), MAIN_SYNC_INTERVAL_MS);
     mainSyncTimer.unref?.();
+    const avisosBoot = setTimeout(() => void runAvisosCheck(), 9000);
+    avisosBoot.unref?.();
+    avisosTimer = setInterval(() => void runAvisosCheck(), AVISOS_INTERVAL_MS);
+    avisosTimer.unref?.();
 }).catch((err) => {
     console.error('[Nexo PokeBot] Falha ao iniciar:', err);
     isQuitting = true;

@@ -51,6 +51,11 @@ contextBridge.exposeInMainWorld('pokeHub', {
         ipcRenderer.on('hub:update-state', fn);
         return () => ipcRenderer.removeListener('hub:update-state', fn);
     },
+    onAviso: (cb) => {
+        const fn = (_ev, data) => cb(data);
+        ipcRenderer.on('hub:aviso', fn);
+        return () => ipcRenderer.removeListener('hub:aviso', fn);
+    },
     onUpdateOpen: (cb) => {
         const fn = () => cb();
         ipcRenderer.on('hub:update-open', fn);

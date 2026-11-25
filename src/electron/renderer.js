@@ -4454,6 +4454,18 @@ function wireEvents() {
         void closeAllEmbeddedToHeadless();
     });
 
+    if (typeof window.pokeHub.onAviso === 'function') {
+        window.pokeHub.onAviso((a) => {
+            if (!a) return;
+            showToast({
+                kind: a.kind || 'info',
+                title: a.title || 'Nexo PokeBot',
+                text: a.text || a.title || '',
+                duration: 30_000,
+                ...(a.link ? { actionLabel: 'Abrir', onClick: () => void window.pokeHub.openExternal?.(a.link) } : {}),
+            });
+        });
+    }
     if (typeof window.pokeHub.onUpdateState === 'function') {
         window.pokeHub.onUpdateState((st) => renderUpdateUi(st));
     }
