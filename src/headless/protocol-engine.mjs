@@ -641,11 +641,9 @@ export const BUYABLE_POTION_IDS = Object.freeze([
     ITEM_IDS.ULTRA_POTION,
     ITEM_IDS.HYPER_POTION,
     ITEM_IDS.ULTIMATE_POTION,
-]);
-export const POTION_IDS = Object.freeze([
-    ...BUYABLE_POTION_IDS,
     ITEM_IDS.GOLDEN_POTION,
 ]);
+export const POTION_IDS = BUYABLE_POTION_IDS;
 
 /**
  * Normaliza uma lista de IDs de pocoes validas para auto.set (potionIds).
@@ -670,7 +668,7 @@ export function normalizePotionIds(raw) {
  * Resolve o ID compravel de pocao com base na config explicita ou preferencias nativas (potionIds).
  * @param {object} [state] Estado atual do jogador.
  * @param {object} [config] Configuracao headless (restockPotionId e preferredPotionIds).
- * @returns {number} ID da pocao compravel (200..204).
+ * @returns {number} ID da pocao compravel (200..204 ou 70070, a Golden).
  */
 export function resolveRestockPotionId(state = null, config = null, catalog = null) {
     if (config?.potionOptimize) {
