@@ -3460,6 +3460,12 @@ export function createHeadlessController(options = {}) {
         for (const oldKey of [...seenShinySlots]) {
             if (!activeSlotKeys.has(oldKey)) seenShinySlots.delete(oldKey);
         }
+        // Fora do campo (centro, casa, praça, arena) a lista de mobs some; isso não quer dizer que o shiny fugiu.
+        // A contagem fica parada e recomeça do zero quando o bot volta ao campo.
+        if (nonWild) {
+            for (const p of pendingShinies.values()) p.goneAt = 0;
+            return;
+        }
         for (const [slot, p] of [...pendingShinies]) {
             if (live.has(slot)) continue;
             if (!p.goneAt) p.goneAt = ts;
