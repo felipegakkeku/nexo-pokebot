@@ -33,6 +33,7 @@
     "check": "npm run lint && node build.mjs && node --test tests/*.test.mjs",
     "check-tag": "node build.mjs --check-tag",
     "lint": "eslint src/modules src/headless src/desktop src/electron headless-farm.mjs",
+    "aviso": "node src/desktop/aviso-enviar.mjs",
     "headless": "node headless-farm.mjs",
     "headless:check": "node headless-farm.mjs --check-session",
     "gui": "node src/headless/gui-server.mjs --open-app",

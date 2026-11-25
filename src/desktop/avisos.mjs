@@ -1,13 +1,18 @@
-// Avisos enviados pelo repositório: os Hubs leem avisos.json do main e mostram
-// cada aviso novo uma vez (toast no Hub e notificação do Windows).
+// Avisos em tempo real: o Hub fica conectado ao servidor do dono (WebSocket) e mostra cada
+// aviso novo uma vez. O endereço do servidor vem de avisos-servidor.json no main (o túnel pode trocar).
+// Todo aviso vem assinado com Ed25519; sem assinatura válida da chave abaixo, nada aparece.
+import { createPublicKey, verify } from 'node:crypto';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DEFAULT_UPDATE_REPO, compareSemver } from './updater.mjs';
 
-export const AVISOS_URL = `https://raw.githubusercontent.com/${DEFAULT_UPDATE_REPO}/main/avisos.json`;
+export const AVISOS_PUBLIC_KEY = 'MCowBQYDK2VwAyEAPBXq2k4jnjcvThbdX68hm75qgHbSc6BJnIF9t+9sOx0=';
+export const AVISOS_SERVER_URL = `https://raw.githubusercontent.com/${DEFAULT_UPDATE_REPO}/main/avisos-servidor.json`;
+export const AVISOS_WS_PATH = '/api/nexo/avisos/ws';
 const SEEN_FILE = 'avisos-vistos.json';
 const KINDS = new Set(['info', 'ok', 'warn', 'error']);
 const KIND_ALIAS = { aviso: 'warn', alerta: 'warn', erro: 'error', sucesso: 'ok' };
+const PUB_KEY = createPublicKey({ key: Buffer.from(AVISOS_PUBLIC_KEY, 'base64'), format: 'der', type: 'spki' });
 
 const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 
@@ -20,8 +25,8 @@ function parseUntil(raw) {
 }
 
 /**
- * Filtra o JSON do repositório e devolve só os avisos que valem para este Hub e ainda não foram vistos.
- * @param {unknown} json Conteúdo de avisos.json.
+ * Filtra avisos e devolve só os que valem para este Hub e ainda não foram vistos.
+ * @param {unknown} json Lista de avisos (ou { avisos: [...] }).
  * @param {{ now?: number, version?: string, seen?: Set<string> }} ctx
  */
 export function pickNewAvisos(json, { now = Date.now(), version = '', seen = new Set() } = {}) {
@@ -47,6 +52,18 @@ export function pickNewAvisos(json, { now = Date.now(), version = '', seen = new
     return out;
 }
 
+/** Confere o envelope { payload, sig } assinado pelo dono e devolve o aviso, ou null. */
+export function verifyAvisoEnvelope(env, key = PUB_KEY) {
+    if (!env || typeof env.payload !== 'string' || typeof env.sig !== 'string' || env.payload.length > 3000) return null;
+    try {
+        if (!verify(null, Buffer.from(env.payload, 'utf8'), key, Buffer.from(env.sig, 'base64'))) return null;
+        const a = JSON.parse(env.payload);
+        return a && typeof a === 'object' ? a : null;
+    } catch {
+        return null;
+    }
+}
+
 export function readSeenAvisos(dataDir) {
     try {
         const p = join(dataDir, SEEN_FILE);
@@ -64,13 +81,69 @@ export function saveSeenAvisos(dataDir, seen) {
     } catch { /* sem gravar, o aviso pode voltar uma vez */ }
 }
 
-/** Busca avisos.json; sem internet ou arquivo ausente devolve null. */
-export async function fetchAvisos({ fetchImpl = fetch, signal } = {}) {
+/** Endereço atual do servidor de avisos (https), lido do main. */
+export async function fetchAvisosServer({ fetchImpl = fetch, signal } = {}) {
     try {
-        const res = await fetchImpl(`${AVISOS_URL}?t=${Math.floor(Date.now() / 60_000)}`, { signal, cache: 'no-store' });
-        if (!res.ok) return null;
-        return await res.json();
+        const res = await fetchImpl(`${AVISOS_SERVER_URL}?t=${Date.now()}`, { signal, cache: 'no-store' });
+        if (!res.ok) return '';
+        const j = await res.json();
+        const url = str(j?.servidor, 200).replace(/\/+$/, '');
+        return /^https:\/\/[a-z0-9.-]+(?::\d+)?$/i.test(url) ? url : '';
     } catch {
-        return null;
+        return '';
+    }
+}
+
+const sleep = (ms, signal) => new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true });
+});
+
+/** Uma conexão WebSocket; resolve quando ela fecha. Devolve quanto tempo ficou aberta. */
+function openOnce(url, { WebSocketImpl, signal, onAviso }) {
+    return new Promise((resolve) => {
+        let ws;
+        try { ws = new WebSocketImpl(url); } catch { resolve(0); return; }
+        let opened = 0;
+        let idle = null;
+        // O servidor manda {"t":1} a cada 25 s. Sem nada por 70 s a conexão morreu em silêncio
+        // (PC suspenso, túnel trocado): fecha para reconectar.
+        const arm = (ms) => { clearTimeout(idle); idle = setTimeout(() => { try { ws.close(); } catch { /* fecha */ } }, ms); };
+        const done = () => {
+            clearTimeout(idle);
+            signal.removeEventListener('abort', stop);
+            resolve(opened ? Date.now() - opened : 0);
+        };
+        arm(20_000);
+        const stop = () => { try { ws.close(); } catch { /* fecha */ } };
+        signal.addEventListener('abort', stop, { once: true });
+        ws.addEventListener('open', () => { opened = Date.now(); arm(70_000); });
+        ws.addEventListener('message', (ev) => {
+            arm(70_000);
+            let env;
+            try { env = JSON.parse(typeof ev.data === 'string' ? ev.data : Buffer.from(ev.data).toString('utf8')); } catch { return; }
+            const aviso = verifyAvisoEnvelope(env);
+            if (aviso) { try { onAviso(aviso); } catch { /* um aviso ruim não derruba a conexão */ } }
+        });
+        ws.addEventListener('close', done, { once: true });
+        ws.addEventListener('error', () => { try { ws.close(); } catch { /* fecha */ } });
+    });
+}
+
+/**
+ * Mantém a conexão com o servidor de avisos enquanto o Hub estiver aberto.
+ * Cai a conexão: espera um pouco, relê o endereço (o túnel pode ter mudado) e reconecta.
+ * @param {{ fetchImpl?: typeof fetch, WebSocketImpl?: typeof WebSocket, signal: AbortSignal, onAviso: (aviso: object) => void }} opts
+ */
+export async function runAvisosStream({ fetchImpl = fetch, WebSocketImpl = globalThis.WebSocket, signal, onAviso }) {
+    if (typeof WebSocketImpl !== 'function') return;
+    let wait = 5_000;
+    while (!signal.aborted) {
+        const base = await fetchAvisosServer({ fetchImpl, signal });
+        if (!base) { await sleep(60_000, signal); continue; }
+        const lived = await openOnce(`${base.replace(/^http/, 'ws')}${AVISOS_WS_PATH}`, { WebSocketImpl, signal, onAviso });
+        if (signal.aborted) break;
+        wait = lived > 60_000 ? 5_000 : Math.min(wait * 2, 60_000);
+        await sleep(wait, signal);
     }
 }
