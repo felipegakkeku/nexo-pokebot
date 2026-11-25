@@ -1171,6 +1171,9 @@
         cBall: 'Bola de todo arremesso. Como o shiny é sorteado no próprio arremesso, é esta bola que tenta segurar o shiny: bola melhor segura mais shinies e custa mais. "auto" escolhe pelo gold que você tem.',
         cTargetBalls: 'Quantas bolas manter na mochila. O restock completa até esse número.',
         cTargetPotions: 'Quantas poções manter. 0 desliga a compra de poções.',
+        cMinBalls: 'Quando as bolas caírem abaixo deste número, o bot compra até o alvo. Vazio usa 35% do alvo.',
+        cMinPotions: 'Quando as poções caírem abaixo deste número, o bot compra até o alvo. Vazio usa 35% do alvo.',
+        cMinRevives: 'Quando os revives caírem abaixo deste número, o bot compra até o alvo. Vazio usa 35% do alvo.',
         cRestockPotion: 'Qual poção comprar no restock. "Mais econômica" calcula o gold por HP que cada poção cura de verdade no Pokémon ativo e compra e usa a que rende mais: em Pokémon de muito HP a Small vira uma por segundo e sai mais cara que uma Hyper ou Ultimate. Automático usa a primeira marcada no Auto-Heal.',
         cReserve: 'O restock nunca deixa o gold abaixo deste valor.',
         cTargetRevives: 'Quantos revives manter. 0 desliga a compra.',
@@ -1368,6 +1371,15 @@
         const theme = window.nexoIcons?.getTheme() || 'marinho';
         const accent = window.nexoIcons?.accountAccent?.(activeAccount) || window.nexoIcons?.getAccent() || 'azul';
         document.querySelectorAll('[data-theme-pick]').forEach((b) => b.setAttribute('aria-checked', b.dataset.themePick === theme ? 'true' : 'false'));
+        const bg = window.nexoIcons?.getBackdrop?.() || 'liso';
+        document.querySelectorAll('[data-bg-pick]').forEach((b) => b.setAttribute('aria-checked', b.dataset.bgPick === bg ? 'true' : 'false'));
+        $('bgCustom')?.classList.toggle('hidden', bg !== 'custom');
+        const cus = window.nexoIcons?.getBackdropCustom?.();
+        if (cus) {
+            if ($('bgC1') && document.activeElement !== $('bgC1')) $('bgC1').value = cus.c1;
+            if ($('bgC2') && document.activeElement !== $('bgC2')) $('bgC2').value = cus.c2;
+            if ($('bgElem')) $('bgElem').value = cus.elem;
+        }
         document.querySelectorAll('[data-accent-pick]').forEach((b) => b.setAttribute('aria-checked', b.dataset.accentPick === accent ? 'true' : 'false'));
         document.querySelectorAll('[data-hud-pos]').forEach((b) => b.setAttribute('aria-checked', b.dataset.hudPos === hudPos ? 'true' : 'false'));
         window.applyToastPosition?.();
@@ -1925,6 +1937,11 @@
         $('btnBellClear')?.addEventListener('click', () => dismissBell(bellItems.map((i) => i.key)));
 
         document.querySelectorAll('[data-theme-pick]').forEach((b) => b.addEventListener('click', () => { window.nexoIcons?.setTheme(b.dataset.themePick); syncMenuState(); }));
+        document.querySelectorAll('[data-bg-pick]').forEach((b) => b.addEventListener('click', () => { window.nexoIcons?.setBackdrop?.(b.dataset.bgPick); syncMenuState(); }));
+        for (const [id, key] of [['bgC1', 'c1'], ['bgC2', 'c2']]) {
+            $(id)?.addEventListener('input', (ev) => window.nexoIcons?.setBackdropCustom?.({ [key]: ev.target.value }));
+        }
+        $('bgElem')?.addEventListener('change', (ev) => window.nexoIcons?.setBackdropCustom?.({ elem: ev.target.value }));
         document.querySelectorAll('[data-accent-pick]').forEach((b) => b.addEventListener('click', () => {
             const ni = window.nexoIcons;
             if (ni?.setAccountAccent) ni.setAccountAccent(activeAccount, b.dataset.accentPick);

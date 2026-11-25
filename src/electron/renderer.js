@@ -1360,6 +1360,14 @@ function formatBonusMins(mins) {
     return h > 0 ? `${h}h${String(r).padStart(2, '0')}m` : `${r}m`;
 }
 
+/** Campo vazio = o servidor usa 35% do alvo. */
+function readMinField(id) {
+    const raw = String($(id)?.value ?? '').trim();
+    if (!raw) return undefined;
+    const n = Math.floor(Number(raw));
+    return Number.isFinite(n) && n >= 1 ? n : undefined;
+}
+
 function readConfigForm() {
     const targetRevives = Math.max(0, Number($('cTargetRevives').value) || 0);
     const liveTwitchRewards = readCheckedRewards('data-tw-reward');
@@ -1390,6 +1398,9 @@ function readConfigForm() {
         pvpQueue: $('cPvpQueue').checked,
         targetRevives,
         restockRevive: targetRevives > 0,
+        minBalls: readMinField('cMinBalls'),
+        minPotions: readMinField('cMinPotions'),
+        minRevives: readMinField('cMinRevives'),
         minGoldReserve: Math.max(0, Number($('cReserve').value) || 0),
         huntGuideMode: $('cGuideMode').value,
         huntGuideMetric: $('cGuideMetric').value,
@@ -1860,6 +1871,16 @@ function renderActiveAccountPanel() {
         $('cPvpQueue').checked = Boolean(cfg.pvpQueue);
         $('cTargetRevives').value = cfg.restockRevive === false ? 0 : (cfg.targetRevives ?? 20);
         $('cReserve').value = cfg.minGoldReserve ?? 0;
+        // Mostra o mínimo só quando foge do padrão (35% do alvo); vazio continua automático.
+        const autoMin = (target, floor) => Math.min(target, Math.max(floor, Math.round(target * 0.35)));
+        const showMin = (id, val, target, floor) => {
+            if (!$(id)) return;
+            const t = Number(target || 0);
+            $(id).value = val != null && t > 0 && Number(val) !== autoMin(t, floor) ? String(val) : '';
+        };
+        showMin('cMinBalls', cfg.minBalls, cfg.targetBalls ?? 50, 15);
+        showMin('cMinPotions', cfg.minPotions, cfg.targetPotions ?? 40, 15);
+        showMin('cMinRevives', cfg.minRevives, cfg.restockRevive === false ? 0 : (cfg.targetRevives ?? 20), 5);
         $('cGuideMode').value = cfg.huntGuideMode || 'off';
         $('cGuideMetric').value = cfg.huntGuideMetric || 'xp';
         if ($('cFarmObjective')) $('cFarmObjective').value = cfg.farmObjective || 'off';

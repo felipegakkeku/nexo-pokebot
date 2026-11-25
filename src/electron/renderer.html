@@ -131,6 +131,34 @@
               </div>
             </div>
             <div class="menu-sec">
+              <div class="menu-label" data-icon="sparkles">Fundo</div>
+              <div class="bg-grid" id="bgSwatches" role="radiogroup" aria-label="Fundo">
+                <button type="button" class="bg-sw" data-bg-pick="liso" role="radio" title="Liso: usa as cores do tema">Liso</button>
+                <button type="button" class="bg-sw" data-bg-pick="aurora" role="radio" title="Aurora">Aurora</button>
+                <button type="button" class="bg-sw" data-bg-pick="nebulosa" role="radio" title="Nebulosa">Nebulosa</button>
+                <button type="button" class="bg-sw" data-bg-pick="crepusculo" role="radio" title="Crepúsculo">Crepúsculo</button>
+                <button type="button" class="bg-sw" data-bg-pick="oceano" role="radio" title="Oceano">Oceano</button>
+                <button type="button" class="bg-sw" data-bg-pick="fogo" role="radio" title="Fogo">Fogo</button>
+                <button type="button" class="bg-sw" data-bg-pick="agua" role="radio" title="Água">Água</button>
+                <button type="button" class="bg-sw" data-bg-pick="planta" role="radio" title="Planta">Planta</button>
+                <button type="button" class="bg-sw" data-bg-pick="eletrico" role="radio" title="Elétrico">Elétrico</button>
+                <button type="button" class="bg-sw" data-bg-pick="gelo" role="radio" title="Gelo">Gelo</button>
+                <button type="button" class="bg-sw" data-bg-pick="psiquico" role="radio" title="Psíquico">Psíquico</button>
+                <button type="button" class="bg-sw" data-bg-pick="fantasma" role="radio" title="Fantasma">Fantasma</button>
+                <button type="button" class="bg-sw" data-bg-pick="dragao" role="radio" title="Dragão">Dragão</button>
+                <button type="button" class="bg-sw" data-bg-pick="sombrio" role="radio" title="Sombrio">Sombrio</button>
+                <button type="button" class="bg-sw" data-bg-pick="fada" role="radio" title="Fada">Fada</button>
+                <button type="button" class="bg-sw" data-bg-pick="pokebola" role="radio" title="Pokébola">Pokébola</button>
+                <button type="button" class="bg-sw" data-bg-pick="custom" role="radio" title="Escolha as suas cores">Seu</button>
+              </div>
+              <div class="bg-custom hidden" id="bgCustom">
+                <label>Cor 1 <input type="color" id="bgC1" value="#8b5cf6" /></label>
+                <label>Cor 2 <input type="color" id="bgC2" value="#0ea5e9" /></label>
+                <select id="bgElem" aria-label="Desenho do fundo"><option value="">Sem desenho</option><option value="fogo">Fogo</option><option value="agua">Água</option><option value="planta">Planta</option><option value="eletrico">Elétrico</option><option value="gelo">Gelo</option><option value="psiquico">Psíquico</option><option value="fantasma">Fantasma</option><option value="dragao">Dragão</option><option value="sombrio">Sombrio</option><option value="fada">Fada</option><option value="pokebola">Pokébola</option></select>
+              </div>
+              <div class="menu-hint">As cores claras viram só um brilho: o fundo continua escuro.</div>
+            </div>
+            <div class="menu-sec">
               <div class="menu-label" data-icon="hud">Barra sobre o jogo</div>
               <div class="mini-seg" id="hudPosSeg" role="radiogroup" aria-label="Posição da barra sobre o jogo">
                 <button type="button" data-hud-pos="top" role="radio">Em cima</button>
@@ -403,7 +431,9 @@
                   </select>
                 </div>
                 <div class="field"><label for="cTargetBalls">Alvo bolas</label><input type="number" id="cTargetBalls" min="10" step="10" /></div>
+                <div class="field"><label for="cMinBalls">Comprar bolas abaixo de</label><input type="number" id="cMinBalls" min="1" step="10" placeholder="35% do alvo" /></div>
                 <div class="field"><label for="cTargetPotions">Alvo poções</label><input type="number" id="cTargetPotions" min="0" step="10" /></div>
+                <div class="field"><label for="cMinPotions">Comprar poções abaixo de</label><input type="number" id="cMinPotions" min="1" step="10" placeholder="35% do alvo" /></div>
                 <div class="field"><label for="cRestockPotion">Poção para comprar</label>
                   <select id="cRestockPotion">
                     <option value="opt">Mais econômica (gold por HP)</option>
@@ -417,6 +447,7 @@
                 </div>
                 <div class="field"><label for="cReserve">Reserva mínima gold</label><input type="number" id="cReserve" min="0" max="100000000" step="5000" /></div>
                 <div class="field"><label for="cTargetRevives">Alvo revives</label><input type="number" id="cTargetRevives" min="0" step="5" /></div>
+                <div class="field"><label for="cMinRevives">Comprar revives abaixo de</label><input type="number" id="cMinRevives" min="1" step="5" placeholder="35% do alvo" /></div>
                 <div class="cfg-group-title">Acompanhamento da /hunt</div>
                 <div class="field"><label for="cGuideMode">Acompanhamento /hunt</label>
                   <select id="cGuideMode">
