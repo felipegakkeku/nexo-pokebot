@@ -925,7 +925,7 @@
             grid: { layout: gridState.layout, order: [...(gridState.order || [])], hidden: [...(gridState.hidden || [])], max: gridState.max || 0, splitX: gridState.splitX, splitY: gridState.splitY },
             dockCols: [...dockCols], dockWeights: [...dockWeights],
             activityPinned, dockWidth, hudPos,
-            cards: { hidden: [...cardState.hidden], collapsed: [...cardState.collapsed] }, paneW,
+            cards: { hidden: [...cardState.hidden], collapsed: [...cardState.collapsed], order: { ...cardState.order } }, paneW,
         };
     }
     function applyLayout(l) {
@@ -1221,7 +1221,7 @@
     let miniHudOpen = false;
     function syncMenuState() {
         const theme = window.nexoIcons?.getTheme() || 'marinho';
-        const accent = window.nexoIcons?.getAccent() || 'azul';
+        const accent = window.nexoIcons?.accountAccent?.(activeAccount) || window.nexoIcons?.getAccent() || 'azul';
         document.querySelectorAll('[data-theme-pick]').forEach((b) => b.setAttribute('aria-checked', b.dataset.themePick === theme ? 'true' : 'false'));
         document.querySelectorAll('[data-accent-pick]').forEach((b) => b.setAttribute('aria-checked', b.dataset.accentPick === accent ? 'true' : 'false'));
         document.querySelectorAll('[data-hud-pos]').forEach((b) => b.setAttribute('aria-checked', b.dataset.hudPos === hudPos ? 'true' : 'false'));
@@ -1372,9 +1372,24 @@
     }
 
     // ===== ganchos chamados pelo renderer =====
+    function applyAccountColors() {
+        const ni = window.nexoIcons;
+        if (!ni?.accountAccent) return;
+        ni.applyAccountAccent(activeAccount);
+        for (const acc of ACCOUNTS) {
+            const c = ni.accountAccent(acc);
+            for (const el of document.querySelectorAll(`.acc-tab[data-acc="${acc}"], .pcard[data-acc="${acc}"], #wv-slot-${acc}, .popout-acc[data-pop-acc="${acc}"]`)) {
+                if (el.dataset.accColor !== c) el.dataset.accColor = c;
+            }
+        }
+        const name = $('accentAccName');
+        const label = `Conta ${activeAccount}`;
+        if (name && name.textContent !== label) name.textContent = label;
+    }
     function afterRender() {
         sampleHistory();
         updateShinyFlash();
+        applyAccountColors();
         if (POPOUT) {
             renderPopoutBar();
             renderHero();
@@ -1507,7 +1522,80 @@
     function sanitizeCards() {
         if (!cardState || typeof cardState !== 'object') cardState = {};
         const clean = (a) => (Array.isArray(a) ? [...new Set(a.filter((k) => CARD_LABEL[k]))] : []);
-        cardState = { hidden: clean(cardState.hidden), collapsed: clean(cardState.collapsed) };
+        const order = {};
+        if (cardState.order && typeof cardState.order === 'object') {
+            for (const [panel, keys] of Object.entries(cardState.order)) {
+                if (/^tab-[a-z]+$/.test(panel)) { const k = clean(keys); if (k.length) order[panel] = k; }
+            }
+        }
+        cardState = { hidden: clean(cardState.hidden), collapsed: clean(cardState.collapsed), order };
+    }
+    const DEFAULT_ORDER = {};
+    const panelCards = (panel) => [...panel.querySelectorAll(':scope > .card[data-card]')];
+    // Reposiciona os cards na ordem salva usando os lugares que eles já ocupam:
+    // barras e avisos que não são card ficam onde estão.
+    function applyCardOrder() {
+        document.querySelectorAll('.tab-panel').forEach((panel) => {
+            const cards = panelCards(panel);
+            if (cards.length < 2) return;
+            const want = cardState.order[panel.id] || DEFAULT_ORDER[panel.id];
+            if (!want) return;
+            const rank = (c) => { const i = want.indexOf(c.dataset.card); return i < 0 ? 999 + cards.indexOf(c) : i; };
+            const sorted = [...cards].sort((a, b) => rank(a) - rank(b));
+            if (sorted.every((c, i) => c === cards[i])) return;
+            const marks = cards.map((c) => { const m = document.createComment(''); c.before(m); return m; });
+            sorted.forEach((c, i) => marks[i].replaceWith(c));
+        });
+    }
+    function saveCardOrder(panel) {
+        const keys = panelCards(panel).map((c) => c.dataset.card);
+        if (keys.join() === (DEFAULT_ORDER[panel.id] || []).join()) delete cardState.order[panel.id];
+        else cardState.order[panel.id] = keys;
+        saveCards();
+        applyCards();
+    }
+    let dragCard = null;
+    function setupCardDrag() {
+        document.addEventListener('pointerdown', (ev) => {
+            const grip = ev.target.closest('[data-card-act="drag"]');
+            const card = grip?.closest('.card[data-card]');
+            if (card) card.draggable = true;
+        });
+        document.addEventListener('pointerup', () => {
+            if (!dragCard) document.querySelectorAll('.card[draggable="true"]').forEach((c) => { c.draggable = false; });
+        });
+        document.addEventListener('dragstart', (ev) => {
+            const card = ev.target.closest?.('.card[data-card][draggable="true"]');
+            if (!card) return;
+            dragCard = card;
+            ev.dataTransfer.effectAllowed = 'move';
+            try { ev.dataTransfer.setData('text/plain', card.dataset.card); } catch { /* ignore */ }
+            document.body.classList.add('dragging-card');
+            setTimeout(() => card.classList.add('card-dragging'), 0);
+        });
+        document.addEventListener('dragover', (ev) => {
+            if (!dragCard) return;
+            const over = ev.target.closest?.('.card[data-card]');
+            if (!over || over.parentElement !== dragCard.parentElement) return;
+            ev.preventDefault();
+            ev.dataTransfer.dropEffect = 'move';
+            if (over === dragCard) return;
+            const r = over.getBoundingClientRect();
+            const after = ev.clientY > r.top + r.height / 2;
+            if (after && over.nextElementSibling !== dragCard) over.after(dragCard);
+            else if (!after && over.previousElementSibling !== dragCard) over.before(dragCard);
+        });
+        document.addEventListener('drop', (ev) => { if (dragCard) ev.preventDefault(); });
+        document.addEventListener('dragend', () => {
+            if (!dragCard) return;
+            const card = dragCard;
+            dragCard = null;
+            card.draggable = false;
+            card.classList.remove('card-dragging');
+            document.body.classList.remove('dragging-card');
+            const panel = card.closest('.tab-panel');
+            if (panel) saveCardOrder(panel);
+        });
     }
     sanitizeCards();
     const saveCards = () => LS.set('nexo.cards', cardState);
@@ -1528,11 +1616,13 @@
             const name = CARD_LABEL[card.dataset.card] || 'card';
             const tools = document.createElement('span');
             tools.className = 'card-tools';
-            tools.innerHTML = `<button type="button" class="icon-btn card-tool" data-card-act="collapse" title="Recolher ou abrir (clique no título também)" aria-label="Recolher ${esc(name)}">${IC('chevron')}</button>`
+            tools.innerHTML = `<button type="button" class="icon-btn card-tool card-grip" data-card-act="drag" title="Arraste para mudar a ordem dos cards" aria-label="Mover ${esc(name)}">${IC('grip')}</button>`
+                + `<button type="button" class="icon-btn card-tool" data-card-act="collapse" title="Recolher ou abrir (clique no título também)" aria-label="Recolher ${esc(name)}">${IC('chevron')}</button>`
                 + `<button type="button" class="icon-btn card-tool" data-card-act="hide" title="Fechar este card. Ele volta pelo rodapé da aba." aria-label="Fechar ${esc(name)}">${IC('x')}</button>`;
             head.append(tools);
         });
         document.querySelectorAll('.tab-panel').forEach((panel) => {
+            if (!DEFAULT_ORDER[panel.id]) DEFAULT_ORDER[panel.id] = panelCards(panel).map((c) => c.dataset.card);
             if (!panel.querySelector('.card[data-card]') || panel.querySelector(':scope > .cards-restore')) return;
             const bar = document.createElement('div');
             bar.className = 'cards-restore hidden';
@@ -1541,6 +1631,7 @@
         applyCards();
     }
     function applyCards() {
+        applyCardOrder();
         const hidden = new Set(cardState.hidden);
         const collapsed = new Set(cardState.collapsed);
         document.querySelectorAll('.card[data-card]').forEach((card) => {
@@ -1551,10 +1642,12 @@
         });
         document.querySelectorAll('.tab-panel > .cards-restore').forEach((bar) => {
             const keys = [...bar.parentElement.querySelectorAll('.card[data-card].card-off')].map((c) => c.dataset.card);
-            bar.classList.toggle('hidden', !keys.length);
-            const html = keys.length
+            const custom = Boolean(cardState.order[bar.parentElement.id]);
+            bar.classList.toggle('hidden', !keys.length && !custom);
+            const html = (keys.length
                 ? `<span>${IC('eyeoff')}Cards fechados:</span>${keys.map((k) => `<button type="button" class="filter-pill" data-card-show="${esc(k)}" title="Mostrar de novo">${escapeHtml(CARD_LABEL[k] || k)}</button>`).join('')}`
-                : '';
+                : '')
+                + (custom ? `<button type="button" class="link-btn cards-reset" data-card-reset="${esc(bar.parentElement.id)}" title="Volta os cards desta aba para a ordem original">Ordem padrão</button>` : '');
             if (bar.dataset.sig !== html) { bar.dataset.sig = html; bar.innerHTML = html; }
         });
     }
@@ -1566,6 +1659,8 @@
         applyCards();
     }
     function onCardClick(ev) {
+        const reset = ev.target.closest('[data-card-reset]');
+        if (reset) { delete cardState.order[reset.dataset.cardReset]; saveCards(); applyCards(); return; }
         const show = ev.target.closest('[data-card-show]');
         if (show) { toggleCardKey('hidden', show.dataset.cardShow, false); return; }
         const act = ev.target.closest('[data-card-act]');
@@ -1573,6 +1668,7 @@
         if (!card) return;
         const k = card.dataset.card;
         if (act?.dataset.cardAct === 'hide') { toggleCardKey('hidden', k, true); return; }
+        if (act?.dataset.cardAct === 'drag') return;
         const onTitle = !act && ev.target.closest('.card-head-row > h3');
         if (act?.dataset.cardAct === 'collapse' || onTitle) toggleCardKey('collapsed', k, !cardState.collapsed.includes(k));
     }
@@ -1677,7 +1773,19 @@
         $('btnBellClear')?.addEventListener('click', () => dismissBell(bellItems.map((i) => i.key)));
 
         document.querySelectorAll('[data-theme-pick]').forEach((b) => b.addEventListener('click', () => { window.nexoIcons?.setTheme(b.dataset.themePick); syncMenuState(); }));
-        document.querySelectorAll('[data-accent-pick]').forEach((b) => b.addEventListener('click', () => { window.nexoIcons?.setAccent(b.dataset.accentPick); syncMenuState(); }));
+        document.querySelectorAll('[data-accent-pick]').forEach((b) => b.addEventListener('click', () => {
+            const ni = window.nexoIcons;
+            if (ni?.setAccountAccent) ni.setAccountAccent(activeAccount, b.dataset.accentPick);
+            else ni?.setAccent(b.dataset.accentPick);
+            applyAccountColors();
+            syncMenuState();
+        }));
+        $('btnAccentAll')?.addEventListener('click', () => {
+            const ni = window.nexoIcons;
+            ni?.setAccountAccent?.(activeAccount, ni.accountAccent(activeAccount), true);
+            applyAccountColors();
+            syncMenuState();
+        });
         document.querySelectorAll('[data-hud-pos]').forEach((b) => b.addEventListener('click', () => setHudPos(b.dataset.hudPos)));
         $('btnPinActivityMenu')?.addEventListener('click', () => setActivityPinned(!activityPinned));
         $('btnPinActivity')?.addEventListener('click', () => setActivityPinned(!activityPinned));
@@ -1750,6 +1858,7 @@
         window.addEventListener('focus', () => markBack(false));
 
         setupCards();
+        setupCardDrag();
         document.addEventListener('click', onCardClick);
         $('btnOvGoLives')?.addEventListener('click', () => goAccount(activeAccount, 'lives'));
         if (!POPOUT) {

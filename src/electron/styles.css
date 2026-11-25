@@ -2560,8 +2560,8 @@ kbd {
 .wv-hud {
   position: absolute; top: 8px; left: 50%; transform: translateX(-50%); z-index: 6;
   display: flex; align-items: center; gap: 10px; padding: 4px 6px 4px 10px; max-width: calc(100% - 16px);
-  border-radius: var(--r-pill); background: color-mix(in srgb, var(--bg-deep) 82%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border-hi) 70%, transparent); backdrop-filter: blur(6px);
+  border-radius: var(--r-pill); background: color-mix(in srgb, var(--bg-deep) 92%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-hi) 70%, transparent);
   font-size: var(--fs-sm); color: var(--text-soft); white-space: nowrap; overflow: hidden;
   opacity: 0.92; transition: opacity var(--t-med) ease;
   pointer-events: auto;
@@ -3100,3 +3100,40 @@ body.minihud-body { background: color-mix(in srgb, var(--bg-deep) 94%, transpare
   .eff-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .sl-side { container: card / inline-size; }
+
+/* ===== Cor de destaque por conta ===== */
+[data-acc-color="azul"] { --acc-c: #3b82f6; }
+[data-acc-color="ciano"] { --acc-c: #06b6d4; }
+[data-acc-color="violeta"] { --acc-c: #8b5cf6; }
+[data-acc-color="rosa"] { --acc-c: #ec4899; }
+[data-acc-color="esmeralda"] { --acc-c: #10b981; }
+[data-acc-color="laranja"] { --acc-c: #f97316; }
+.acc-tab[data-acc-color] .acc-num { background: color-mix(in srgb, var(--acc-c) 30%, var(--raise)); color: var(--text-soft); }
+.acc-tab[data-acc-color].active .acc-num { background: var(--acc-c); color: var(--on-accent); }
+.acc-tab[data-acc-color].active { border-color: var(--acc-c); box-shadow: inset 0 -2px 0 var(--acc-c); }
+.workspace.mode-grid .wv-slot[data-acc-color] { border-top: 2px solid color-mix(in srgb, var(--acc-c) 70%, transparent); }
+.workspace.mode-grid .wv-slot[data-acc-color].slot-active { border-color: var(--acc-c); }
+.pcard[data-acc-color] { border-top: 2px solid color-mix(in srgb, var(--acc-c) 70%, transparent); }
+.pcard[data-acc-color].active { border-color: var(--acc-c); }
+.popout-acc[data-acc-color] { box-shadow: inset 0 -2px 0 var(--acc-c); }
+.accent-acc-label { display: flex; align-items: center; gap: 6px; }
+.accent-acc-label b { color: var(--accent-text); }
+.accent-acc-label .link-btn { margin-left: auto; font-size: var(--fs-xs); }
+
+/* ===== Arrastar cards para mudar a ordem ===== */
+.card-grip { cursor: grab; }
+.card-grip:active { cursor: grabbing; }
+.card.card-dragging { opacity: 0.45; outline: 2px dashed var(--accent-hi); outline-offset: -2px; }
+body.dragging-card .tab-panel > .card:not(.card-dragging) { transition: transform var(--t-fast) ease; }
+.cards-restore .cards-reset { margin-left: auto; }
+
+/* ===== Troca de aba fluida ===== */
+/* Só opacidade: roda no compositor, não disputa o quadro com o jogo embutido. */
+.pane-scroll > .tab-panel:not(.hidden), .dock-col-body > .tab-panel:not(.hidden) { animation: panel-in 140ms ease-out; }
+@keyframes panel-in { from { opacity: 0; } to { opacity: 1; } }
+/* Cards fora da tela não são desenhados até rolar até eles. */
+.tab-panel > .card { content-visibility: auto; contain-intrinsic-size: auto 200px; }
+.tab-panel > .card.card-dragging { content-visibility: visible; }
+@media (prefers-reduced-motion: reduce) {
+  .pane-scroll > .tab-panel:not(.hidden), .dock-col-body > .tab-panel:not(.hidden) { animation: none; }
+}

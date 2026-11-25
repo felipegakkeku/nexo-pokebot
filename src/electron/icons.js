@@ -11,7 +11,30 @@
     const theme = read('nexo.theme', 'marinho');
     const accent = read('nexo.accent', 'azul');
     if (THEMES.includes(theme) && theme !== 'marinho') root.dataset.theme = theme;
-    if (ACCENTS.includes(accent) && accent !== 'azul') root.dataset.accent = accent;
+
+    // Cada conta tem a própria cor de destaque. Sem nada salvo, a conta 1 herda
+    // a cor antiga do app e as outras pegam cores bem diferentes entre si.
+    const ACC_DEFAULT = ['azul', 'esmeralda', 'laranja', 'violeta', 'rosa', 'ciano'];
+    function readAccMap() {
+        let m = null;
+        try { m = JSON.parse(localStorage.getItem('nexo.accentByAcc') || 'null'); } catch { m = null; }
+        const out = {};
+        if (m && typeof m === 'object') {
+            for (const k of ['1', '2', '3', '4']) if (ACCENTS.includes(m[k])) out[k] = m[k];
+        }
+        if (Object.keys(out).length === 4) return out;
+        const first = out['1'] || (ACCENTS.includes(accent) ? accent : 'azul');
+        out['1'] = first;
+        const pool = ACC_DEFAULT.filter((a) => a !== first);
+        for (const k of ['2', '3', '4']) if (!out[k]) out[k] = pool.shift();
+        return out;
+    }
+    let accMap = readAccMap();
+    function paintAccent(a) {
+        if (!a || a === 'azul') delete root.dataset.accent;
+        else root.dataset.accent = a;
+    }
+    paintAccent(accMap['1']);
 
     const P = {
         play: '<path d="M6 4l14 8-14 8z"/>',
@@ -114,15 +137,28 @@
     }
     function setAccent(accent) {
         const a = ACCENTS.includes(accent) ? accent : 'azul';
-        if (a === 'azul') delete root.dataset.accent;
-        else root.dataset.accent = a;
+        paintAccent(a);
         try { localStorage.setItem('nexo.accent', a); } catch { /* ignore */ }
+    }
+    const saveAccMap = () => { try { localStorage.setItem('nexo.accentByAcc', JSON.stringify(accMap)); } catch { /* ignore */ } };
+    const accountAccent = (acc) => accMap[String(acc)] || 'azul';
+    function setAccountAccent(acc, accent, all = false) {
+        const a = ACCENTS.includes(accent) ? accent : 'azul';
+        if (all) for (const k of Object.keys(accMap)) accMap[k] = a;
+        else accMap[String(acc)] = a;
+        saveAccMap();
+        applyAccountAccent(acc);
+    }
+    function applyAccountAccent(acc) {
+        const a = accountAccent(acc);
+        if ((root.dataset.accent || 'azul') !== a) paintAccent(a);
     }
 
     window.nexoIcons = {
         icon, hydrate, setTheme, setAccent, THEMES, ACCENTS,
         getTheme: () => root.dataset.theme || 'marinho',
         getAccent: () => root.dataset.accent || 'azul',
+        accountAccent, setAccountAccent, applyAccountAccent,
     };
 
     const ready = () => { injectSprite(); hydrate(); };
@@ -132,6 +168,7 @@
     // Outras janelas (pop-out e mini-HUD) acompanham a troca de tema
     window.addEventListener('storage', (ev) => {
         if (ev.key === 'nexo.theme') setTheme(ev.newValue || 'marinho');
-        if (ev.key === 'nexo.accent') setAccent(ev.newValue || 'azul');
+        if (ev.key === 'nexo.accent' && !document.querySelector('.acc-tab, .popout-acc')) setAccent(ev.newValue || 'azul');
+        if (ev.key === 'nexo.accentByAcc') accMap = readAccMap();
     });
 })();

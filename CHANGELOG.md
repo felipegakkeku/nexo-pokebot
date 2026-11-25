@@ -4,6 +4,12 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+## 1.0.16
+
+- Cards com alça de arrastar: mude a ordem dentro de cada aba. A ordem fica salva (e vai junto nos Layouts); "Ordem padrão" no rodapé da aba desfaz.
+- Cor de destaque por conta: cada conta tem a sua (azul, esmeralda, laranja e violeta de saída), no número da aba, no cabeçalho e na grade. Troque em Mais opções > Cor da conta; "Usar em todas" volta para uma cor só.
+- Troca de aba mais leve com o jogo embutido: a aba aparece na hora e os dados chegam no quadro seguinte, cards fora da tela não são desenhados, e a barra sobre o jogo deixou de usar desfoque (que pesava a cada quadro do jogo).
+
 ## 1.0.15
 
 - **Painel com largura arrastável**: no modo Painel + Jogo, arraste a borda direita do painel para alargar (até 72% da janela); duplo clique volta ao tamanho padrão.

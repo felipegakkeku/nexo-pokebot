@@ -1157,10 +1157,23 @@ function setViewMode(mode, { skipAutoClose = false } = {}) {
     hubHook('afterViewMode', mode);
 }
 
+// A aba aparece no mesmo quadro do clique; o refresh dos dados vem no quadro
+// seguinte (e trocas rápidas viram um render só). Com o jogo embutido isso
+// evita que o clique espere o render inteiro do painel.
+let subtabRenderPending = false;
+function scheduleSubtabRender() {
+    if (subtabRenderPending) return;
+    subtabRenderPending = true;
+    requestAnimationFrame(() => setTimeout(() => {
+        subtabRenderPending = false;
+        renderActiveAccountPanel();
+    }, 0));
+}
+
 function setSubtab(tab) {
     if (hubHook('onSubtab', tab) === true) {
         if (tab === 'lives') setTimeout(requestLivesRefresh, 0);
-        renderActiveAccountPanel();
+        scheduleSubtabRender();
         return;
     }
     document.querySelectorAll('.subtab').forEach((b) => {
@@ -1170,7 +1183,7 @@ function setSubtab(tab) {
     document.querySelectorAll('.tab-panel').forEach((p) => {
         p.classList.toggle('hidden', p.id !== `tab-${tab}`);
     });
-    renderActiveAccountPanel();
+    scheduleSubtabRender();
 }
 
 async function sendAction(action, payload = {}, acc = activeAccount) {
@@ -2876,7 +2889,7 @@ function renderUpdateUi(st) {
     const btnCheck = $('btnUpdateCheck');
     const brandVer = document.querySelector('.brand-ver');
 
-    const curVer = st.currentVersion || '1.0.15';
+    const curVer = st.currentVersion || '1.0.16';
     const shortCur = curVer.replace(/\.0$/, '');
     if (brandVer) brandVer.textContent = `v${shortCur}`;
     document.title = `Nexo PokeBot v${shortCur}`;
