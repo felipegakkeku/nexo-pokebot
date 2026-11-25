@@ -67,7 +67,12 @@ export const hopNextTopCatchArea = async (ctx, force = false) => {
                 return false;
             }
 
-            const nextArea = candidates[0];
+            const visited = Array.isArray(state.topCatchVisitedSignatures) ? state.topCatchVisitedSignatures : [];
+            const unseen = candidates.filter((c) => !visited.includes(c.signature));
+            const nextArea = unseen.length > 0 ? unseen[0] : candidates[0];
+            state.topCatchVisitedSignatures = unseen.length > 0
+                ? [...visited.slice(-19), nextArea.signature]
+                : [nextArea.signature];
             state.lastActionNote = `Top Catch -> ${nextArea.regionName} Nv${nextArea.areaLevel}`;
             const ok = await travelToMarkerMeta(ctx, nextArea);
             if (ok) {

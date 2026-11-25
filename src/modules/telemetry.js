@@ -106,6 +106,7 @@ export const updateSessionReadings = (session, poke, snap, now = Date.now()) => 
 export const shouldTopCatchHop = (topCatchHop, state, now = Date.now()) =>
     Boolean(
         topCatchHop.enabled &&
+            !state.paused &&
             !state.modalLockOwner &&
             !state.shinyAlertActive &&
             now - state.lastHopAt >= topCatchHop.hopCooldownMs
@@ -243,7 +244,7 @@ export const updateFarmTelemetry = (ctx) => {
             if (shouldTopCatchHop(CONFIG.topCatchHop, state)) {
                 state.lastHopAt = Date.now();
                 setTimeout(() => {
-                    if (state.running && !state.shinyAlertActive) hopNextTopCatchArea(ctx, false);
+                    if (state.running && !state.paused && !state.shinyAlertActive) hopNextTopCatchArea(ctx, false);
                 }, 1000);
             }
         }

@@ -1,7 +1,7 @@
 // Controlador stateful de farm headless e servidor HTTP/API para Dashboard Web e App Desktop.
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
@@ -29,6 +29,7 @@ import {
     applyPvpMessage,
     computeModeWarnings,
     chavePokedex,
+    getTopCatchWeekKey,
     getTopCatchWeekWindow,
     getTopCatchMilestoneProgress,
     computeTopCatchRankingPosition,
@@ -169,8 +170,68 @@ const EDITABLE_CONFIG_KEYS = new Set([
     'liveCustomKick',
     'dropHideCategories',
     'dropHideItems',
+    'dropNotifyCategories',
+    'dropNotifyAllowItems',
+    'dropNotifyCommon',
+    'notifyCatchNewSpecies',
     'browserProfile',
 ]);
+
+const recentShinyHistoryMap = new Map(); // key -> { ts, own }
+function resolveSharedShinyHistoryPath(cwd) {
+    const abs = resolve(cwd || process.cwd());
+    const parent = dirname(abs);
+    const rootDir = basename(parent) === '.pokebot-accounts' ? dirname(parent) : abs;
+    return join(rootDir, '.pokebot-shiny-history.jsonl');
+}
+
+function appendShinyHistoryRecord(cwd, record) {
+    if (!record || !record.name) return false;
+    const ts = Number(record.ts || Date.now());
+    const trainerKey = String(record.trainer || '').trim().toLowerCase();
+    const nameKey = String(record.name || '').trim().toLowerCase();
+    const dedupeKey = `${trainerKey}|${nameKey}|${record.egg ? 1 : 0}`;
+    const prev = recentShinyHistoryMap.get(dedupeKey);
+    if (prev && Math.abs(ts - prev.ts) < 12_000 && (prev.own || !record.own)) {
+        return false;
+    }
+    recentShinyHistoryMap.set(dedupeKey, { ts, own: Boolean(record.own) });
+    if (recentShinyHistoryMap.size > 120) {
+        for (const [k, v] of recentShinyHistoryMap) {
+            if (ts - v.ts > 60_000) recentShinyHistoryMap.delete(k);
+        }
+    }
+    const brt = new Date(ts - 3 * 3600_000);
+    const pad2 = (n) => String(n).padStart(2, '0');
+    const row = {
+        ts,
+        iso: new Date(ts).toISOString(),
+        brtDate: `${brt.getUTCFullYear()}-${pad2(brt.getUTCMonth() + 1)}-${pad2(brt.getUTCDate())}`,
+        brtTime: `${pad2(brt.getUTCHours())}:${pad2(brt.getUTCMinutes())}:${pad2(brt.getUTCSeconds())}`,
+        hourBrt: brt.getUTCHours(),
+        minuteBrt: brt.getUTCMinutes(),
+        weekdayBrt: brt.getUTCDay(),
+        trainer: record.trainer || 'Desconhecido',
+        own: Boolean(record.own),
+        account: record.account ?? null,
+        egg: Boolean(record.egg),
+        name: record.name,
+        speciesId: record.speciesId ?? null,
+        spriteDex: record.spriteDex ?? null,
+        level: record.level ?? '?',
+        hunt: record.hunt || '',
+        ballId: record.ballId ?? null,
+        details: Array.isArray(record.details) ? record.details : [],
+    };
+    try {
+        const filePath = resolveSharedShinyHistoryPath(cwd);
+        mkdirSync(dirname(filePath), { recursive: true });
+        appendFileSync(filePath, `${JSON.stringify(row)}\n`, 'utf8');
+        return true;
+    } catch {
+        return false;
+    }
+}
 
 export const SESSION_DROP_CATALOG = Object.freeze([
     { key: 'bossTokens', id: 70000, name: 'Bronze Boss Token', area: 'outland', rare: true },
@@ -315,6 +376,12 @@ function buildConfig(prefs = {}, saved = {}, overrides = {}, isolatedAccount = f
         liveCustomKick: typeof p.liveCustomKick === 'string' ? p.liveCustomKick : '',
         dropHideCategories: Array.isArray(p.dropHideCategories) ? p.dropHideCategories : ['stone'],
         dropHideItems: Array.isArray(p.dropHideItems) ? p.dropHideItems : [],
+        dropNotifyCategories: Array.isArray(p.dropNotifyCategories)
+            ? p.dropNotifyCategories
+            : ['outland', 'unova', 'boss', 'other'],
+        dropNotifyAllowItems: Array.isArray(p.dropNotifyAllowItems) ? p.dropNotifyAllowItems : [],
+        dropNotifyCommon: Boolean(p.dropNotifyCommon ?? false),
+        notifyCatchNewSpecies: p.notifyCatchNewSpecies ?? true,
         browserProfile: '',
     };
 
@@ -514,6 +581,26 @@ function normalizeConfigPatch(current, patch = {}) {
                 .filter((k) => k.length > 0 && k.length <= 80)
         )].slice(0, 64);
     }
+    if (Array.isArray(patch.dropNotifyCategories)) {
+        next.dropNotifyCategories = [...new Set(
+            patch.dropNotifyCategories
+                .map((c) => String(c || '').trim().toLowerCase())
+                .filter((c) => DROP_CATEGORIES.includes(c))
+        )];
+    }
+    if (Array.isArray(patch.dropNotifyAllowItems)) {
+        next.dropNotifyAllowItems = [...new Set(
+            patch.dropNotifyAllowItems
+                .map((k) => String(k || '').trim())
+                .filter((k) => k.length > 0 && k.length <= 80)
+        )].slice(0, 64);
+    }
+    if (patch.dropNotifyCommon !== undefined) {
+        next.dropNotifyCommon = Boolean(patch.dropNotifyCommon);
+    }
+    if (patch.notifyCatchNewSpecies !== undefined) {
+        next.notifyCatchNewSpecies = Boolean(patch.notifyCatchNewSpecies);
+    }
     if (typeof patch.browserProfile === 'string') {
         const cleanProfile = patch.browserProfile.trim();
         if (
@@ -605,6 +692,8 @@ function ingestWelcomeCatalog(welcomeMsg, catalog) {
             const spName = sp.nome ? String(sp.nome) : (catalog.pokemonNames[pid] || `#${pid}`);
             if (sp.nome) {
                 catalog.pokemonNames[pid] = spName;
+                catalog.pokemonIdByName ??= {};
+                catalog.pokemonIdByName[spName.trim().toLowerCase()] = pid;
                 const dex = resolvePokemonSpriteDex(pid, spName);
                 if (dex > 0) {
                     catalog.pokemonDexByName ??= {};
@@ -1794,6 +1883,7 @@ export function createLiveRewardsBridge({
             liveChestsClaimed: 0,
             liveRewardsRedeemed: 0,
         },
+        stepEvents: [],
         lastActionNote: '',
     };
 
@@ -1867,6 +1957,7 @@ export function createLiveRewardsBridge({
         const prevChests = liveState.stats.liveChestsClaimed;
         const prevRedeems = liveState.stats.liveRewardsRedeemed;
         const prevNote = liveState.lastActionNote;
+        liveState.stepEvents.length = 0;
 
         try {
             await liveRunner(liveCtx, { force });
@@ -1875,8 +1966,14 @@ export function createLiveRewardsBridge({
             return false;
         }
 
-        if (liveState.stats.liveChestsClaimed > prevChests || liveState.stats.liveRewardsRedeemed > prevRedeems) {
-            onLog?.('reward', liveState.lastActionNote || 'Lives: recompensa processada.');
+        const stepEvents = liveState.stepEvents.splice(0, liveState.stepEvents.length);
+        if (stepEvents.length > 0) {
+            for (const msg of stepEvents) {
+                onLog?.('live', msg);
+            }
+        } else if (liveState.stats.liveChestsClaimed > prevChests || liveState.stats.liveRewardsRedeemed > prevRedeems) {
+            const note = String(liveState.lastActionNote || '');
+            onLog?.('live', note && !/exige clique/i.test(note) ? note : 'Lives: recompensa processada.');
         } else if (
             liveState.lastActionNote &&
             liveState.lastActionNote !== prevNote &&
@@ -2037,6 +2134,7 @@ export function createLiveRewardsBridge({
         };
         return {
             enabled: Boolean(cfg.liveEnabled ?? true),
+            autoClaimChest: Boolean(cfg.liveAutoClaimChest ?? true),
             rewardType: fallbackKind,
             twitchRewards,
             kickRewards,
@@ -2081,12 +2179,14 @@ export function createLiveRewardsBridge({
     const noteChestClaimed = (channel, source = 'hud') => {
         const low = String(channel || '').trim().toLowerCase();
         liveState.stats.liveChestsClaimed = (liveState.stats.liveChestsClaimed || 0) + 1;
-        const st = liveState.liveStatus?.twitch?.[low];
-        if (st) {
-            st.manualChest = false;
-            st.error = null;
+        const twMap = liveState.liveStatus?.twitch || {};
+        for (const [k, st] of Object.entries(twMap)) {
+            if (k.toLowerCase() === low && st) {
+                st.manualChest = false;
+                st.error = null;
+            }
         }
-        onLog?.('reward', `Lives: caixinha +50 resgatada em ${low}${source === 'auto' ? ' (automático)' : ''}.`);
+        onLog?.('live', `Lives: caixinha +50 resgatada em ${low}${source === 'auto' ? ' (automático)' : ''}.`);
     };
 
     // Sessao no player real da Twitch (janela oculta do Hub): sequencia e seguir
@@ -2100,11 +2200,11 @@ export function createLiveRewardsBridge({
         liveState.liveWatch[low] = next;
         if (info.watching) return;
         if (info.kind === 'watch' && info.ok) {
-            onLog?.('reward', `Lives: ${low} assistida por ${info.minutes} min no player da Twitch (conta para a sequência).`);
+            onLog?.('live', `Lives: ${low} assistida por ${info.minutes} min no player da Twitch (conta para a sequência).`);
         } else if (info.kind === 'watch' && info.reasonText) {
             onLog?.('warn', `Lives: não consegui assistir ${low} no player da Twitch (${info.reasonText}).`);
         }
-        if (info.followedNow) onLog?.('reward', `Lives: agora seguindo ${low} na Twitch.`);
+        if (info.followedNow) onLog?.('live', `Lives: agora seguindo ${low} na Twitch.`);
     };
 
     // Pontos dos canais sem esperar o ciclo completo (funciona com o bot pausado)
@@ -2285,6 +2385,9 @@ export function createHeadlessController(options = {}) {
     let objectiveRotateFromSlug = null;
     let objectiveLastDecision = null;
     let objectiveLastLogKey = '';
+    let objectiveStaySlug = null;
+    let objectiveStaySinceAt = 0;
+    const objectiveStaleUntilBySlug = new Map();
     const optimisticPokedexKeys = new Set();
     const createTopCatchState = () => ({
         week: null,
@@ -2319,6 +2422,7 @@ export function createHeadlessController(options = {}) {
     let campoFeedDegraded = false;
     let pendingHuntSlug = null;
     let huntFlushTimer = null;
+    let campoDrainTimer = null;
 
     const voteFetch = typeof options.voteFetch === 'function'
         ? options.voteFetch
@@ -2360,6 +2464,25 @@ export function createHeadlessController(options = {}) {
             clearTimeout(huntFlushTimer);
             huntFlushTimer = null;
         }
+    };
+    const clearCampoDrainTimer = () => {
+        if (campoDrainTimer) {
+            clearTimeout(campoDrainTimer);
+            campoDrainTimer = null;
+        }
+    };
+    const hasAnyBallStock = (state = merger.getState()) => {
+        const b = state?.balls;
+        if (!b) return false;
+        return [1, 2, 3, 4, 5].some((id) => Number(b[id] ?? b[String(id)] ?? 0) > 0);
+    };
+    const hasFieldCatchPriority = (state = merger.getState()) => {
+        if (pendingShinies.size > 0) return true;
+        if (field.getMobs().some((m) => isWildCampoMob(m) && m.shiny)) return true;
+        if (config.caidosEnabled !== false && hasAnyBallStock(state)) {
+            return field.getFallenCorpses(getSyncedNowMs(), config.prioritizeExpiring !== false).length > 0;
+        }
+        return false;
     };
     const hasLiveMobInField = () => field.getMobs().some((mob) => !mob.morto && Number(mob.hp ?? 0) > 0);
     const getCombatLockMs = (state = merger.getState()) => {
@@ -2715,11 +2838,34 @@ export function createHeadlessController(options = {}) {
         return false;
     };
 
+    const ensureCurrentTopCatchWeek = () => {
+        const syncedNow = getSyncedNowMs();
+        const currentWeek = getTopCatchWeekKey(syncedNow);
+        if (topCatchState.week && (topCatchState.week < currentWeek || getTopCatchWeekWindow(topCatchState.week, syncedNow).ending)) {
+            topCatchState.keys.clear();
+            topCatchState.loaded = false;
+            topCatchState.ini = false;
+            topCatchState.count = 0;
+            topCatchState.lastMinute = 0;
+            topCatchState.paidMilestone = 0;
+            topCatchState.lastRequestedAt = 0;
+            topCatchState.rankingRequestedAt = 0;
+            topCatchState.rankingRows = null;
+            topCatchState.rankingFetchedAt = 0;
+            topCatchState.week = currentWeek;
+            objectiveRotateFromSlug = null;
+            return true;
+        }
+        return false;
+    };
+
     const syncTopCatchFromState = (state) => {
         const snap = state?.topCatch;
         if (!snap || typeof snap !== 'object') return;
+        ensureCurrentTopCatchWeek();
+        const currentWeek = getTopCatchWeekKey(getSyncedNowMs());
         const week = typeof snap.s === 'string' && snap.s ? snap.s : null;
-        if (week && topCatchState.week && week < topCatchState.week) return;
+        if (week && (week < currentWeek || (topCatchState.week && week < topCatchState.week))) return;
         if (week && topCatchState.week && week > topCatchState.week) {
             topCatchState.keys.clear();
             topCatchState.loaded = false;
@@ -2745,6 +2891,7 @@ export function createHeadlessController(options = {}) {
     const requestTopCatchSync = ({ force = false, includeRanking = true } = {}) => {
         const isOnline = status === 'connected' || status === 'bridge';
         if (!isOnline || config.economyPingOnly) return false;
+        ensureCurrentTopCatchWeek();
         const state = merger.getState();
         if (!force && !state?.topCatch && config.farmObjective !== 'topcatch') return false;
         const now = nowFn();
@@ -2769,6 +2916,7 @@ export function createHeadlessController(options = {}) {
     };
 
     const getEffectiveWeeklyCaughtSet = () => {
+        ensureCurrentTopCatchWeek();
         if (!topCatchState.loaded ||
             (topCatchState.week && getTopCatchWeekWindow(topCatchState.week, getSyncedNowMs()).ending)) return null;
         return new Set(topCatchState.keys);
@@ -2781,6 +2929,9 @@ export function createHeadlessController(options = {}) {
         objectiveRotateFromSlug = null;
         objectiveLastDecision = null;
         objectiveLastLogKey = '';
+        objectiveStaySlug = null;
+        objectiveStaySinceAt = 0;
+        objectiveStaleUntilBySlug.clear();
         huntGuideRanking = null;
     };
 
@@ -2813,10 +2964,12 @@ export function createHeadlessController(options = {}) {
         if (pendingHuntSlug === slug) return false;
         const waitMs = Math.max(getCombatLockMs(state), getHuntSwapLockMs());
         const huntLabel = catalog.huntNames?.[slug] || slug;
-        if (waitMs > 0) {
+        if (waitMs > 0 || hasFieldCatchPriority(state)) {
             pendingHuntSlug = slug;
             schedulePendingHuntFlush();
-            pushLog('info', `${reasonLabel}: troca para ${huntLabel} agendada (${(waitMs / 1000).toFixed(1)}s fora de combate).`);
+            if (waitMs > 0) {
+                pushLog('info', `${reasonLabel}: troca para ${huntLabel} agendada (${(waitMs / 1000).toFixed(1)}s fora de combate).`);
+            }
             return true;
         }
         if (sendFrame({ t: 'hunt.select', slug })) {
@@ -2870,12 +3023,30 @@ export function createHeadlessController(options = {}) {
             String(huntGuideRanking.pokemonId) === String(activePk?.id)
             ? huntGuideRanking.ranked
             : null;
+        const now = nowFn();
+        for (const [s, until] of objectiveStaleUntilBySlug) {
+            if (until <= now) objectiveStaleUntilBySlug.delete(s);
+        }
+        if (state.huntSlug && state.huntSlug === objectiveTargetSlug && isOnline && config.caidosEnabled !== false) {
+            if (objectiveStaySlug !== state.huntSlug) {
+                objectiveStaySlug = state.huntSlug;
+                objectiveStaySinceAt = now;
+            } else if (now - objectiveStaySinceAt >= 12 * 60_000) {
+                objectiveStaleUntilBySlug.set(state.huntSlug, now + 20 * 60_000);
+                objectiveStaySinceAt = now;
+            }
+        } else if (state.huntSlug !== objectiveStaySlug) {
+            objectiveStaySlug = state.huntSlug || null;
+            objectiveStaySinceAt = now;
+        }
+        const activeStaleSet = new Set(objectiveStaleUntilBySlug.keys());
         const decision = selectObjectiveHunt({
             mode,
             focus,
             currentSlug: state.huntSlug || '',
             activeTargetSlug: objectiveTargetSlug,
             rotateAfterCatch: mode === 'topcatch' && Boolean(state.huntSlug && state.huntSlug === objectiveRotateFromSlug),
+            staleSlugs: activeStaleSet,
             hunts: catalog.huntsList,
             trainerLevel: Number(state.level || 0),
             activePokemonLevel: Number(activePk?.level || 0),
@@ -2933,7 +3104,8 @@ export function createHeadlessController(options = {}) {
         const mode = config.huntGuideMode;
         const objMode = config.farmObjective;
         const objFocus = config.farmObjectiveFocus || 'xp';
-        const objNeedsGuide = (objMode === 'pokedex' || objMode === 'topcatch') && objFocus !== 'fast';
+        const objNeedsGuide = (objMode === 'pokedex' || objMode === 'topcatch') &&
+            !objectiveLastDecision?.completed && objFocus !== 'fast';
         const metric = objNeedsGuide ? objFocus : config.huntGuideMetric;
         const activeStatus = status;
         const isOnline = activeStatus === 'bridge' || activeStatus === 'connected';
@@ -3025,7 +3197,7 @@ export function createHeadlessController(options = {}) {
             const huntKnown = catalog.huntsList.length === 0 || catalog.huntsList.some((hunt) => hunt.slug === best.slug);
             if (mode !== 'auto' || sameHunt || best.unsafe || !confirmed || !state.huntSlug ||
                 state.noCentro === true || Number(state.mistico?.prazo || 0) > nowFn() ||
-                getCombatLockMs(state) > 0 || getHuntSwapLockMs() > 0 ||
+                getCombatLockMs(state) > 0 || getHuntSwapLockMs() > 0 || hasFieldCatchPriority(state) ||
                 !huntKnown ||
                 (huntGuideSwapAt !== null && nowFn() - huntGuideSwapAt < 30_000)) return;
             if (sendFrame({ t: 'hunt.select', slug: best.slug })) {
@@ -3104,6 +3276,7 @@ export function createHeadlessController(options = {}) {
         const effectiveTargetSlug = (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch') && objectiveTargetSlug
             ? objectiveTargetSlug
             : (config.huntGuideMode === 'auto' && huntGuideTarget ? huntGuideTarget : config.targetHuntSlug);
+        const syncedNow = getSyncedNowMs();
         const actions = evaluateHeadlessTick({
             state,
             field,
@@ -3112,11 +3285,20 @@ export function createHeadlessController(options = {}) {
                 ? { ...config, targetHuntSlug: effectiveTargetSlug }
                 : config,
             tracker,
-            nowMs: nowFn(),
+            nowMs: syncedNow,
             forceRestock,
             desiredMissingKeys: getDesiredMissingKeysForTick(state),
         });
         sendActions(actions);
+        if (actions.some((a) => a.t === 'ball.throw') &&
+            field.getFallenCorpses(syncedNow, config.prioritizeExpiring !== false).length > 1) {
+            clearCampoDrainTimer();
+            campoDrainTimer = setTimeout(() => {
+                campoDrainTimer = null;
+                if (!disposed) runTickForState(merger.getState());
+            }, 1250);
+            campoDrainTimer.unref?.();
+        }
         tracker.pvp ??= {};
         const pvpActions = evaluatePvpQueue(tracker.pvp, config, nowFn());
         if (pvpActions.length) sendActions(pvpActions);
@@ -3169,10 +3351,11 @@ export function createHeadlessController(options = {}) {
             ? msg.ev
             : (Array.isArray(msg.eventos) ? msg.eventos : [msg]);
         const ts = nowFn();
+        const syncedTs = getSyncedNowMs();
         let addedCorpse = false;
         for (const e of eventos) {
             if (!e || typeof e !== 'object') continue;
-            if (field.applyBattleEvent?.(e, ts)) {
+            if (field.applyBattleEvent?.(e, syncedTs)) {
                 addedCorpse = true;
             }
             const kind = e.k || e.t || e.tipo || e.acao;
@@ -3264,17 +3447,32 @@ export function createHeadlessController(options = {}) {
                     const curSlug = merger.getState()?.huntSlug || '';
                     const spId = Number(e.pokemon?.speciesId) || null;
                     const spriteDex = resolvePokemonSpriteDex(spId, name, catalog.pokemonDexByName) || null;
+                    const details = extractPokemonDetails(e.pokemon);
+                    const huntLabel = curSlug ? (catalog.huntNames?.[curSlug] || curSlug) : '';
                     ownShinies.unshift({
                         ts,
                         speciesId: spId,
                         spriteDex,
                         name,
                         level,
-                        hunt: curSlug ? (catalog.huntNames?.[curSlug] || curSlug) : '',
+                        hunt: huntLabel,
                         ballId: lastBallThrown,
-                        details: extractPokemonDetails(e.pokemon),
+                        details,
                     });
                     if (ownShinies.length > 10) ownShinies.pop();
+                    appendShinyHistoryRecord(cwd, {
+                        ts,
+                        trainer: merger.getState()?.nick || session?.nick || 'Você',
+                        own: true,
+                        egg: false,
+                        name,
+                        speciesId: spId,
+                        spriteDex,
+                        level,
+                        hunt: huntLabel,
+                        ballId: lastBallThrown,
+                        details,
+                    });
                 }
             } else if (kind === 'topCatchNova') {
                 const week = String(e.s || topCatchState.week || '');
@@ -3380,18 +3578,45 @@ export function createHeadlessController(options = {}) {
             const spId = Number(m.pokemon.speciesId ?? m.pokemon.pokeId) || null;
             const spriteDex = resolvePokemonSpriteDex(spId, m.pokemon.nome, catalog.pokemonDexByName) || null;
             const trainerNick = m.nick || 'Desconhecido';
-            recentShinies.unshift({ ts: lastMsgAt, name: m.pokemon.nome, speciesId: spId, spriteDex, trainer: trainerNick, egg: Boolean(m.ovo) });
-            if (recentShinies.length > 30) recentShinies.pop();
+            const level = m.pokemon.level ?? m.pokemon.nivel ?? '?';
+            const details = extractPokemonDetails(m.pokemon);
             const ownNick = String(merger.getState()?.nick || session?.nick || '').toLowerCase();
-            if (ownNick && String(m.nick || '').toLowerCase() === ownNick) {
+            const isOwn = Boolean(ownNick && String(m.nick || '').toLowerCase() === ownNick);
+            const curSlug = merger.getState()?.huntSlug || '';
+            const huntLabel = m.ovo ? 'Ovo Shiny' : (isOwn && curSlug ? (catalog.huntNames?.[curSlug] || curSlug) : '');
+            recentShinies.unshift({
+                ts: lastMsgAt,
+                name: m.pokemon.nome,
+                speciesId: spId,
+                spriteDex,
+                level,
+                trainer: trainerNick,
+                egg: Boolean(m.ovo),
+                own: isOwn,
+                hunt: huntLabel,
+                details,
+            });
+            if (recentShinies.length > 50) recentShinies.pop();
+            appendShinyHistoryRecord(cwd, {
+                ts: lastMsgAt,
+                trainer: trainerNick,
+                own: isOwn,
+                egg: Boolean(m.ovo),
+                name: m.pokemon.nome,
+                speciesId: spId,
+                spriteDex,
+                level,
+                hunt: huntLabel,
+                ballId: isOwn && !m.ovo ? lastBallThrown : null,
+                details,
+            });
+            if (isOwn) {
                 const lastOwn = ownShinies[0];
                 const sameAsRecent = lastOwn && (lastMsgAt - Number(lastOwn.ts || 0) < 8_000) && (
                     (spId != null && lastOwn.speciesId === spId) ||
                     String(lastOwn.name || '').toLowerCase() === m.pokemon.nome.toLowerCase()
                 );
                 if (!sameAsRecent) {
-                    const level = m.pokemon.level ?? m.pokemon.nivel ?? '?';
-                    const curSlug = merger.getState()?.huntSlug || '';
                     resolveShinyCapture(m.pokemon.nome, null);
                     stats.shiniesCaptured += 1;
                     if (stats.shiniesSeen < stats.shiniesCaptured) stats.shiniesSeen = stats.shiniesCaptured;
@@ -3402,9 +3627,9 @@ export function createHeadlessController(options = {}) {
                         spriteDex,
                         name: m.pokemon.nome,
                         level,
-                        hunt: m.ovo ? 'Ovo Shiny' : (curSlug ? (catalog.huntNames?.[curSlug] || curSlug) : ''),
+                        hunt: huntLabel,
                         ballId: m.ovo ? null : lastBallThrown,
-                        details: extractPokemonDetails(m.pokemon),
+                        details,
                     });
                     if (ownShinies.length > 10) ownShinies.pop();
                 }
@@ -3609,7 +3834,7 @@ export function createHeadlessController(options = {}) {
             lastCampoAt = nowFn();
             battleKillsWithoutCampo = 0;
             campoFeedDegraded = false;
-            field.applyCampoInit(m, nowFn());
+            field.applyCampoInit(m, getSyncedNowMs());
             scanShinyField(nowFn());
             if (pendingHuntSlug) schedulePendingHuntFlush();
             return;
@@ -3621,7 +3846,7 @@ export function createHeadlessController(options = {}) {
             lastCampoAt = nowFn();
             battleKillsWithoutCampo = 0;
             campoFeedDegraded = false;
-            field.applyCampo(m, nowFn());
+            field.applyCampo(m, getSyncedNowMs());
             scanShinyField(nowFn());
             if (pendingHuntSlug) schedulePendingHuntFlush();
             runTickForState(merger.getState());
@@ -3691,7 +3916,7 @@ export function createHeadlessController(options = {}) {
             if (res.kickToken && !config.liveKickToken) patch.liveKickToken = res.kickToken;
             if (Object.keys(patch).length > 0) {
                 updateConfig({ ...patch, liveEnabled: true });
-                pushLog('ok', 'Cookies Twitch/Kick sincronizados automaticamente do navegador!');
+                pushLog('live', 'Lives: cookies Twitch/Kick sincronizados do navegador.');
                 liveBridge.runOnce({ force: false });
             }
         }).catch(() => {});
@@ -4423,7 +4648,7 @@ export function createHeadlessController(options = {}) {
             return true;
         }
         const waitMs = Math.max(getCombatLockMs(state), getHuntSwapLockMs());
-        if (waitMs > 0) {
+        if (waitMs > 0 || hasFieldCatchPriority(state)) {
             schedulePendingHuntFlush();
             return false;
         }
@@ -4442,15 +4667,18 @@ export function createHeadlessController(options = {}) {
     const schedulePendingHuntFlush = () => {
         clearHuntFlushTimer();
         if (disposed || !pendingHuntSlug) return;
-        const waitMs = Math.max(getCombatLockMs(merger.getState()), getHuntSwapLockMs());
-        if (waitMs <= 0) {
+        const stNow = merger.getState();
+        const waitMs = Math.max(getCombatLockMs(stNow), getHuntSwapLockMs());
+        const fieldBusy = hasFieldCatchPriority(stNow);
+        if (waitMs <= 0 && !fieldBusy) {
             flushPendingHunt();
             return;
         }
+        const delayMs = waitMs > 0 ? Math.min(waitMs + 80, 15_000) : 1300;
         huntFlushTimer = setTimeout(() => {
             huntFlushTimer = null;
             flushPendingHunt();
-        }, Math.min(waitMs + 80, 15_000));
+        }, delayMs);
         huntFlushTimer.unref?.();
     };
 
@@ -4479,6 +4707,10 @@ export function createHeadlessController(options = {}) {
         const combatMs = getCombatLockMs(state);
         if (combatMs > 0) {
             pushLog('warn', `Em combate: aguarde ${(combatMs / 1000).toFixed(1)}s para ir ao Centro Médico.`);
+            return false;
+        }
+        if (hasFieldCatchPriority(state)) {
+            pushLog('warn', 'Aguardando captura de caído/Shiny antes de ir ao Centro Médico.');
             return false;
         }
         if (sendFrame({ t: 'centro.ir' })) {
@@ -5151,6 +5383,7 @@ export function createHeadlessController(options = {}) {
             try { headlessHuntGuide?.dispose?.(); } catch { /* ignore */ }
         }
         clearHuntFlushTimer();
+        clearCampoDrainTimer();
         pendingHuntSlug = null;
         clearReconnectTimer();
         closeBridgeQuietly();

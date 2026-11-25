@@ -1198,3 +1198,124 @@ test('live: isolamento multi-conta (runtimeState independente para Twitch, Kick 
         liveRewards.dispose(ctx2);
     }
 });
+
+test('live: IntegrityCheckFailed sem token de integridade mantem manualChest sem erro ou exige clique', async () => {
+    liveRewards.dispose();
+    const mockFetch = async (url, opts = {}) => {
+        if (url === 'https://gql.twitch.tv/gql') {
+            const payload = JSON.parse(opts.body);
+            if (payload.query.includes('claimCommunityPoints')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        errors: [{ message: 'failed integrity check', extensions: { code: 'IntegrityCheckFailed' } }],
+                        data: { claimCommunityPoints: null },
+                        extensions: { challenge: { type: 'integrity' } },
+                    }),
+                };
+            }
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    data: {
+                        currentUser: { id: 'u1' },
+                        user: {
+                            id: 'ch99',
+                            stream: null,
+                            channel: {
+                                self: { communityPoints: { balance: 270, availableClaim: { id: 'chest1' } } },
+                                communityPointsSettings: { customRewards: [] },
+                            },
+                        },
+                    },
+                }),
+            };
+        }
+        return { ok: false, status: 404 };
+    };
+
+    const ctx = {
+        CONFIG: { live: { enabled: true, autoClaimChest: true, autoRedeem: false, watchTwitch: false } },
+        state: {
+            running: true,
+            lastActionNote: '',
+            stepEvents: [],
+            liveGameData: { twitch: null, kick: null, skew: 0 },
+            liveStatus: { twitch: {}, kick: {} },
+            stats: { liveChestsClaimed: 0, liveMinutesWatched: 0, liveRewardsRedeemed: 0 },
+        },
+        net: { fetch: mockFetch },
+        getTwitchIntegrityToken: async () => null,
+    };
+
+    try {
+        const st = await stepTwitchChannel(ctx, 'tftoddy', { token: 'tw_tok', force: true });
+        assert.equal(st.manualChest, true);
+        assert.equal(st.error, null);
+        assert.ok(!/exige clique/i.test(ctx.state.lastActionNote || ''));
+        assert.equal(ctx.state.stepEvents.length, 0);
+    } finally {
+        liveRewards.dispose(ctx);
+    }
+});
+
+test('live: stepTwitchChannel registra evento de coleta em stepEvents sem exige clique', async () => {
+    liveRewards.dispose();
+    const mockFetch = async (url, opts = {}) => {
+        if (url === 'https://gql.twitch.tv/gql') {
+            const payload = JSON.parse(opts.body);
+            if (payload.query.includes('claimCommunityPoints')) {
+                return {
+                    ok: true,
+                    status: 200,
+                    json: async () => ({
+                        data: { claimCommunityPoints: { claim: { id: 'chest1' }, currentPoints: 450, error: null } },
+                    }),
+                };
+            }
+            return {
+                ok: true,
+                status: 200,
+                json: async () => ({
+                    data: {
+                        currentUser: { id: 'u1' },
+                        user: {
+                            id: 'ch77',
+                            stream: null,
+                            channel: {
+                                self: { communityPoints: { balance: 400, availableClaim: { id: 'chest1' } } },
+                                communityPointsSettings: { customRewards: [] },
+                            },
+                        },
+                    },
+                }),
+            };
+        }
+        return { ok: false, status: 404 };
+    };
+
+    const ctx = {
+        CONFIG: { live: { enabled: true, autoClaimChest: true, autoRedeem: false, watchTwitch: false } },
+        state: {
+            running: true,
+            lastActionNote: '',
+            stepEvents: [],
+            liveGameData: { twitch: null, kick: null, skew: 0 },
+            liveStatus: { twitch: {}, kick: {} },
+            stats: { liveChestsClaimed: 0, liveMinutesWatched: 0, liveRewardsRedeemed: 0 },
+        },
+        net: { fetch: mockFetch },
+    };
+
+    try {
+        const st = await stepTwitchChannel(ctx, 'patopapao', { token: 'tw_tok', force: true });
+        assert.equal(st.balance, 450);
+        assert.equal(ctx.state.stats.liveChestsClaimed, 1);
+        assert.ok(ctx.state.stepEvents.some((ev) => /patopapao/.test(ev) && /caixinha \+50/i.test(ev)));
+        assert.ok(ctx.state.stepEvents.every((ev) => !/exige clique/i.test(ev)));
+    } finally {
+        liveRewards.dispose(ctx);
+    }
+});

@@ -346,6 +346,9 @@ export function createFieldTracker() {
             mobs.set(b.s, {
                 ...prev,
                 slot: b.s,
+                speciesId: (b.p ?? b.pokeId ?? b.speciesId) !== undefined
+                    ? Number(b.p ?? b.pokeId ?? b.speciesId)
+                    : (isNewName ? null : (prev.speciesId ?? null)),
                 nome: b.n !== undefined ? b.n : prev.nome,
                 level: b.nv !== undefined ? b.nv : prev.level,
                 shiny: b.sh !== undefined ? Boolean(b.sh) : (isNewName ? false : Boolean(prev.shiny)),
@@ -414,6 +417,9 @@ export function createFieldTracker() {
             mobs.set(slot, {
                 ...prev,
                 slot,
+                speciesId: (e.p ?? e.pokeId ?? e.speciesId) !== undefined
+                    ? Number(e.p ?? e.pokeId ?? e.speciesId)
+                    : (prev.speciesId ?? null),
                 nome: e.nome ?? prev.nome ?? '',
                 level: Number(e.level ?? e.nivel ?? prev.level ?? 1) || 1,
                 shiny: e.shiny !== undefined ? Boolean(e.shiny) : Boolean(prev.shiny),
@@ -446,6 +452,7 @@ export function createFieldTracker() {
             if (e.morto && isWildCampoMob(e) && resta > 0) {
                 list.push({
                     slot: e.slot,
+                    speciesId: e.speciesId ?? null,
                     nome: e.nome || '',
                     level: Number(e.level) || 1,
                     shiny: Boolean(e.shiny),
@@ -750,9 +757,13 @@ export function evaluateHeadlessTick({
     );
     const needsCollectionControl = collectionMode && config.caidosEnabled !== false &&
         Boolean(state.automation?.autoBallSemParar || state.automation?.autoBallAteCapturar);
-    const autoSetCooldownMs = needsPotionSync || needsCollectionControl ? 5_000 : 30_000;
+    const needsCollectionRestore = !collectionMode && Boolean(
+        tracker.savedAutoBall &&
+        (tracker.savedAutoBall.autoBallAteCapturar || tracker.savedAutoBall.autoBallSemParar)
+    );
+    const autoSetCooldownMs = needsPotionSync || needsCollectionControl || needsCollectionRestore ? 5_000 : 30_000;
 
-    if ((needsNativeHeal || needsPotionSync || needsCollectionControl) &&
+    if ((needsNativeHeal || needsPotionSync || needsCollectionControl || needsCollectionRestore) &&
         nowMs - (tracker.lastAutoSetAt || 0) >= autoSetCooldownMs) {
         const autoPayload = { t: 'auto.set' };
         for (const campo of CAMPOS_AUTO_SET) {
@@ -769,8 +780,16 @@ export function evaluateHeadlessTick({
             autoPayload.potionIds = [...preferredPotionIds];
         }
         if (needsCollectionControl) {
+            tracker.savedAutoBall ??= {
+                autoBallAteCapturar: Boolean(state.automation?.autoBallAteCapturar),
+                autoBallSemParar: Boolean(state.automation?.autoBallSemParar),
+            };
             autoPayload.autoBallAteCapturar = false;
             autoPayload.autoBallSemParar = false;
+        } else if (needsCollectionRestore) {
+            autoPayload.autoBallAteCapturar = tracker.savedAutoBall.autoBallAteCapturar;
+            autoPayload.autoBallSemParar = tracker.savedAutoBall.autoBallSemParar;
+            tracker.savedAutoBall = null;
         }
         tracker.lastAutoSetAt = nowMs;
         actions.push(autoPayload);
@@ -788,20 +807,37 @@ export function evaluateHeadlessTick({
 
     if (config.caidosEnabled !== false && field) {
         let corpses = field.getFallenCorpses(nowMs, config.prioritizeExpiring !== false);
+        const sceneSlug = field.getScene?.()?.slug || state.huntSlug || '';
+        const sceneSpecies = Array.isArray(catalog.huntsBySlug?.[sceneSlug]?.especies)
+            ? catalog.huntsBySlug[sceneSlug].especies
+            : [];
+        const sceneIdByName = new Map();
+        for (const sp of sceneSpecies) {
+            const nm = String(sp?.nome || '').trim().toLowerCase();
+            if (nm && sp?.pokeId != null) sceneIdByName.set(nm, Number(sp.pokeId));
+        }
+        const resolveCorpseSpeciesId = (c) => {
+            if (c.speciesId != null) return c.speciesId;
+            const nm = String(c.nome || '').trim().toLowerCase();
+            if (!nm) return null;
+            if (sceneIdByName.has(nm)) return sceneIdByName.get(nm);
+            const catId = catalog.pokemonIdByName?.[nm];
+            return catId != null ? catId : null;
+        };
         const hasMissingSet = desiredMissingKeys instanceof Set && desiredMissingKeys.size > 0;
         const isDesiredMissing = (c) => {
             if (!hasMissingSet) return false;
-            const k = chavePokedex(c.speciesId);
+            const k = chavePokedex(resolveCorpseSpeciesId(c));
             return k != null && desiredMissingKeys.has(String(k));
         };
+        // autoBallAteCapturar do servidor nao lanca em especies ja registradas na Pokedex;
+        // so delegamos quando autoBallSemParar esta ativo para nao matar rolagens de Shiny.
         const vipAutoBall = Boolean(
-            state.loja?.vip && (state.automation?.autoBallSemParar || state.automation?.autoBallAteCapturar)
+            state.loja?.vip && state.automation?.autoBallSemParar
         );
-        if (collectionMode) {
+        if (collectionMode && desiredMissingKeys instanceof Set && config.farmObjectiveFocus !== 'shiny') {
             corpses = corpses.filter(isDesiredMissing);
         } else if (vipAutoBall) {
-            // No modo Top Catch / Pokedex, o autoBallAteCapturar nativo nao lanca em especies ja na Pokedex;
-            // preservamos shinies E especies ainda pendentes no objetivo ativo.
             corpses = corpses.filter((c) => c.shiny === true || isDesiredMissing(c));
         }
         if (hasMissingSet && corpses.length > 1) {
@@ -901,15 +937,18 @@ export function evaluateHeadlessTick({
         }
     }
 
-    if (
-        state.noCentro === true &&
+    if (state.noCentro !== true) {
+        tracker.centerHealSinceAt = 0;
+    } else if (
         nowMs >= Number(state.centroLivreEm || 0) &&
         nowMs - (tracker.lastHealAt || 0) >= 5000
     ) {
+        if (!tracker.centerHealSinceAt) tracker.centerHealSinceAt = nowMs;
         tracker.lastHealAt = nowMs;
         actions.push({ t: 'centro.curar' });
         const huntSlug = config.targetHuntSlug || tracker.lastHuntSlug;
-        if (huntSlug && !state.automation?.autoVoltarHunt) {
+        const stuckInCenter = nowMs - tracker.centerHealSinceAt >= 4_000;
+        if (huntSlug && (!state.automation?.autoVoltarHunt || stuckInCenter)) {
             actions.push({ t: 'hunt.select', slug: huntSlug });
         }
     }
@@ -941,9 +980,21 @@ export function evaluateHeadlessTick({
                 break;
             }
             if (Array.isArray(c.lista) && c.lista.length > 0 && c.pk == null) {
-                const pk = catalog.huntSpeciesId && c.lista.includes(catalog.huntSpeciesId)
+                let pk = catalog.huntSpeciesId && c.lista.includes(catalog.huntSpeciesId)
                     ? catalog.huntSpeciesId
-                    : c.lista[0];
+                    : null;
+                if (pk == null && Array.isArray(catalog.huntsList)) {
+                    const lvl = Number(state.level || 0);
+                    const unlockedIds = new Set();
+                    for (const h of catalog.huntsList) {
+                        if (lvl > 0 && Number(h?.nivel || 0) > lvl) continue;
+                        for (const sp of h?.especies || []) {
+                            if (sp?.pokeId != null) unlockedIds.add(Number(sp.pokeId));
+                        }
+                    }
+                    pk = c.lista.find((id) => unlockedIds.has(Number(id))) ?? null;
+                }
+                if (pk == null) pk = c.lista[0];
                 tracker.lastPreyActionAt = nowMs;
                 actions.push({ t: 'prey.escolher', cartela: i, dia, pk });
                 break;
@@ -1225,6 +1276,7 @@ export function selectObjectiveHunt({
     currentSlug = '',
     activeTargetSlug = null,
     rotateAfterCatch = false,
+    staleSlugs = null,
     hunts = [],
     trainerLevel = 0,
     activePokemonLevel = 0,
@@ -1295,10 +1347,14 @@ export function selectObjectiveHunt({
 
     const safePool = candidates.filter((c) => !c.unsafe);
     const eligiblePool = safePool.length > 0 ? safePool : candidates;
-    const alternatives = mode === 'topcatch' && rotateAfterCatch
-        ? eligiblePool.filter((candidate) => candidate.slug !== currentSlug)
+    const freshPool = staleSlugs instanceof Set && staleSlugs.size > 0
+        ? eligiblePool.filter((c) => !staleSlugs.has(c.slug))
         : [];
-    const pool = alternatives.length ? alternatives : eligiblePool;
+    const basePool = freshPool.length > 0 ? freshPool : eligiblePool;
+    const alternatives = mode === 'topcatch' && rotateAfterCatch
+        ? basePool.filter((candidate) => candidate.slug !== currentSlug)
+        : [];
+    const pool = alternatives.length ? alternatives : basePool;
 
     if (focus === 'fast') {
         pool.sort((a, b) =>
@@ -1329,6 +1385,7 @@ export function selectObjectiveHunt({
         currentCandidate && alternatives.length === 0 &&
         activeTargetSlug &&
         currentCandidate.slug === activeTargetSlug &&
+        !(staleSlugs instanceof Set && staleSlugs.has(currentCandidate.slug)) &&
         (!currentCandidate.unsafe || safePool.length === 0)
     ) {
         chosen = currentCandidate;

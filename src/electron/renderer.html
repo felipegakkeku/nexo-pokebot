@@ -140,6 +140,13 @@
               </div>
               <div class="menu-hint">Arraste pela alça ⠿ para soltar a barra onde quiser. Duplo clique na alça volta para cima.</div>
               <button type="button" class="menu-item" id="btnWvAutoZoom" role="menuitemcheckbox" aria-checked="true" data-icon="layout" title="Em telas baixas da grade, afasta o zoom do jogo para o mapa continuar visível">Ajustar zoom do jogo à tela</button>
+              <div class="menu-label" data-icon="bell" style="margin-top:8px;">Avisos flutuantes (Hub)</div>
+              <div class="mini-seg" id="toastPosSeg" role="radiogroup" aria-label="Posição dos avisos flutuantes">
+                <button type="button" data-toast-pos="top-right" role="radio">Topo dir.</button>
+                <button type="button" data-toast-pos="top-center" role="radio">Topo centro</button>
+                <button type="button" data-toast-pos="bottom-right" role="radio">Base dir.</button>
+                <button type="button" data-toast-pos="off" role="radio">Desligados</button>
+              </div>
             </div>
             <div class="menu-sec">
               <div class="menu-label" data-icon="layout">Layouts salvos</div>
@@ -708,6 +715,28 @@
                   <div class="sound-status hint-text" data-snd-status="vote"></div>
                 </details>
               </div>
+              <div class="sound-event drop-prefs-box" id="notifyPrefsBox">
+                <div class="sound-event-head">
+                  <span class="alert-ev-name" data-icon="sliders">Personalizar notificações de Drops & Capturas</span>
+                </div>
+                <div class="sound-event-sub">Escolha quais categorias de itens notificam (Stones comuns ficam ocultas por padrão) e destaque capturas inéditas.</div>
+                <div class="drop-filter-bar" id="notifyDropCats" style="margin-top:6px;">
+                  <button type="button" class="filter-pill active" data-notify-drop-cat="outland">Outland</button>
+                  <button type="button" class="filter-pill active" data-notify-drop-cat="unova">Ovo Shiny</button>
+                  <button type="button" class="filter-pill active" data-notify-drop-cat="boss">Boss</button>
+                  <button type="button" class="filter-pill" data-notify-drop-cat="stone" title="Pedras de evolução comuns">Stones</button>
+                  <button type="button" class="filter-pill active" data-notify-drop-cat="other">Outros</button>
+                </div>
+                <div class="toggle-list" style="margin-top:6px;">
+                  <label class="toggle-item"><input type="checkbox" id="cNotifyDropCommon" /> Notificar também drops comuns das categorias marcadas</label>
+                  <label class="toggle-item"><input type="checkbox" id="cNotifyNewSpecies" checked /> Notificar capturas de espécie nova (Pokédex / Top Catch)</label>
+                  <label class="toggle-item"><input type="checkbox" id="cNotifyServerShiny" checked /> Notificar Shiny no servidor (clique abre o card do drop)</label>
+                </div>
+                <div class="field" style="margin-top:6px;">
+                  <label for="cNotifyDropAllow">Sempre notificar estes itens (separados por vírgula)</label>
+                  <input type="text" id="cNotifyDropAllow" placeholder="Ex: Ovo Shiny, Fire Stone, Master Ball" spellcheck="false" />
+                </div>
+              </div>
             </div>
           </div>
 
@@ -837,9 +866,9 @@
             </div>
             <div class="wv-bar-actions">
               <button type="button" class="btn sm slot-audio is-muted" data-slot-act="mute" data-slot="1" id="slotAudio-1" hidden>Mudo</button>
-              <button type="button" class="btn sm icon-btn" data-slot-act="focus" data-slot="1" title="Focar nesta conta" aria-label="Focar na Conta 1" data-icon="crosshair"></button>
-              <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="1" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 1" data-icon="refresh"></button>
-              <button type="button" class="btn sm teal" data-slot-act="toggle" data-slot="1">Abrir Embutido</button>
+              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="focus" data-slot="1" title="Focar nesta conta" aria-label="Focar na Conta 1" data-icon="crosshair"></button>
+              <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="1" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 1" data-icon="refresh" hidden></button>
+              <button type="button" class="btn sm teal grid-only" data-slot-act="toggle" data-slot="1">Abrir Embutido</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="1" title="Maximizar esta tela" aria-label="Maximizar a tela da Conta 1"></button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="hide" data-slot="1" title="Ocultar esta tela da grade" aria-label="Ocultar a tela da Conta 1" data-icon="eyeoff"></button>
             </div>
@@ -848,10 +877,9 @@
             <div class="wv-placeholder" id="wv-ph-1">
               <div class="stage-live" id="stageLive-1"></div>
               <div class="wv-placeholder-title" id="phTitle-1">Conta 1 · Modo Headless</div>
-              <div class="wv-placeholder-sub" id="phSub-1">O bot pode farmar e trocar de hunt (/hunt) em 2º plano sem consumir RAM de navegador, ou abrir o jogo embutido aqui dentro.</div>
+              <div class="wv-placeholder-sub" id="phSub-1">Use Abrir no Embutido para jogar/logar aqui dentro ou Iniciar Headless para farmar em 2º plano.</div>
               <div class="wv-placeholder-stats" id="phStats-1"></div>
               <div class="wv-placeholder-btns">
-                <button type="button" class="btn teal" data-slot-act="open" data-slot="1">Abrir jogo embutido</button>
                 <button type="button" class="btn primary" data-slot-act="headless" data-slot="1">Iniciar Headless</button>
               </div>
             </div>
@@ -868,9 +896,9 @@
             </div>
             <div class="wv-bar-actions">
               <button type="button" class="btn sm slot-audio is-muted" data-slot-act="mute" data-slot="2" id="slotAudio-2" hidden>Mudo</button>
-              <button type="button" class="btn sm icon-btn" data-slot-act="focus" data-slot="2" title="Focar nesta conta" aria-label="Focar na Conta 2" data-icon="crosshair"></button>
-              <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="2" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 2" data-icon="refresh"></button>
-              <button type="button" class="btn sm teal" data-slot-act="toggle" data-slot="2">Abrir Embutido</button>
+              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="focus" data-slot="2" title="Focar nesta conta" aria-label="Focar na Conta 2" data-icon="crosshair"></button>
+              <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="2" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 2" data-icon="refresh" hidden></button>
+              <button type="button" class="btn sm teal grid-only" data-slot-act="toggle" data-slot="2">Abrir Embutido</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="2" title="Maximizar esta tela" aria-label="Maximizar a tela da Conta 2"></button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="hide" data-slot="2" title="Ocultar esta tela da grade" aria-label="Ocultar a tela da Conta 2" data-icon="eyeoff"></button>
             </div>
@@ -879,10 +907,9 @@
             <div class="wv-placeholder" id="wv-ph-2">
               <div class="stage-live" id="stageLive-2"></div>
               <div class="wv-placeholder-title" id="phTitle-2">Conta 2 · Modo Headless</div>
-              <div class="wv-placeholder-sub" id="phSub-2">O bot pode farmar e trocar de hunt (/hunt) em 2º plano sem consumir RAM de navegador, ou abrir o jogo embutido aqui dentro.</div>
+              <div class="wv-placeholder-sub" id="phSub-2">Use Abrir no Embutido para jogar/logar aqui dentro ou Iniciar Headless para farmar em 2º plano.</div>
               <div class="wv-placeholder-stats" id="phStats-2"></div>
               <div class="wv-placeholder-btns">
-                <button type="button" class="btn teal" data-slot-act="open" data-slot="2">Abrir jogo embutido</button>
                 <button type="button" class="btn primary" data-slot-act="headless" data-slot="2">Iniciar Headless</button>
               </div>
             </div>
@@ -899,9 +926,9 @@
             </div>
             <div class="wv-bar-actions">
               <button type="button" class="btn sm slot-audio is-muted" data-slot-act="mute" data-slot="3" id="slotAudio-3" hidden>Mudo</button>
-              <button type="button" class="btn sm icon-btn" data-slot-act="focus" data-slot="3" title="Focar nesta conta" aria-label="Focar na Conta 3" data-icon="crosshair"></button>
-              <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="3" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 3" data-icon="refresh"></button>
-              <button type="button" class="btn sm teal" data-slot-act="toggle" data-slot="3">Abrir Embutido</button>
+              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="focus" data-slot="3" title="Focar nesta conta" aria-label="Focar na Conta 3" data-icon="crosshair"></button>
+              <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="3" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 3" data-icon="refresh" hidden></button>
+              <button type="button" class="btn sm teal grid-only" data-slot-act="toggle" data-slot="3">Abrir Embutido</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="3" title="Maximizar esta tela" aria-label="Maximizar a tela da Conta 3"></button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="hide" data-slot="3" title="Ocultar esta tela da grade" aria-label="Ocultar a tela da Conta 3" data-icon="eyeoff"></button>
             </div>
@@ -910,10 +937,9 @@
             <div class="wv-placeholder" id="wv-ph-3">
               <div class="stage-live" id="stageLive-3"></div>
               <div class="wv-placeholder-title" id="phTitle-3">Conta 3 · Offline</div>
-              <div class="wv-placeholder-sub" id="phSub-3">Abra o jogo embutido aqui dentro para logar ou configure a conta na aba Conexões.</div>
+              <div class="wv-placeholder-sub" id="phSub-3">Use Abrir no Embutido para jogar/logar aqui dentro ou configure a conta na aba Conexões.</div>
               <div class="wv-placeholder-stats" id="phStats-3"></div>
               <div class="wv-placeholder-btns">
-                <button type="button" class="btn teal" data-slot-act="open" data-slot="3">Abrir jogo embutido</button>
                 <button type="button" class="btn primary" data-slot-act="headless" data-slot="3">Iniciar Headless</button>
               </div>
             </div>
@@ -930,9 +956,9 @@
             </div>
             <div class="wv-bar-actions">
               <button type="button" class="btn sm slot-audio is-muted" data-slot-act="mute" data-slot="4" id="slotAudio-4" hidden>Mudo</button>
-              <button type="button" class="btn sm icon-btn" data-slot-act="focus" data-slot="4" title="Focar nesta conta" aria-label="Focar na Conta 4" data-icon="crosshair"></button>
-              <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="4" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 4" data-icon="refresh"></button>
-              <button type="button" class="btn sm teal" data-slot-act="toggle" data-slot="4">Abrir Embutido</button>
+              <button type="button" class="btn sm icon-btn grid-only" data-slot-act="focus" data-slot="4" title="Focar nesta conta" aria-label="Focar na Conta 4" data-icon="crosshair"></button>
+              <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="4" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 4" data-icon="refresh" hidden></button>
+              <button type="button" class="btn sm teal grid-only" data-slot-act="toggle" data-slot="4">Abrir Embutido</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="4" title="Maximizar esta tela" aria-label="Maximizar a tela da Conta 4"></button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="hide" data-slot="4" title="Ocultar esta tela da grade" aria-label="Ocultar a tela da Conta 4" data-icon="eyeoff"></button>
             </div>
@@ -941,10 +967,9 @@
             <div class="wv-placeholder" id="wv-ph-4">
               <div class="stage-live" id="stageLive-4"></div>
               <div class="wv-placeholder-title" id="phTitle-4">Conta 4 · Offline</div>
-              <div class="wv-placeholder-sub" id="phSub-4">Abra o jogo embutido aqui dentro para logar ou configure a conta na aba Conexões.</div>
+              <div class="wv-placeholder-sub" id="phSub-4">Use Abrir no Embutido para jogar/logar aqui dentro ou configure a conta na aba Conexões.</div>
               <div class="wv-placeholder-stats" id="phStats-4"></div>
               <div class="wv-placeholder-btns">
-                <button type="button" class="btn teal" data-slot-act="open" data-slot="4">Abrir jogo embutido</button>
                 <button type="button" class="btn primary" data-slot-act="headless" data-slot="4">Iniciar Headless</button>
               </div>
             </div>
@@ -956,6 +981,16 @@
     </main>
   </div>
 
+  <div class="shiny-modal-backdrop hidden" id="shinyInspectModal" role="dialog" aria-modal="true" aria-labelledby="shinyInspectTitle">
+    <div class="shiny-modal-card">
+      <div class="shiny-modal-head">
+        <span class="shiny-modal-title" id="shinyInspectTitle">Ficha do Shiny</span>
+        <button type="button" class="icon-btn sm" id="btnCloseShinyInspect" aria-label="Fechar ficha">×</button>
+      </div>
+      <div class="shiny-modal-meta" id="shinyInspectMeta"></div>
+      <div class="shiny-modal-body" id="shinyInspectBody"></div>
+    </div>
+  </div>
   <div class="toast-stack" id="toastStack" aria-live="polite"></div>
   <script src="renderer.js"></script>
   <script src="hub-ui.js"></script>

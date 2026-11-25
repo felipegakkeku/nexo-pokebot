@@ -13,7 +13,15 @@ export const createRuntime = (ctx, { scheduler = createScheduler() } = {}) => {
         mod.init?.(ctx);
         if (typeof mod.tick === 'function') {
             const everyMs = typeof mod.everyMs === 'function' ? mod.everyMs(ctx) : mod.everyMs;
-            scheduler.add({ id: mod.id, everyMs, priority: mod.priority ?? 0, run: () => mod.tick(ctx) });
+            scheduler.add({
+                id: mod.id,
+                everyMs,
+                priority: mod.priority ?? 0,
+                run: () => {
+                    if (ctx.state?.paused) return undefined;
+                    return mod.tick(ctx);
+                },
+            });
         }
         return mod;
     };

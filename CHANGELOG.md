@@ -4,6 +4,15 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+## 1.0.18
+
+- **Notificações, categorias e cor por conta**: separação da categoria **Lives** no registro e nos avisos, remoção do alerta obsoleto de `"exige clique no navegador"`, toasts reposicionadas no topo direito (com escolha de posição no menu `⋯` e desvio automático do painel fixado), e destaque pela cor selecionada de cada conta.
+- **Card do Shiny sob demanda e histórico**: toast de Shiny no servidor abre o card completo ao clicar (também disponível em **Últimos shinies do servidor**), com registro deduplicado em `.pokebot-shiny-history.jsonl` para consultas e análises futuras.
+- **Filtros de Drops & Capturas**: personalize quais categorias notificam (Stones comuns ficam ocultas por padrão), itens específicos que sempre notificam e avisos de espécie nova.
+- **Captura Pokédex, Top Catch e VIP**: correção da resolução de `speciesId` por nome nos modos de coleção, desbloqueio de arremessos em contas VIP com `autoBallAteCapturar`, sincronia de relógio nos corpos caídos, rotação de mapas estagnados e proteção de caídos/Shinies antes de trocar de mapa ou ir ao Centro Médico.
+- **Motor de Lives e baús +50**: ajuste na janela de 55s dos pings da Twitch (para não pular minutos), separação de HLS/Spade da fila de GQL/429, suporte a lives da Kick sem `vod_id`, histerese nos buffs inteligentes e watcher automático de caixinhas mais leve.
+- **Interface**: removido o botão duplicado de abrir jogo embutido fora da grade.
+
 ## 1.0.17
 
 - Trocar de conta com o jogo embutido não congela mais a tela: as telas das contas ficam empilhadas e seguem rodando, então a troca é imediata e o jogo não precisa ser redimensionado de novo ao voltar.

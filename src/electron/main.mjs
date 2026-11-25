@@ -884,7 +884,7 @@ async function claimTwitchChestFromHud(acc, rawChannel, { fallbackPopup = true }
     }
     const res = await chestClaimsInFlight.get(key);
     if (res.ok) controller.noteLiveChestClaimed?.(channel, fallbackPopup ? 'hud' : 'auto');
-    controller.triggerAction('run-lives');
+    controller.triggerAction('refresh-lives');
 
     if (res.ok) return { ok: true, message: `Caixinha +50 resgatada em ${channel}.` };
     if (res.reason === 'no-chest') {
@@ -913,7 +913,7 @@ function nextAutoChestCandidate() {
         const entry = servers.get(acc);
         if (!entry) continue;
         const snap = entry.instance.controller.getSnapshot({ includeHunts: false });
-        if (snap?.config?.liveAutoClaimChest === false) continue;
+        if (snap?.config?.liveAutoClaimChest === false || snap?.config?.liveEnabled === false || snap?.config?.liveWatchTwitch === false) continue;
         for (const [channel, st] of Object.entries(snap?.lives?.twitch || {})) {
             if (!st?.manualChest) continue;
             const key = `${acc}:${channel}`;
@@ -1108,9 +1108,15 @@ async function runHiddenTwitchWatch(acc, channel, job, { watchMs, follow, onProg
                     await win.webContents.executeJavaScript(WATCH_FOLLOW_DOM_CLICK, true).catch(() => false);
                 }
             }
-            if (watchMs > 0 && st.playing && st.t > lastT) {
-                if (lastT >= 0) result.watchedSec += 5;
-                lastT = st.t;
+            if (watchMs > 0 && st.playing) {
+                if (st.t > lastT) {
+                    if (lastT >= 0) result.watchedSec += 5;
+                    lastT = st.t;
+                } else if (st.t < lastT && st.t > 0) {
+                    // Reset de currentTime por transicao de anuncio / MSE
+                    result.watchedSec += 5;
+                    lastT = st.t;
+                }
             }
             const min = Math.floor(result.watchedSec / 60);
             if (watchMs > 0 && min !== lastProgressMin) {
@@ -1539,6 +1545,7 @@ function alertTick() {
         const dropKeyOf = (d) => (Number(d?.id) > 0 ? Number(d.id) : Number(d?.ts || 0));
         const maxRareKey = rareList.reduce((m, d) => Math.max(m, dropKeyOf(d)), 0);
         const chests = new Set(Object.entries(snap.lives?.twitch || {}).filter(([, st]) => st?.manualChest).map(([ch]) => ch));
+        const chestsClaimed = Number(snap.lives?.chestsClaimed || 0);
         const voteReady = Boolean(snap.vote?.available);
         const lastLogId = logs.length ? Number(logs[logs.length - 1].id || 0) : 0;
         const base = alertBase.get(acc);
@@ -1549,6 +1556,7 @@ function alertTick() {
                 ownTs: Math.max(0, ...own.map((e) => Number(e?.ts) || 0)),
                 lastRareKey: maxRareKey,
                 chests,
+                chestsClaimed,
                 voteReady,
                 lastLogId,
             });
@@ -1577,8 +1585,14 @@ function alertTick() {
             fireAlert('error', acc, `Erro · Conta ${acc}`, `${nick}: ${String(freshErr[freshErr.length - 1].text || '').slice(0, 180)}`);
         }
         base.lastLogId = lastLogId;
-        for (const ch of chests) {
-            if (!base.chests.has(ch)) fireAlert('chest', acc, `Caixinha +50 · Conta ${acc}`, `Disponível em ${ch}.`, { name: ch });
+        if (chestsClaimed > Number(base.chestsClaimed || 0)) {
+            fireAlert('chest', acc, `Caixinha +50 · Conta ${acc}`, `${nick} resgatou +50 pontos na Twitch.`);
+        }
+        base.chestsClaimed = chestsClaimed;
+        if (snap.config?.liveAutoClaimChest === false) {
+            for (const ch of chests) {
+                if (!base.chests.has(ch)) fireAlert('chest', acc, `Caixinha +50 · Conta ${acc}`, `Disponível em ${ch}.`, { name: ch });
+            }
         }
         base.chests = chests;
         if (voteReady && !base.voteReady) fireAlert('vote', acc, `Voto liberado · Conta ${acc}`, 'Voto diário liberado no IdleHub.io.');

@@ -33,13 +33,17 @@ let chatReminderTimer = null;
 let lastDropsSig = '';
 let pollTimer = null;
 let huntCountdownTimer = null;
-let toastsEnabled = (() => {
+let toastPos = (() => {
     try {
-        return localStorage.getItem('nexo_toast_enabled') !== '0';
+        if (localStorage.getItem('nexo_toast_enabled') === '0') return 'off';
+        const saved = localStorage.getItem('nexo_toast_pos');
+        if (saved && ['top-right', 'top-center', 'bottom-right'].includes(saved)) return saved;
+        return 'top-right';
     } catch {
-        return true;
+        return 'top-right';
     }
 })();
+let toastsEnabled = toastPos !== 'off';
 const toastBaselineByAcc = {};
 const recentToastMap = new Map();
 let serverShinyToastBaselineDone = false;
@@ -1086,6 +1090,50 @@ async function initSoundControls() {
             renderSoundCard();
         }
     });
+
+    const srvShinyChk = $('cNotifyServerShiny');
+    if (srvShinyChk) {
+        try {
+            srvShinyChk.checked = localStorage.getItem('nexo_notify_server_shiny') !== '0';
+        } catch {
+            srvShinyChk.checked = true;
+        }
+        srvShinyChk.addEventListener('change', () => {
+            try {
+                localStorage.setItem('nexo_notify_server_shiny', srvShinyChk.checked ? '1' : '0');
+            } catch { /* ignore */ }
+        });
+    }
+    $('notifyDropCats')?.addEventListener('click', async (ev) => {
+        const btn = ev.target.closest('[data-notify-drop-cat]');
+        if (!btn) return;
+        const cat = btn.dataset.notifyDropCat;
+        if (!cat) return;
+        const cur = new Set(snapshots[activeAccount]?.config?.dropNotifyCategories || ['outland', 'unova', 'boss', 'other']);
+        if (cur.has(cat)) cur.delete(cat);
+        else cur.add(cat);
+        await sendAction('set-config', { config: { dropNotifyCategories: [...cur] } });
+    });
+    $('cNotifyDropCommon')?.addEventListener('change', async (ev) => {
+        await sendAction('set-config', { config: { dropNotifyCommon: ev.target.checked } });
+    });
+    $('cNotifyNewSpecies')?.addEventListener('change', async (ev) => {
+        await sendAction('set-config', { config: { notifyCatchNewSpecies: ev.target.checked } });
+    });
+    $('cNotifyDropAllow')?.addEventListener('change', async (ev) => {
+        const items = String(ev.target.value || '')
+            .split(/[,;\n]+/)
+            .map((s) => s.trim())
+            .filter(Boolean);
+        await sendAction('set-config', { config: { dropNotifyAllowItems: items } });
+    });
+    $('btnCloseShinyInspect')?.addEventListener('click', () => closeShinyInspectCard());
+    $('shinyInspectModal')?.addEventListener('click', (ev) => {
+        if (ev.target === $('shinyInspectModal')) closeShinyInspectCard();
+    });
+    document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') closeShinyInspectCard();
+    });
 }
 
 function initGridControls() {
@@ -1479,8 +1527,10 @@ function renderTopTabsAndSlots() {
         const toggleBtn = document.querySelector(`[data-slot-act="toggle"][data-slot="${acc}"]`);
         if (toggleBtn) {
             toggleBtn.textContent = isEmbedded ? 'Ir p/ Headless' : 'Abrir Embutido';
-            toggleBtn.className = isEmbedded ? 'btn sm primary' : 'btn sm teal';
+            toggleBtn.className = isEmbedded ? 'btn sm primary grid-only' : 'btn sm teal grid-only';
         }
+        const reloadBtn = document.querySelector(`[data-slot-act="reload"][data-slot="${acc}"]`);
+        if (reloadBtn) reloadBtn.hidden = !isEmbedded;
 
         if (!isEmbedded) {
             const phTitle = $(`phTitle-${acc}`);
@@ -1495,7 +1545,7 @@ function renderTopTabsAndSlots() {
                 const guideNote = s?.huntGuide?.note ? ` /hunt: ${s.huntGuide.note}` : '';
                 phSub.textContent = status === 'connected'
                     ? `Rodando em 2º plano sem abrir navegador (economia máxima de RAM/CPU).${guideNote}`
-                    : 'Clique em "Abrir jogo embutido" para jogar/logar aqui dentro ou "Iniciar Headless" para farmar em 2º plano.';
+                    : 'Use "Abrir no Embutido" no painel ao lado para jogar/logar aqui dentro ou "Iniciar Headless" para farmar em 2º plano.';
             }
             if (phStats) {
                 if (status === 'connected' || status === 'paused') {
@@ -1788,6 +1838,18 @@ function renderActiveAccountPanel() {
         setConfigDirty(Boolean(dirtyByAcc[activeAccount]));
         renderConfigModePreview();
     }
+    if (cfg) {
+        const notifyCats = new Set(Array.isArray(cfg.dropNotifyCategories) ? cfg.dropNotifyCategories : ['outland', 'unova', 'boss', 'other']);
+        document.querySelectorAll('#notifyDropCats [data-notify-drop-cat]').forEach((btn) => {
+            btn.classList.toggle('active', notifyCats.has(btn.dataset.notifyDropCat));
+        });
+        if ($('cNotifyDropCommon')) $('cNotifyDropCommon').checked = Boolean(cfg.dropNotifyCommon);
+        if ($('cNotifyNewSpecies')) $('cNotifyNewSpecies').checked = cfg.notifyCatchNewSpecies !== false;
+        const allowInp = $('cNotifyDropAllow');
+        if (allowInp && document.activeElement !== allowInp) {
+            allowInp.value = Array.isArray(cfg.dropNotifyAllowItems) ? cfg.dropNotifyAllowItems.join(', ') : '';
+        }
+    }
 
     // Connections
     const profSel = $('cBrowserProfile');
@@ -1952,9 +2014,18 @@ function renderLives(lv) {
     // Lista de lives com seletor individual de buff por canal
     const chanListEl = $('liveChannelList');
     const channels = Array.isArray(lv.channels) ? lv.channels : [];
+    const autoChestOn = lv.autoClaimChest !== false;
     const channelNotes = channels.map(ch => {
         const status = lv[ch.platform]?.[ch.channel];
-        return status?.manualChest ? 'Caixinha +50 disponível: clique em Resgatar +50' : status?.error;
+        if (status?.manualChest) {
+            return {
+                text: autoChestOn
+                    ? 'Caixinha +50 detectada (resgate automático em andamento)'
+                    : 'Caixinha +50 disponível: clique em Resgatar +50',
+                soft: autoChestOn,
+            };
+        }
+        return status?.error ? { text: status.error, soft: false } : null;
     });
     const chanSig = JSON.stringify([activeAccount, lv.officialUrls, channels, channelNotes]);
     if (chanSig !== lastLiveChanSig && !chanListEl.querySelector('select:focus')) {
@@ -2000,11 +2071,11 @@ function renderLives(lv) {
             sel.setAttribute('aria-label', 'Bônus de ' + ch.channel);
             row.appendChild(info);
             row.appendChild(sel);
-            const error = channelNotes[index];
-            if (error) {
+            const noteInfo = channelNotes[index];
+            if (noteInfo?.text) {
                 const note = document.createElement('small');
-                note.className = 'channel-warning';
-                note.textContent = error;
+                note.className = noteInfo.soft ? 'channel-smart-note' : 'channel-warning';
+                note.textContent = noteInfo.text;
                 row.append(note);
             } else if (ch.smartNote) {
                 const note = document.createElement('small');
@@ -2049,7 +2120,8 @@ function renderActivity(data) {
         list.replaceChildren();
         for (const entry of feed) {
             const item = document.createElement('li');
-            item.className = 'shiny-feed-item';
+            item.className = 'shiny-feed-item clickable';
+            item.title = 'Clique para abrir o card completo deste shiny';
             const entryDex = resolvePokemonSpriteDex(entry.speciesId, entry.name, entry.spriteDex);
             const entryUrl = pokemonSpriteUrl(entry.speciesId, true, entryDex, entry.name);
             if (entryUrl) {
@@ -2066,11 +2138,13 @@ function renderActivity(data) {
             const txt = document.createElement('span');
             txt.className = 'shiny-feed-text';
             const name = document.createElement('strong');
-            name.textContent = entry.name;
+            const lvTxt = entry.level && entry.level !== '?' ? ` (Nv ${entry.level})` : '';
+            name.textContent = `${entry.name}${lvTxt}`;
             const meta = document.createElement('small');
             meta.textContent = `${entry.trainer} · ${entry.egg ? 'Ovo' : 'Captura'} · ${new Date(entry.ts).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
             txt.append(name, meta);
             item.append(txt);
+            item.addEventListener('click', () => openShinyInspectCard(entry));
             list.append(item);
         }
         if (!feed.length) list.textContent = 'Aguardando o próximo anúncio do servidor. O histórico começa quando a conta se conecta.';
@@ -2263,6 +2337,53 @@ function labelPokemonDetail(key) {
     return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
+function closeShinyInspectCard() {
+    $('shinyInspectModal')?.classList.add('hidden');
+}
+
+function openShinyInspectCard(entry) {
+    const modal = $('shinyInspectModal');
+    const titleEl = $('shinyInspectTitle');
+    const metaEl = $('shinyInspectMeta');
+    const bodyEl = $('shinyInspectBody');
+    if (!modal || !entry) return;
+    const dex = resolvePokemonSpriteDex(entry.speciesId, entry.name, entry.spriteDex);
+    const when = entry.ts ? new Date(entry.ts).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'medium' }) : 'Agora';
+    if (titleEl) {
+        titleEl.textContent = entry.own ? `Seu Shiny: ${entry.name}` : `Shiny no servidor: ${entry.name}`;
+    }
+    if (metaEl) {
+        const parts = [
+            entry.trainer ? `Treinador: ${entry.trainer}` : '',
+            entry.egg ? 'Origem: Ovo' : 'Origem: Captura',
+            entry.hunt && entry.hunt !== 'Ovo Shiny' ? `Mapa: ${entry.hunt}` : '',
+            when,
+        ].filter(Boolean);
+        metaEl.textContent = parts.join(' · ');
+    }
+    if (bodyEl) {
+        bodyEl.replaceChildren();
+        const cardEl = buildToastCard({
+            speciesId: entry.speciesId,
+            spriteDex: dex,
+            sprite: pokemonSpriteUrl(entry.speciesId, true, dex, entry.name),
+            name: entry.name,
+            level: entry.level,
+            subtitle: [dex ? `#${dex}` : '', entry.speciesId && entry.speciesId !== dex ? `ID ${entry.speciesId}` : ''].filter(Boolean).join(' · '),
+            rows: Array.isArray(entry.details) ? entry.details : [],
+        });
+        bodyEl.append(cardEl);
+        if (!Array.isArray(entry.details) || entry.details.length === 0) {
+            const hint = document.createElement('div');
+            hint.className = 'hint-text';
+            hint.style.marginTop = '8px';
+            hint.textContent = 'O servidor não enviou atributos extras (IVs/natureza) neste anúncio.';
+            bodyEl.append(hint);
+        }
+    }
+    modal.classList.remove('hidden');
+}
+
 function buildToastCard(card) {
     const wrap = document.createElement('div');
     wrap.className = 'toast-card';
@@ -2330,18 +2451,102 @@ function buildToastCard(card) {
     return wrap;
 }
 
+const TOAST_LIVE_RE = /^(?:Lives:|Twitch\b|Kick\b|Cookies Twitch)/i;
+
+function toastVisualMeta({ kind = 'info', text = '', event = '', card = null } = {}) {
+    const k = String(kind || 'info');
+    const txt = String(text || '');
+    if (k === 'shiny' || card) {
+        return { tone: 'shiny', cat: 'shiny', tag: 'SHINY', icon: 'sparkles', cleanText: txt };
+    }
+    if (k === 'shiny-miss' || event === 'shinyMiss') {
+        return { tone: 'warn', cat: 'shiny', tag: 'SHINY PERDIDO', icon: 'alert', cleanText: txt };
+    }
+    if (k === 'error' || event === 'error') {
+        const isLiveErr = TOAST_LIVE_RE.test(txt);
+        return { tone: 'error', cat: isLiveErr ? 'live' : 'error', tag: isLiveErr ? 'ERRO LIVE' : 'ERRO', icon: 'x', cleanText: txt };
+    }
+    const isLive = k === 'live' || event === 'chest' || TOAST_LIVE_RE.test(txt) || /\b429\b/i.test(txt);
+    if (k === 'warn') {
+        return {
+            tone: 'warn',
+            cat: isLive ? 'live' : 'warn',
+            tag: isLive ? 'LIVE' : 'AVISO',
+            icon: 'alert',
+            cleanText: isLive ? txt.replace(/^Lives:\s*/i, '') : txt,
+        };
+    }
+    if (isLive) {
+        return {
+            tone: 'live',
+            cat: 'live',
+            tag: 'LIVE',
+            icon: 'tv',
+            cleanText: txt.replace(/^Lives:\s*/i, ''),
+        };
+    }
+    if (k === 'reward' || event === 'rareDrop' || event === 'vote') {
+        let tag = 'BÔNUS';
+        if (event === 'rareDrop' || /^Drop\b/i.test(txt)) tag = 'DROP RARO';
+        else if (event === 'vote' || /voto|diamante/i.test(txt)) tag = 'VOTO';
+        else if (/top catch/i.test(txt)) tag = 'TOP CATCH';
+        else if (/passe/i.test(txt)) tag = 'PASSE';
+        return { tone: 'reward', cat: 'reward', tag, icon: 'gift', cleanText: txt };
+    }
+    const isHunt = /hunt|centro m[eé]dico|equipe curada|pok[eé]dex|top catch/i.test(txt);
+    if (k === 'ok') {
+        return { tone: 'ok', cat: isHunt ? 'hunt' : 'ok', tag: isHunt ? 'HUNT' : 'CONTA', icon: isHunt ? 'trend' : 'check', cleanText: txt };
+    }
+    return { tone: 'info', cat: isHunt ? 'hunt' : 'info', tag: isHunt ? 'HUNT' : 'SISTEMA', icon: isHunt ? 'trend' : 'info', cleanText: txt };
+}
+
+function applyToastPosition() {
+    const stack = $('toastStack');
+    if (stack) {
+        stack.classList.remove('pos-top-right', 'pos-top-center', 'pos-bottom-right');
+        const cls = toastPos === 'top-center'
+            ? 'pos-top-center'
+            : (toastPos === 'bottom-right' ? 'pos-bottom-right' : 'pos-top-right');
+        stack.classList.add(cls);
+        stack.hidden = toastPos === 'off';
+    }
+    document.querySelectorAll('#toastPosSeg [data-toast-pos]').forEach((btn) => {
+        const active = btn.dataset.toastPos === toastPos;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-checked', String(active));
+    });
+    const chk = $('cToastEnabled');
+    if (chk) chk.checked = toastsEnabled;
+}
+window.applyToastPosition = applyToastPosition;
+
+function setToastPos(pos) {
+    const valid = ['top-right', 'top-center', 'bottom-right', 'off'].includes(pos) ? pos : 'top-right';
+    toastPos = valid;
+    toastsEnabled = valid !== 'off';
+    try {
+        localStorage.setItem('nexo_toast_enabled', toastsEnabled ? '1' : '0');
+        if (valid !== 'off') localStorage.setItem('nexo_toast_pos', valid);
+    } catch { /* ignore */ }
+    applyToastPosition();
+    hubHook('syncMenuState');
+}
+
 function showToast({
     kind = 'info', title = 'Nexo PokeBot', text = '', account = null, onClick = null,
     actionLabel = '', card = null, duration = 0, event = '',
 } = {}) {
     if (event && soundCfg?.events?.[event]?.toast === false) return;
+    const meta = toastVisualMeta({ kind, text, event, card });
     hubHook('recordEvent', { kind, title, text, account, event, card, ts: Date.now() });
     if (!toastsEnabled || (!text && !card)) return;
-    if (hubHook('routeToast', { kind, title, text, account, onClick, actionLabel, card, duration, event }) === true) return;
+    if (hubHook('routeToast', { kind, category: meta.cat, title, text: meta.cleanText || text, account, onClick, actionLabel, card, duration, event }) === true) return;
     const stack = $('toastStack');
     if (!stack) return;
+    applyToastPosition();
     const now = Date.now();
-    const dedupeKey = `${account || 0}|${kind}|${text}|${card?.name || ''}`;
+    const bodyTxt = meta.cleanText || text || '';
+    const dedupeKey = `${account || 0}|${meta.tone}|${bodyTxt}|${card?.name || ''}`;
     const prevTs = recentToastMap.get(dedupeKey) || 0;
     if (now - prevTs < 8000) return;
     recentToastMap.set(dedupeKey, now);
@@ -2355,31 +2560,69 @@ function showToast({
         stack.firstElementChild?.remove();
     }
 
+    const accNum = Number(account);
+    const hasAcc = Number.isInteger(accNum) && ACCOUNTS.includes(accNum);
+    const accColor = hasAcc ? (window.nexoIcons?.accountAccent?.(accNum) || 'azul') : '';
+
     const item = document.createElement('div');
-    item.className = `toast-item ${kind}${card ? ' has-card' : ''}${onClick ? ' actionable' : ''}`;
-    item.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+    item.className = `toast-item ${meta.tone}${hasAcc ? ' has-acc' : ''}${card ? ' has-card' : ''}${onClick ? ' actionable' : ''}`;
+    if (hasAcc) {
+        item.dataset.acc = String(accNum);
+        item.dataset.accColor = accColor;
+    }
+    item.setAttribute('role', meta.tone === 'error' ? 'alert' : 'status');
 
     const icon = document.createElement('div');
     icon.className = 'toast-icon';
-    icon.textContent = TOAST_ICONS[kind] || TOAST_ICONS.info;
+    const svg = window.nexoIcons?.icon?.(meta.icon);
+    if (svg) icon.innerHTML = svg;
+    else icon.textContent = TOAST_ICONS[kind] || TOAST_ICONS.info;
 
     const main = document.createElement('div');
     main.className = 'toast-main';
     const head = document.createElement('div');
     head.className = 'toast-head';
-    const titleSpan = document.createElement('span');
-    titleSpan.className = 'toast-title';
-    titleSpan.textContent = title;
+    const badges = document.createElement('div');
+    badges.className = 'toast-badges';
+
+    let headline = String(title || '').trim();
+    if (hasAcc) {
+        let nickLabel = '';
+        const accMatch = headline.match(new RegExp(`^(?:(.+?)\\s*·\\s*)?Conta\\s+${accNum}(?:\\s*·\\s*(.+))?$`));
+        if (accMatch) {
+            headline = (accMatch[1] || '').trim();
+            nickLabel = (accMatch[2] || '').trim();
+        }
+        const accPill = document.createElement('span');
+        accPill.className = 'toast-acc-pill';
+        const dot = document.createElement('i');
+        dot.className = 'acc-pill-dot';
+        accPill.append(dot, document.createTextNode(nickLabel ? `C${accNum} · ${nickLabel}` : `Conta ${accNum}`));
+        badges.append(accPill);
+    }
+
+    const catPill = document.createElement('span');
+    catPill.className = `toast-cat-pill ${meta.tone}`;
+    catPill.textContent = meta.tag;
+    badges.append(catPill);
+
     const timeSpan = document.createElement('span');
     timeSpan.className = 'toast-time';
     timeSpan.textContent = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    head.append(titleSpan, timeSpan);
+    head.append(badges, timeSpan);
     main.append(head);
+
+    if (headline && headline.toUpperCase() !== meta.tag) {
+        const titleEl = document.createElement('div');
+        titleEl.className = 'toast-title';
+        titleEl.textContent = headline;
+        main.append(titleEl);
+    }
     if (card) main.append(buildToastCard(card));
-    if (text) {
+    if (bodyTxt) {
         const body = document.createElement('div');
         body.className = 'toast-body';
-        body.textContent = text;
+        body.textContent = bodyTxt;
         main.append(body);
     }
     if (onClick && actionLabel) {
@@ -2395,7 +2638,7 @@ function showToast({
     close.setAttribute('aria-label', 'Fechar notificação');
     close.textContent = '×';
 
-    const life = duration || (card ? 15_000 : (kind === 'shiny' || onClick ? 8_000 : 5_000));
+    const life = duration || (card ? 15_000 : (meta.tone === 'shiny' || onClick ? 8_000 : 5_500));
     const bar = document.createElement('div');
     bar.className = 'toast-progress';
     bar.style.animationDuration = `${life}ms`;
@@ -2432,8 +2675,8 @@ function showToast({
         dismiss();
     });
     item.addEventListener('click', () => {
-        if (account && ACCOUNTS.includes(account)) {
-            selectAccount(account);
+        if (hasAcc) {
+            selectAccount(accNum);
         }
         if (typeof onClick === 'function') {
             try { onClick(); } catch { /* ignore */ }
@@ -2444,12 +2687,40 @@ function showToast({
     arm();
 }
 
-function isToastWorthyLog(entry) {
+function shouldNotifyDrop(drop, cfg = null) {
+    if (!drop || !drop.name) return false;
+    const hiddenItems = new Set((Array.isArray(cfg?.dropHideItems) ? cfg.dropHideItems : []).map((s) => String(s).toLowerCase()));
+    if (hiddenItems.has(String(drop.key || '').toLowerCase()) || hiddenItems.has(String(drop.name || '').toLowerCase())) {
+        return false;
+    }
+    const allowList = (Array.isArray(cfg?.dropNotifyAllowItems) ? cfg.dropNotifyAllowItems : [])
+        .map((s) => String(s || '').trim().toLowerCase())
+        .filter(Boolean);
+    const nameLow = String(drop.name || '').toLowerCase();
+    const keyLow = String(drop.key || '').toLowerCase();
+    if (allowList.some((a) => nameLow.includes(a) || keyLow === a)) return true;
+
+    const notifyCats = new Set(
+        Array.isArray(cfg?.dropNotifyCategories)
+            ? cfg.dropNotifyCategories
+            : ['outland', 'unova', 'boss', 'other']
+    );
+    const cat = String(drop.category || 'other').toLowerCase();
+    if (!notifyCats.has(cat)) return false;
+    if (!drop.rare && !cfg?.dropNotifyCommon) return false;
+    return true;
+}
+
+function isToastWorthyLog(entry, cfg = null) {
     if (!entry || !entry.text) return false;
     const k = String(entry.kind || '');
     const txt = String(entry.text || '');
+    if (/exige clique no navegador/i.test(txt)) return false;
+    if (/^Drop:/i.test(txt)) return false; // recentRare / recentDrops tratam drops com filtro personalizado
+    if (k === 'reward' && /top catch: nova esp[eé]cie/i.test(txt) && cfg?.notifyCatchNewSpecies === false) return false;
     if (k === 'shiny' || k === 'shiny-miss' || k === 'reward' || k === 'error') return true;
-    if (k === 'warn') return /sess[aã]o|combate|falha|desconect|expir|erro|morreu|morte|cancelad|limita|shiny|captura|somente ping|feed de campo/i.test(txt);
+    if (k === 'live') return /caixinha|ba[úu] \+\d+|resgatad|coletad|b[ôo]nus|cookies|sincronizad|429/i.test(txt);
+    if (k === 'warn') return /sess[aã]o|combate|falha|desconect|expir|erro|morreu|morte|cancelad|limita|shiny|captura|somente ping|feed de campo|429|live/i.test(txt);
     if (k === 'ok') return /troca de hunt|centro m[eé]dico|equipe curada|conectad|cookies|sincronizad|salva|pok[eé]dex|top catch/i.test(txt);
     if (k === 'info') return /\/hunt recomenda|troca .* agendada|indo para o centro|pok[eé]dex|top catch/i.test(txt);
     return false;
@@ -2467,11 +2738,13 @@ function processActivityToasts(allSnaps) {
 
         const logs = Array.isArray(snap.logs) ? snap.logs : [];
         const sigOf = (l) => `${l.time || ''}|${l.kind || ''}|${l.text || ''}`;
+        const allDrops = Array.isArray(snap.drops?.recent) ? snap.drops.recent : [];
         const rareList = Array.isArray(snap.drops?.recentRare)
             ? snap.drops.recentRare
-            : (Array.isArray(snap.drops?.recent) ? snap.drops.recent.filter((d) => d?.rare) : []);
+            : allDrops.filter((d) => d?.rare);
         const dropKeyOf = (d) => (Number(d?.id) > 0 ? Number(d.id) : Number(d?.ts || 0));
         const maxRareKey = rareList.reduce((m, d) => Math.max(m, dropKeyOf(d)), 0);
+        const maxDropKey = allDrops.reduce((m, d) => Math.max(m, dropKeyOf(d)), 0);
         const base = toastBaselineByAcc[acc];
         if (!base) {
             const initChests = new Set(
@@ -2482,6 +2755,7 @@ function processActivityToasts(allSnaps) {
             toastBaselineByAcc[acc] = {
                 lastSig: logs.length > 0 ? sigOf(logs[logs.length - 1]) : '',
                 lastRareKey: maxRareKey,
+                lastDropKey: maxDropKey,
                 manualChests: initChests,
                 voteReady: Boolean(snap.vote?.available),
                 lastOwnShinyTs: Number(snap.ownShinies?.[0]?.ts || 0),
@@ -2502,29 +2776,36 @@ function processActivityToasts(allSnaps) {
                 for (const entry of fresh) {
                     // A captura shiny ganha o cartao com a ficha logo abaixo; nao repete em texto
                     if (hasShinyCards && entry.kind === 'shiny' && /^(?:Capturado|Chocado) SHINY/i.test(entry.text || '')) continue;
-                    if (isToastWorthyLog(entry)) {
-                        const ev = entry.kind === 'shiny-miss' ? 'shinyMiss' : (entry.kind === 'error' ? 'error' : '');
-                        showToast({ kind: entry.kind === 'shiny-miss' ? 'warn' : (entry.kind || 'info'), title: accLabel, text: entry.text, account: acc, event: ev });
+                    if (isToastWorthyLog(entry, snap.config)) {
+                        const isChest = /caixinha|ba[úu] \+\d+/i.test(entry.text || '');
+                        const ev = entry.kind === 'shiny-miss'
+                            ? 'shinyMiss'
+                            : (entry.kind === 'error' ? 'error' : (isChest ? 'chest' : ''));
+                        const toastKind = entry.kind === 'shiny-miss' ? 'warn' : (entry.kind || 'info');
+                        showToast({ kind: toastKind, title: accLabel, text: entry.text, account: acc, event: ev });
                     }
                 }
                 base.lastSig = sigOf(logs[logs.length - 1]);
             }
+            const autoChestOn = snap.lives?.autoClaimChest !== false && snap.config?.liveAutoClaimChest !== false;
             const curChests = new Set(
                 Object.entries(snap.lives?.twitch || {})
                     .filter(([, st]) => st?.manualChest)
                     .map(([ch]) => ch)
             );
-            for (const ch of curChests) {
-                if (!base.manualChests?.has(ch)) {
-                    showToast({
-                        kind: 'reward',
-                        title: `Caixinha +50 · ${accLabel}`,
-                        text: `Disponível em ${ch}. O bot resgata sozinho em instantes.`,
-                        account: acc,
-                        actionLabel: 'Resgatar agora',
-                        event: 'chest',
-                        onClick: () => void claimTwitchChest(ch, acc),
-                    });
+            if (!autoChestOn) {
+                for (const ch of curChests) {
+                    if (!base.manualChests?.has(ch)) {
+                        showToast({
+                            kind: 'reward',
+                            title: `Caixinha +50 · ${accLabel}`,
+                            text: `Disponível em ${ch}.`,
+                            account: acc,
+                            actionLabel: 'Resgatar agora',
+                            event: 'chest',
+                            onClick: () => void claimTwitchChest(ch, acc),
+                        });
+                    }
                 }
             }
             base.manualChests = curChests;
@@ -2542,17 +2823,24 @@ function processActivityToasts(allSnaps) {
                 });
             }
             base.voteReady = voteReadyNow;
-            const freshRare = rareList.filter((d) => dropKeyOf(d) > Number(base.lastRareKey || 0)).reverse();
-            for (const rareDrop of freshRare) {
-                showToast({
-                    kind: 'reward',
-                    title: `Drop raro · ${accLabel}`,
-                    event: 'rareDrop',
-                    text: `${rareDrop.name} x${rareDrop.qty || 1}`,
-                    account: acc,
-                });
-                base.lastRareKey = Math.max(Number(base.lastRareKey || 0), dropKeyOf(rareDrop));
+            const freshDrops = (snap.config?.dropNotifyCommon || (snap.config?.dropNotifyAllowItems?.length > 0))
+                ? allDrops.filter((d) => dropKeyOf(d) > Number(base.lastDropKey || 0)).reverse()
+                : rareList.filter((d) => dropKeyOf(d) > Number(base.lastRareKey || 0)).reverse();
+            for (const dropItem of freshDrops) {
+                if (shouldNotifyDrop(dropItem, snap.config)) {
+                    showToast({
+                        kind: 'reward',
+                        title: `${dropItem.rare ? 'Drop raro' : 'Drop'} · ${accLabel}`,
+                        event: 'rareDrop',
+                        text: `${dropItem.name} x${dropItem.qty || 1}`,
+                        account: acc,
+                    });
+                }
+                base.lastRareKey = Math.max(Number(base.lastRareKey || 0), dropKeyOf(dropItem));
+                base.lastDropKey = Math.max(Number(base.lastDropKey || 0), dropKeyOf(dropItem));
             }
+            base.lastRareKey = Math.max(Number(base.lastRareKey || 0), maxRareKey);
+            base.lastDropKey = Math.max(Number(base.lastDropKey || 0), maxDropKey);
         }
 
         if (base) {
@@ -2566,6 +2854,8 @@ function processActivityToasts(allSnaps) {
                     title: `Shiny capturado · ${accLabel}`,
                     account: acc,
                     event: 'shinyCaught',
+                    actionLabel: 'Ver ficha',
+                    onClick: () => openShinyInspectCard({ ...sh, trainer: nick, own: true }),
                     card: {
                         speciesId: sh.speciesId,
                         spriteDex: shDex,
@@ -2593,19 +2883,19 @@ function processActivityToasts(allSnaps) {
             lastServerShinyToastKey = shinyKey;
         } else if (shinyKey !== lastServerShinyToastKey) {
             lastServerShinyToastKey = shinyKey;
-            const nsDex = resolvePokemonSpriteDex(newestShiny.speciesId, newestShiny.name, newestShiny.spriteDex);
-            showToast({
-                kind: 'shiny',
-                title: 'Shiny no servidor',
-                duration: 9_000,
-                card: {
-                    speciesId: newestShiny.speciesId,
-                    spriteDex: nsDex,
-                    sprite: pokemonSpriteUrl(newestShiny.speciesId, true, nsDex, newestShiny.name),
-                    name: newestShiny.name,
-                    subtitle: `${newestShiny.egg ? 'Chocado de ovo' : 'Capturado'} por ${newestShiny.trainer}`,
-                },
-            });
+            let srvToastOn = true;
+            try { srvToastOn = localStorage.getItem('nexo_notify_server_shiny') !== '0'; } catch { /* ignore */ }
+            if (srvToastOn) {
+                const lvTxt = newestShiny.level && newestShiny.level !== '?' ? ` Nv ${newestShiny.level}` : '';
+                showToast({
+                    kind: 'shiny',
+                    title: 'Shiny no servidor',
+                    text: `${newestShiny.name}${lvTxt} · ${newestShiny.egg ? 'Ovo' : 'Captura'} por ${newestShiny.trainer}`,
+                    duration: 8_000,
+                    actionLabel: 'Ver card do drop',
+                    onClick: () => openShinyInspectCard(newestShiny),
+                });
+            }
         }
     } else if (!serverShinyToastBaselineDone) {
         serverShinyToastBaselineDone = true;
@@ -2642,7 +2932,9 @@ function refreshTopCatchTimer(data = snapshots[activeAccount]) {
         timerEl.classList.remove('ending');
         return;
     }
-    const remMs = Math.max(0, Number(tc.endMs) - Date.now());
+    const remMs = Number.isFinite(tc.remainingMs)
+        ? Math.max(0, Number(tc.remainingMs) - Math.max(0, Date.now() - Number(data?._receivedAt || Date.now())))
+        : Math.max(0, Number(tc.endMs) - Date.now());
     const label = remMs > 0 ? `Falta ${fmtEventCountdown(remMs)}` : 'Virando semana...';
     if (timerEl.textContent !== label) timerEl.textContent = label;
     timerEl.classList.toggle('ending', remMs > 0 && remMs < 12 * 3600_000);
@@ -3090,18 +3382,26 @@ function wireEvents() {
         }
     });
 
+    applyToastPosition();
     const toastChk = $('cToastEnabled');
     if (toastChk) {
         toastChk.checked = toastsEnabled;
         toastChk.addEventListener('change', () => {
-            toastsEnabled = toastChk.checked;
+            let preferred = 'top-right';
             try {
-                localStorage.setItem('nexo_toast_enabled', toastsEnabled ? '1' : '0');
-            } catch {
-                // ignora storage bloqueado
-            }
+                const stored = localStorage.getItem('nexo_toast_pos');
+                if (stored && ['top-right', 'top-center', 'bottom-right'].includes(stored)) {
+                    preferred = stored;
+                }
+            } catch { /* ignora storage bloqueado */ }
+            setToastPos(toastChk.checked ? preferred : 'off');
         });
     }
+    $('toastPosSeg')?.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('[data-toast-pos]');
+        if (!btn) return;
+        setToastPos(btn.dataset.toastPos || 'top-right');
+    });
     document.querySelectorAll('.acc-tab').forEach((btn) => {
         btn.addEventListener('click', () => selectAccount(Number(btn.dataset.acc)));
     });
@@ -3346,8 +3646,6 @@ function wireEvents() {
                 setViewMode('split');
             } else if (act === 'reload') {
                 webviews.get(acc)?.reload();
-            } else if (act === 'open') {
-                await openEmbeddedForAccount(acc);
             } else if (act === 'headless') {
                 if (webviews.has(acc)) {
                     await closeEmbeddedForAccount(acc, { startHeadless: true });

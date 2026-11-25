@@ -156,7 +156,10 @@ export const processCaidos = (ctx, container) => {
     }
 
     if (!CONFIG.caidos.enabled) return;
-    if (state.modalLockOwner && !(CONFIG.shinyGuard.enabled && shinyButtons.length > 0)) return;
+    const modalBlocking = typeof dom.getVisibleModal === 'function'
+        ? Boolean(dom.getVisibleModal())
+        : Boolean(state.modalLockOwner);
+    if (modalBlocking && !(CONFIG.shinyGuard.enabled && shinyButtons.length > 0)) return;
     if (state.throwPending) return;
 
     const inv = dom.getInventorySnapshot();

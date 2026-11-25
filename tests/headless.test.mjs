@@ -2304,6 +2304,7 @@ test('hub: encontra extensao /hunt, roda /hunt em modo headless puro e acopla po
     }
 });
 
+
 test('desktop: gera icone ICO valido multi-resolucao e compila Nexo PokeBot.exe', () => {
     const ico = buildPokeballIconBuffer();
     assert.equal(ico.readUInt16LE(0), 0);
@@ -2411,6 +2412,7 @@ test('potions e lives: escolhe pocoes para auto.set/restock e salva buff por can
         rmSync(dir, { recursive: true, force: true });
     }
 });
+
 
 test('eco: startMultiAccountDaemon sobe 4 contas em 1 processo unico e encerra limpo', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'pokebot-eco-'));
@@ -2561,6 +2563,7 @@ test('telemetria eco: mapeia foco Outland/Unova/Boss/Hunt, contabiliza drops, te
     }
 });
 
+
 test('centro medico + troca de hunt: bloqueia durante combate, agenda troca e libera ao zerar contagem', () => {
     const dir = mkdtempSync(join(tmpdir(), 'pokebot-center-'));
     try {
@@ -2636,6 +2639,7 @@ test('centro medico + troca de hunt: bloqueia durante combate, agenda troca e li
         rmSync(dir, { recursive: true, force: true });
     }
 });
+
 
 test('perfil configurado: openLives, openPanel e openExternalUrl usam o perfil escolhido da conta', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'pokebot-profopen-'));
@@ -2714,6 +2718,7 @@ test('perfil configurado: openLives, openPanel e openExternalUrl usam o perfil e
         rmSync(dir, { recursive: true, force: true });
     }
 });
+
 
 test('vote: monitora /idlehub/me, abre IdleHub no perfil configurado e reage a votoCreditado', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'pokebot-vote-'));
@@ -2808,6 +2813,7 @@ test('vote: monitora /idlehub/me, abre IdleHub no perfil configurado e reage a v
         rmSync(dir, { recursive: true, force: true });
     }
 });
+
 
 test('updater: semver, selecao de ZIP, checkForUpdate, script seguro e staging de ZIP', async () => {
     assert.deepEqual(parseSemver('v1.2.3-beta.1'), { major: 1, minor: 2, patch: 3, prerelease: 'beta.1', raw: '1.2.3-beta.1' });
@@ -3185,6 +3191,7 @@ test('garantia de captura e avisos: AoE multi-kill, VIP preserva campo, watchdog
     }
 });
 
+
 test('shiny-miss e shiniesSeen: ignora pets de jogadores (dn), treino na casa (ti), PvP (eq), NPCs, Centro/Casa e deltas atrasados da Praca', async () => {
     // 1) isWildCampoMob exclui todas as entidades nao selvagens
     assert.equal(isWildCampoMob({ slot: 1, nome: 'Shedinja', shiny: true }), true);
@@ -3419,6 +3426,7 @@ test('shiny-miss e shiniesSeen: ignora pets de jogadores (dn), treino na casa (t
     }
 });
 
+
 test('sprites: resolvePokemonSpriteDex mapeia Hoenn (13xxx), Outland (2001..2058 e 10501..), Megas, Formas e nome fallback no gui-server', async () => {
     // 1) National Dex direta (Gen 1..9)
     assert.equal(resolvePokemonSpriteDex(6), 6);
@@ -3522,6 +3530,7 @@ test('sprites: resolvePokemonSpriteDex mapeia Hoenn (13xxx), Outland (2001..2058
     }
 });
 
+
 test('gui: bridge embutido registra drop.raro (casa/bicicleta), recentRare sem filtro e shiny.captura proprio (ovo)', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'pokebot-alert-bridge-'));
     try {
@@ -3574,4 +3583,130 @@ test('gui: bridge embutido registra drop.raro (casa/bicicleta), recentRare sem f
     } finally {
         rmSync(dir, { recursive: true, force: true });
     }
+});
+
+test('gui: bridge de lives emite logs na categoria live, expoe autoClaimChest e filtra exige clique', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pokebot-live-logs-'));
+    try {
+        const controller = createHeadlessController({
+            cwd: dir,
+            autoStart: false,
+            autoLoginOnMissingSession: false,
+            disableBrowserProfileSync: true,
+            initialConfig: { liveEnabled: true, liveAutoClaimChest: true },
+            liveRunner: async (ctx) => {
+                ctx.state.liveStatus.twitch.patopapao = { balance: 350, live: true, manualChest: false, error: null };
+                ctx.state.liveStatus.twitch.tftoddy = { balance: 200, live: true, manualChest: true, error: null };
+                ctx.state.stats.liveChestsClaimed += 1;
+                ctx.state.stepEvents.push('Twitch (patopapao): baú +50 coletado (+50 pts, saldo 350)');
+                ctx.state.lastActionNote = 'Twitch (tftoddy): baú +50 exige clique no navegador';
+            },
+            liveDisposer: () => {},
+            sessionResolver: () => ({ nick: 'Gake', token: 'tok', provedor: 'google', source: 'cache' }),
+        });
+        try {
+            assert.equal(controller.triggerAction('run-lives'), true);
+            await new Promise((resolve) => setTimeout(resolve, 40));
+            controller.noteLiveChestClaimed('tftoddy', 'auto');
+            controller.noteLiveWatchSession('tftoddy', { kind: 'watch', ok: true, minutes: 15 });
+
+            const snap = controller.getSnapshot({ includeHunts: false });
+            assert.equal(snap.lives.autoClaimChest, true);
+            assert.ok(snap.logs.some((l) => l.kind === 'live' && /patopapao.*350/.test(l.text)));
+            assert.ok(snap.logs.some((l) => l.kind === 'live' && /tftoddy.*automático/.test(l.text)));
+            assert.ok(snap.logs.some((l) => l.kind === 'live' && /assistida por 15 min/.test(l.text)));
+            assert.ok(snap.logs.every((l) => !/exige clique/i.test(l.text)));
+        } finally {
+            controller.stop();
+        }
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('etapa1: modos pokedex/topcatch resolvem speciesId pelo nome, VIP autoBallAteCapturar nao para, e centro retorna apos 4s', () => {
+    const field = createFieldTracker();
+    const t0 = 1_700_000_000_000;
+    field.applyCampoInit({
+        slug: 'caverna',
+        ts: t0,
+        mobs: [
+            { s: 's1', n: 'Zubat', nv: 12, x: true, xr: 20_000 },
+            { s: 's2', n: 'Geodude', nv: 12, x: true, xr: 20_000 },
+        ],
+    }, t0);
+    const catalog = {
+        huntsBySlug: {
+            caverna: {
+                slug: 'caverna',
+                especies: [
+                    { pokeId: 41, nome: 'Zubat' },
+                    { pokeId: 74, nome: 'Geodude' },
+                ],
+            },
+        },
+        pokemonIdByName: { zubat: 41, geodude: 74 },
+    };
+    const tracker = {};
+    const state = {
+        huntSlug: 'caverna',
+        gold: 100_000,
+        balls: { 1: 50, 4: 50 },
+        loja: { vip: true },
+        automation: { autoBallAteCapturar: true, autoBallSemParar: false, autoRevive: true, autoPotion: true, autoVoltarHunt: true },
+    };
+
+    // 1. Pokedex faltando apenas Zubat (41) mesmo sem speciesId no frame -> lanca bola em s1 e desliga autoBallAteCapturar
+    const act1 = evaluateHeadlessTick({
+        state,
+        field,
+        catalog,
+        config: { farmObjective: 'pokedex', farmObjectiveFocus: 'xp', caidosEnabled: true, restockEnabled: false },
+        tracker,
+        nowMs: t0 + 500,
+        desiredMissingKeys: new Set(['41']),
+    });
+    const ball1 = act1.find((a) => a.t === 'ball.throw');
+    assert.equal(ball1?.slot, 's1');
+    const autoOff = act1.find((a) => a.t === 'auto.set');
+    assert.equal(autoOff?.autoBallAteCapturar, false);
+
+    // 2. Ao sair do modo colecao, restaura autoBallAteCapturar e conta VIP sem autoBallSemParar continua lancando normalmente
+    const act2 = evaluateHeadlessTick({
+        state: { ...state, automation: { ...state.automation, autoBallAteCapturar: false } },
+        field,
+        catalog,
+        config: { farmObjective: 'off', caidosEnabled: true, restockEnabled: false },
+        tracker,
+        nowMs: t0 + 6_000,
+    });
+    const autoRestore = act2.find((a) => a.t === 'auto.set');
+    assert.equal(autoRestore?.autoBallAteCapturar, true);
+    assert.ok(act2.some((a) => a.t === 'ball.throw'));
+
+    // 3. Preso no Centro Medico com autoVoltarHunt: true envia hunt.select apos 4s
+    const centerState = { ...state, noCentro: true, centroLivreEm: 0 };
+    const heal1 = evaluateHeadlessTick({ state: centerState, field, catalog, config: { targetHuntSlug: 'caverna', restockEnabled: false }, tracker, nowMs: t0 + 10_000 });
+    assert.ok(heal1.some((a) => a.t === 'centro.curar'));
+    assert.ok(!heal1.some((a) => a.t === 'hunt.select'));
+    const heal2 = evaluateHeadlessTick({ state: centerState, field, catalog, config: { targetHuntSlug: 'caverna', restockEnabled: false }, tracker, nowMs: t0 + 15_500 });
+    assert.ok(heal2.some((a) => a.t === 'hunt.select' && a.slug === 'caverna'));
+});
+
+test('etapa1: selectObjectiveHunt pula hunts estagnadas quando ha outras pendentes', () => {
+    const hunts = [
+        { slug: 'rara', nome: 'Rara', nivel: 10, especies: [{ pokeId: 1 }] },
+        { slug: 'outra', nome: 'Outra', nivel: 10, especies: [{ pokeId: 2 }] },
+    ];
+    const dec = selectObjectiveHunt({
+        mode: 'topcatch',
+        focus: 'fast',
+        currentSlug: 'rara',
+        activeTargetSlug: 'rara',
+        staleSlugs: new Set(['rara']),
+        hunts,
+        trainerLevel: 50,
+        capturedSet: new Set(),
+    });
+    assert.equal(dec.targetSlug, 'outra');
 });

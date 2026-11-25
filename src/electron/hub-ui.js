@@ -227,7 +227,7 @@
           <h4>${IC('package')}Drops da sessão</h4><div class="sl-drops"></div>
         </div>
       </div>`;
-    const IMPORTANT_KINDS = new Set(['shiny', 'shiny-miss', 'reward', 'error', 'warn', 'ok']);
+    const IMPORTANT_KINDS = new Set(['shiny', 'shiny-miss', 'live', 'reward', 'error', 'warn', 'ok']);
     const MISS_BALL_LABELS = { 1: 'Poke Ball', 2: 'Great Ball', 3: 'Super Ball', 4: 'Ultra Ball', 5: 'Beast Ball' };
     function recentEvents(acc, n) {
         const logs = snapshots[acc]?.logs || [];
@@ -288,10 +288,17 @@
         const evs = recentEvents(acc, 40);
         const evSig = evs.map((e) => e.id).join(',') + Math.floor(Date.now() / 30_000);
         const ul = q('.sl-events');
-        if (ul.dataset.sig !== evSig) {
-            ul.dataset.sig = evSig;
+        if (evs.length) {
+            // já tratamos abaixo com classifyLogEntry
+        }
+        const accColor = window.nexoIcons?.accountAccent?.(acc) || 'azul';
+        if (ul.dataset.sig !== `${evSig}|${accColor}`) {
+            ul.dataset.sig = `${evSig}|${accColor}`;
             ul.innerHTML = evs.length
-                ? evs.map((e) => `<li class="ev ${esc(e.kind)}">${IC(KIND_ICON[e.kind] || 'info')}<span class="ev-text">${escapeHtml(e.text)}</span><time title="${clockOf(e.ts)}">${relTime(e.ts)}</time></li>`).join('')
+                ? evs.map((e) => {
+                    const meta = classifyLogEntry(e);
+                    return `<li class="ev ${esc(meta.vKind)}" data-acc="${acc}" data-acc-color="${esc(accColor)}">${IC(meta.icon)}<span class="ev-text">${escapeHtml(meta.cleanText)}</span><time title="${clockOf(e.ts)}">${relTime(e.ts)}</time></li>`;
+                }).join('')
                 : '<li class="ev empty">Nada importante ainda.</li>';
         }
         const drops = (s.drops?.featured || []).filter((d) => d.qty > 0).slice(0, 6);
@@ -424,7 +431,7 @@
         if (gridState?.max && gridState.max !== acc) return false;
         return Boolean($(`wv-slot-${acc}`));
     }
-    function slotToast(acc, { kind, title, text, card, onClick, actionLabel }) {
+    function slotToast(acc, { kind, category, title, text, card, onClick, actionLabel }) {
         const slot = $(`wv-slot-${acc}`);
         let stack = slot.querySelector('.slot-toasts');
         if (!stack) {
@@ -435,11 +442,17 @@
         }
         while (stack.children.length >= 3) stack.firstElementChild.remove();
         const item = document.createElement('div');
-        item.className = `slot-toast ${kind}`;
+        const meta = classifyLogEntry({ kind, text });
+        const tone = category === 'live' || meta.cat === 'live' ? (kind === 'warn' ? 'warn' : 'live') : (kind || 'info');
+        const accColor = window.nexoIcons?.accountAccent?.(acc) || 'azul';
+        item.className = `slot-toast ${tone}`;
+        item.dataset.acc = String(acc);
+        item.dataset.accColor = accColor;
         item.setAttribute('role', kind === 'error' ? 'alert' : 'status');
-        const sprite = card?.sprite ? `<img src="${esc(card.sprite)}" alt="" />` : IC(KIND_ICON[kind] || 'info');
-        const body = card ? `${escapeHtml(card.name || '')}${card.level ? ` Nv ${card.level}` : ''}` : escapeHtml(text);
-        item.innerHTML = `${sprite}<span class="st-text"><b>${escapeHtml(String(title || '').split(' · ')[0])}</b><span>${body}</span></span>${onClick && actionLabel ? `<button type="button" class="st-act">${escapeHtml(actionLabel)}</button>` : ''}`;
+        const sprite = card?.sprite ? `<img src="${esc(card.sprite)}" alt="" />` : IC(meta.icon || KIND_ICON[kind] || 'info');
+        const body = card ? `${escapeHtml(card.name || '')}${card.level ? ` Nv ${card.level}` : ''}` : escapeHtml(meta.cleanText || text);
+        const headLabel = meta.cat === 'live' ? `Conta ${acc} · Live` : String(title || `Conta ${acc}`).split(' · ')[0];
+        item.innerHTML = `${sprite}<span class="st-text"><b>${escapeHtml(headLabel)}</b><span>${body}</span></span>${onClick && actionLabel ? `<button type="button" class="st-act">${escapeHtml(actionLabel)}</button>` : ''}`;
         const life = kind === 'shiny' ? 9000 : 6000;
         const kill = () => { item.classList.add('out'); setTimeout(() => item.remove(), 220); };
         item.addEventListener('click', () => {
@@ -489,13 +502,15 @@
                     actions: [['Retomar', () => void sendAction('start', {}, acc)]],
                 });
             }
-            for (const [ch, stt] of Object.entries(s.lives?.twitch || {})) {
-                if (!stt?.manualChest) continue;
-                items.push({
-                    key: `chest:${acc}:${ch}:${Math.floor(now / 3_600_000)}`, sev: 'reward', icon: 'gift', acc,
-                    title: 'Caixinha +50 liberada', text: `${who} em ${ch}.`,
-                    actions: [['Resgatar', () => void claimTwitchChest(ch, acc)]],
-                });
+            if (s.config?.liveAutoClaimChest === false) {
+                for (const [ch, stt] of Object.entries(s.lives?.twitch || {})) {
+                    if (!stt?.manualChest) continue;
+                    items.push({
+                        key: `chest:${acc}:${ch}:${Math.floor(now / 3_600_000)}`, sev: 'reward', icon: 'gift', acc,
+                        title: 'Caixinha +50 liberada', text: `${who} em ${ch}.`,
+                        actions: [['Resgatar', () => void claimTwitchChest(ch, acc)]],
+                    });
+                }
             }
             if (s.vote?.available) {
                 items.push({
@@ -541,18 +556,27 @@
         btn.classList.toggle('has-alerts', count > 0);
         btn.classList.toggle('danger', bellItems.some((i) => i.sev === 'danger'));
         btn.setAttribute('aria-label', count ? `Precisa de você: ${count} aviso${count > 1 ? 's' : ''}` : 'Precisa de você: nada pendente');
-        const sig = bellItems.map((i) => `${i.key}|${i.text}`).join('§');
+        const ni = window.nexoIcons;
+        const sig = bellItems.map((i) => `${i.key}|${i.text}|${i.acc ? ni?.accountAccent?.(i.acc) || 'azul' : ''}`).join('§');
         if (sig === lastBellSig) return;
         lastBellSig = sig;
         const list = $('bellList');
         list.innerHTML = count
-            ? bellItems.map((it, idx) => `<li class="bell-item ${it.sev}">
+            ? bellItems.map((it, idx) => {
+                const hasAcc = ACCOUNTS.includes(Number(it.acc));
+                const accColor = hasAcc ? (ni?.accountAccent?.(it.acc) || 'azul') : '';
+                const accTag = hasAcc
+                    ? `<span class="acc-pill" data-acc="${it.acc}" data-acc-color="${esc(accColor)}"><i class="acc-pill-dot"></i>Conta ${it.acc} · ${escapeHtml(nickOf(it.acc))}</span>`
+                    : '';
+                const bodyTxt = hasAcc ? String(it.text || '').replace(/^Conta \d+ · [^.:]+(?:\.\s*|\s+)/, '') : String(it.text || '');
+                return `<li class="bell-item ${it.sev}"${hasAcc ? ` data-acc="${it.acc}" data-acc-color="${esc(accColor)}"` : ''}>
                 <span class="bell-ico">${IC(it.icon)}</span>
-                <div class="bell-body"><b>${escapeHtml(it.title)}</b><span>${escapeHtml(it.text)}</span>
+                <div class="bell-body">${accTag}<b>${escapeHtml(it.title)}</b><span>${escapeHtml(bodyTxt)}</span>
                   <div class="bell-acts">${it.actions.map(([label], ai) => `<button type="button" class="btn sm" data-bell="${idx}" data-bell-act="${ai}">${escapeHtml(label)}</button>`).join('')}</div>
                 </div>
                 <button type="button" class="bell-x" data-bell-dismiss="${idx}" title="Dispensar" aria-label="Dispensar aviso">${IC('x')}</button>
-              </li>`).join('')
+              </li>`;
+            }).join('')
             : `<li class="bell-empty">${IC('check')}<span>Tudo certo. Nada pede atenção agora.</span></li>`;
     }
     function dismissBell(keys) {
@@ -564,13 +588,80 @@
     }
 
     // ===== S17: registro legível (componente usado na aba e na coluna fixa) =====
-    const KIND_ICON = { shiny: 'sparkles', 'shiny-miss': 'alert', reward: 'gift', error: 'x', warn: 'alert', ok: 'check', info: 'info' };
-    const LOG_FILTERS = [
-        ['all', 'Tudo'], ['shiny', 'Shiny'], ['reward', 'Recompensas'], ['warn', 'Avisos'], ['error', 'Erros'],
-    ];
-    const FILTER_KINDS = {
-        shiny: new Set(['shiny', 'shiny-miss']), reward: new Set(['reward']), warn: new Set(['warn', 'shiny-miss']), error: new Set(['error']),
+    const KIND_ICON = {
+        shiny: 'sparkles',
+        'shiny-miss': 'alert',
+        live: 'tv',
+        reward: 'gift',
+        error: 'x',
+        warn: 'alert',
+        ok: 'check',
+        info: 'info',
+        catch: 'pokeball',
+        hunt: 'trend',
+        shop: 'cart',
+        prey: 'crosshair',
     };
+    const LOG_FILTERS = [
+        ['all', 'Tudo'],
+        ['shiny', 'Shiny'],
+        ['live', 'Lives'],
+        ['reward', 'Drops & Marcos'],
+        ['farm', 'Farm & Hunt'],
+        ['warn', 'Avisos'],
+        ['error', 'Erros'],
+    ];
+    const LIVE_TEXT_RE = /^(?:Lives:|Twitch\b|Kick\b|Cookies Twitch)/i;
+    const HUNT_TEXT_RE = /^\/hunt\b|^Troca (?:de hunt|para )|^(?:Pokédex|Pokedex|Top Catch \()|Centro Médico|Equipe curada/i;
+    function classifyLogEntry(entry = {}) {
+        const k = String(entry.kind || 'info');
+        const txt = String(entry.text || '');
+        if (k === 'shiny') {
+            return { vKind: 'shiny', cats: ['shiny'], tag: 'SHINY', icon: 'sparkles', cleanText: txt };
+        }
+        if (k === 'shiny-miss') {
+            return { vKind: 'shiny-miss', cats: ['shiny', 'warn'], tag: 'SHINY PERDIDO', icon: 'alert', cleanText: txt };
+        }
+        if (k === 'error') {
+            const cats = LIVE_TEXT_RE.test(txt) ? ['error', 'live'] : ['error'];
+            return { vKind: 'error', cats, tag: 'ERRO', icon: 'x', cleanText: txt };
+        }
+        if (k === 'warn') {
+            const isLive = LIVE_TEXT_RE.test(txt) || /\b429\b/i.test(txt);
+            const cleanText = isLive ? txt.replace(/^Lives:\s*/i, '') : txt;
+            return { vKind: 'warn', cats: isLive ? ['warn', 'live'] : ['warn'], tag: isLive ? 'LIVE' : 'AVISO', icon: 'alert', cleanText };
+        }
+        if (k === 'live' || LIVE_TEXT_RE.test(txt)) {
+            return {
+                vKind: 'live',
+                cats: ['live'],
+                tag: 'LIVE',
+                icon: 'tv',
+                cleanText: txt.replace(/^Lives:\s*/i, ''),
+            };
+        }
+        if (k === 'reward') {
+            let tag = 'BÔNUS';
+            if (/^Drop:/i.test(txt)) tag = 'DROP';
+            else if (/top catch/i.test(txt)) tag = 'TOP CATCH';
+            else if (/passe/i.test(txt)) tag = 'PASSE';
+            else if (/diamante|voto/i.test(txt)) tag = 'VOTO';
+            return { vKind: 'reward', cats: ['reward'], tag, icon: 'gift', cleanText: txt };
+        }
+        if (k === 'catch') {
+            return { vKind: 'catch', cats: ['farm'], tag: 'CAPTURA', icon: 'pokeball', cleanText: txt };
+        }
+        if (k === 'shop') {
+            return { vKind: 'shop', cats: ['farm'], tag: 'LOJA', icon: 'cart', cleanText: txt };
+        }
+        if (k === 'prey') {
+            return { vKind: 'prey', cats: ['farm'], tag: 'PREY', icon: 'crosshair', cleanText: txt };
+        }
+        if (HUNT_TEXT_RE.test(txt)) {
+            return { vKind: 'hunt', cats: ['farm'], tag: 'HUNT', icon: 'trend', cleanText: txt };
+        }
+        return { vKind: k === 'ok' ? 'ok' : 'info', cats: ['farm'], tag: 'SISTEMA', icon: k === 'ok' ? 'check' : 'info', cleanText: txt };
+    }
     const logViews = new Map();
     function mountLogView(host, key, defaults = {}) {
         if (!host) return null;
@@ -615,9 +706,11 @@
     function renderLogView(view, force = false) {
         if (!view) return;
         const { state, host } = view;
+        const ni = window.nexoIcons;
+        const accSig = ACCOUNTS.map((a) => ni?.accountAccent?.(a) || 'azul').join(',');
         const all = gatherLogs(state.scope);
         const last = all[all.length - 1];
-        const sig = `${activeAccount}|${state.scope}|${state.filter}|${state.query}|${all.length}|${last?.id}|${last?.acc}|${Math.floor(Date.now() / 20_000)}`;
+        const sig = `${activeAccount}|${state.scope}|${state.filter}|${state.query}|${accSig}|${all.length}|${last?.id}|${last?.acc}|${Math.floor(Date.now() / 20_000)}`;
         if (!force && sig === view.sig) return;
         view.sig = sig;
         host.querySelectorAll('.log-chip').forEach((b) => {
@@ -626,20 +719,21 @@
         });
         const scopeBtn = host.querySelector('.log-scope');
         scopeBtn.innerHTML = state.scope === 'all' ? `${IC('columns')}4 contas` : `${IC('user')}Conta ${activeAccount}`;
-        const kinds = FILTER_KINDS[state.filter];
+        const wantFilter = LOG_FILTERS.some(([f]) => f === state.filter) ? state.filter : 'all';
         const q = state.query.trim().toLowerCase();
         const rows = [];
         // agrupa linhas iguais em sequência (×N)
         for (const l of all) {
-            if (kinds && !kinds.has(l.kind)) continue;
-            if (q && !String(l.text || '').toLowerCase().includes(q)) continue;
+            const meta = classifyLogEntry(l);
+            if (wantFilter !== 'all' && !meta.cats.includes(wantFilter)) continue;
+            if (q && !String(meta.cleanText || '').toLowerCase().includes(q) && !meta.tag.toLowerCase().includes(q)) continue;
             const prev = rows[rows.length - 1];
-            if (prev && prev.acc === l.acc && prev.kind === l.kind && prev.text === l.text) {
+            if (prev && prev.acc === l.acc && prev.meta.vKind === meta.vKind && prev.meta.cleanText === meta.cleanText) {
                 prev.count += 1;
                 prev.ts = l.ts;
                 continue;
             }
-            rows.push({ ...l, count: 1, firstTs: l.ts });
+            rows.push({ ...l, meta, count: 1, firstTs: l.ts });
         }
         const shown = rows.slice(-300).reverse();
         const list = host.querySelector('.log-list');
@@ -651,13 +745,17 @@
             return `${safe.slice(0, i)}<mark>${safe.slice(i, i + escapeHtml(q).length)}</mark>${safe.slice(i + escapeHtml(q).length)}`;
         };
         list.innerHTML = shown.length
-            ? shown.map((r) => `<li class="log-row ${esc(r.kind)}">
-                <span class="log-ico">${IC(KIND_ICON[r.kind] || 'info')}</span>
-                ${state.scope === 'all' ? `<span class="log-acc a${r.acc}" title="${esc(`Conta ${r.acc} · ${nickOf(r.acc)}`)}">${r.acc}</span>` : ''}
-                <span class="log-text">${hl(r.text)}${r.count > 1 ? `<span class="log-count" title="Repetiu ${r.count} vezes">×${r.count}</span>` : ''}</span>
+            ? shown.map((r) => {
+                const m = r.meta;
+                const accColor = ni?.accountAccent?.(r.acc) || 'azul';
+                return `<li class="log-row ${esc(m.vKind)}" data-acc="${r.acc}" data-acc-color="${esc(accColor)}">
+                <span class="log-ico">${IC(m.icon)}</span>
+                ${state.scope === 'all' ? `<span class="log-acc" data-acc="${r.acc}" data-acc-color="${esc(accColor)}" title="${esc(`Conta ${r.acc} · ${nickOf(r.acc)}`)}">${r.acc}</span>` : ''}
+                <span class="log-text"><span class="log-cat ${esc(m.vKind)}">${escapeHtml(m.tag)}</span>${hl(m.cleanText)}${r.count > 1 ? `<span class="log-count" title="Repetiu ${r.count} vezes">×${r.count}</span>` : ''}</span>
                 <time class="log-time" title="${clockOf(r.ts)}${r.count > 1 ? ` (primeira às ${clockOf(r.firstTs)})` : ''}">${relTime(r.ts)}</time>
-              </li>`).join('')
-            : `<li class="log-empty">${q || kinds ? 'Nada com esse filtro.' : 'Sem eventos ainda.'}</li>`;
+              </li>`;
+            }).join('')
+            : `<li class="log-empty">${q || wantFilter !== 'all' ? 'Nada com esse filtro.' : 'Sem eventos ainda.'}</li>`;
     }
 
     // contador de novidades na aba Atividade
@@ -670,7 +768,12 @@
         let n = 0;
         for (const acc of ACCOUNTS) {
             for (const l of snapshots[acc]?.logs || []) {
-                if (l.ts > activitySeenTs && (l.kind === 'shiny' || l.kind === 'shiny-miss' || l.kind === 'error' || l.kind === 'reward')) n++;
+                if (l.ts <= activitySeenTs) continue;
+                if (l.kind === 'shiny' || l.kind === 'shiny-miss' || l.kind === 'error' || l.kind === 'reward') {
+                    n++;
+                } else if (l.kind === 'live' && /resgatad|resgatou|ba[uú] \+50/i.test(l.text || '')) {
+                    n++;
+                }
             }
         }
         badge.textContent = n > 9 ? '9+' : String(n);
@@ -711,6 +814,7 @@
         }
         ws.classList.add('has-activity-dock');
         dock.style.width = `${dockWidth}px`;
+        document.body.style.setProperty('--dock-w', `${dockWidth}px`);
         return dock;
     }
     function wireDockGutter(dock) {
@@ -724,6 +828,7 @@
             const move = (e) => {
                 dockWidth = Math.round(Math.min(640, Math.max(260, startW - (e.clientX - startX))));
                 dock.style.width = `${dockWidth}px`;
+                document.body.style.setProperty('--dock-w', `${dockWidth}px`);
             };
             const up = () => {
                 g.removeEventListener('pointermove', move);
@@ -1225,6 +1330,7 @@
         document.querySelectorAll('[data-theme-pick]').forEach((b) => b.setAttribute('aria-checked', b.dataset.themePick === theme ? 'true' : 'false'));
         document.querySelectorAll('[data-accent-pick]').forEach((b) => b.setAttribute('aria-checked', b.dataset.accentPick === accent ? 'true' : 'false'));
         document.querySelectorAll('[data-hud-pos]').forEach((b) => b.setAttribute('aria-checked', b.dataset.hudPos === hudPos ? 'true' : 'false'));
+        window.applyToastPosition?.();
         $('btnPinActivityMenu')?.setAttribute('aria-checked', activityPinned ? 'true' : 'false');
         $('btnPinActivity')?.setAttribute('aria-pressed', activityPinned ? 'true' : 'false');
         $('btnPinActivity')?.classList.toggle('active-toggle', activityPinned);
@@ -1366,7 +1472,11 @@
             const sig = evs.map((e) => e.id).join(',') + Math.floor(Date.now() / 30_000);
             if (ul.dataset.sig !== sig) {
                 ul.dataset.sig = sig;
-                ul.innerHTML = evs.map((e) => `<li class="ev ${esc(e.kind)}">${IC(KIND_ICON[e.kind] || 'info')}<span class="ev-text">${escapeHtml(e.text)}</span><time>${relTime(e.ts)}</time></li>`).join('') || '<li class="ev empty">Sem eventos ainda.</li>';
+                const accColor = window.nexoIcons?.accountAccent?.(acc) || 'azul';
+                ul.innerHTML = evs.map((e) => {
+                    const meta = classifyLogEntry(e);
+                    return `<li class="ev ${esc(meta.vKind)}" data-acc="${acc}" data-acc-color="${esc(accColor)}">${IC(meta.icon)}<span class="ev-text">${escapeHtml(meta.cleanText)}</span><time>${relTime(e.ts)}</time></li>`;
+                }).join('') || '<li class="ev empty">Sem eventos ainda.</li>';
             }
         }
     }
@@ -1378,7 +1488,7 @@
         ni.applyAccountAccent(activeAccount);
         for (const acc of ACCOUNTS) {
             const c = ni.accountAccent(acc);
-            for (const el of document.querySelectorAll(`.acc-tab[data-acc="${acc}"], .pcard[data-acc="${acc}"], #wv-slot-${acc}, .popout-acc[data-pop-acc="${acc}"]`)) {
+            for (const el of document.querySelectorAll(`[data-acc="${acc}"], [data-pop-acc="${acc}"], #wv-slot-${acc}`)) {
                 if (el.dataset.accColor !== c) el.dataset.accColor = c;
             }
         }
