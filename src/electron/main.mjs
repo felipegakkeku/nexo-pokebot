@@ -2244,7 +2244,15 @@ function registerIpcHandlers() {
     ipcMain.handle('hub:sound-data', (_ev, { event } = {}) => soundDataUrl(String(event || '')));
 
     ipcMain.handle('hub:update-get-state', () => updateState);
-    ipcMain.handle('hub:update-check', () => runUpdateCheck());
+    // Verificar olha as Releases e, sem Release nova, também o main (baixa o que tiver).
+    ipcMain.handle('hub:update-check', async () => {
+        const st = await runUpdateCheck();
+        if (st?.hasUpdate || st?.isGitRepo) return st;
+        const prev = updateState.status;
+        patchUpdateState({ status: 'checking' });
+        try { await runMainSync(); } finally { patchUpdateState({ status: prev }); }
+        return updateState;
+    });
     ipcMain.handle('hub:update-install', () => runUpdateInstall());
 
     ipcMain.handle('hub:open-external', async (_ev, url, account = 1) => {

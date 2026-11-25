@@ -3659,7 +3659,7 @@ function renderUpdateUi(st) {
 
     if (st.status === 'checking') {
         setText(title, 'Verificando atualizações');
-        setText(desc, 'Consultando Releases em felipegakkeku/nexo-pokebot...');
+        setText(desc, 'Consultando Releases e mudanças novas no GitHub...');
         progWrap.classList.add('hidden');
         btnInstall.classList.add('hidden');
     } else if (st.status === 'downloading') {
@@ -3692,6 +3692,7 @@ function renderUpdateUi(st) {
             ? 'Ambiente Git (.git) detectado. Use git pull ou abra a Release no GitHub.'
             : `Versão v${st.latestVersion} pronta para instalar${sizeLabel}.`;
         progWrap.classList.add('hidden');
+        setText(btnInstall, 'Baixar e atualizar');
         btnInstall.classList.toggle('hidden', Boolean(st.isGitRepo) || !st.assetName);
         btnInstall.disabled = false;
         const updId = st.updateId || st.latestVersion;
@@ -3708,11 +3709,19 @@ function renderUpdateUi(st) {
         setText(desc, st.error || 'Não foi possível consultar o GitHub agora.');
         progWrap.classList.add('hidden');
         btnInstall.classList.add('hidden');
+    } else if (st.mainReady && !st.isGitRepo) {
+        const n = Number(st.mainReady.aheadBy || 0);
+        setText(title, 'Mudanças prontas');
+        desc.textContent = `${n > 1 ? `${n} mudanças baixadas` : 'Mudanças baixadas'} do GitHub. Entram ao reabrir o Hub ou agora pelo botão.${st.mainReady.lastMessage ? ` Última: ${st.mainReady.lastMessage}` : ''}`;
+        progWrap.classList.add('hidden');
+        setText(btnInstall, 'Reiniciar e aplicar');
+        btnInstall.classList.remove('hidden');
+        btnInstall.disabled = false;
     } else {
         setText(title, 'Tudo atualizado');
         desc.textContent = st.checkedAt
-            ? `Você já está na última Release (v${curVer}).`
-            : 'Clique em Verificar para buscar novas Releases no GitHub.';
+            ? `Você está na v${curVer} com as últimas mudanças.`
+            : 'Clique em Verificar para buscar Releases e mudanças novas no GitHub.';
         progWrap.classList.add('hidden');
         btnInstall.classList.add('hidden');
     }
