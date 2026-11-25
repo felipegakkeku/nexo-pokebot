@@ -290,6 +290,16 @@ async function bootMainSync() {
     return false;
 }
 
+/** Verificar pedido pela pessoa: Releases e, sem Release nova, também o main (baixa o que tiver). */
+async function runManualUpdateCheck() {
+    const st = await runUpdateCheck();
+    if (st?.hasUpdate || st?.isGitRepo) return st;
+    const prev = updateState.status;
+    patchUpdateState({ status: 'checking' });
+    try { await runMainSync(); } finally { patchUpdateState({ status: prev }); }
+    return updateState;
+}
+
 async function runUpdateInstall() {
     if (updateBusy) return { ok: false, error: 'Atualizacao ja esta em andamento.' };
     // Sem Release nova, mas com o main baixado: reinicia aplicando.
@@ -591,7 +601,7 @@ function refreshTrayMenu(snapsArg = null) {
             label: `Verificar atualizacoes (v${installedVersion})`,
             click: () => {
                 showMainWindow();
-                void runUpdateCheck();
+                void runManualUpdateCheck();
             },
         };
 
@@ -2244,15 +2254,7 @@ function registerIpcHandlers() {
     ipcMain.handle('hub:sound-data', (_ev, { event } = {}) => soundDataUrl(String(event || '')));
 
     ipcMain.handle('hub:update-get-state', () => updateState);
-    // Verificar olha as Releases e, sem Release nova, também o main (baixa o que tiver).
-    ipcMain.handle('hub:update-check', async () => {
-        const st = await runUpdateCheck();
-        if (st?.hasUpdate || st?.isGitRepo) return st;
-        const prev = updateState.status;
-        patchUpdateState({ status: 'checking' });
-        try { await runMainSync(); } finally { patchUpdateState({ status: prev }); }
-        return updateState;
-    });
+    ipcMain.handle('hub:update-check', () => runManualUpdateCheck());
     ipcMain.handle('hub:update-install', () => runUpdateInstall());
 
     ipcMain.handle('hub:open-external', async (_ev, url, account = 1) => {
