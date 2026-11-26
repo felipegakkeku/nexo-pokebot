@@ -3928,7 +3928,15 @@ export function createHeadlessController(options = {}) {
             state.noCentro !== true &&
             !(Number(state.mistico?.prazo || 0) > nowFn())
         ) {
-            queueObjectiveHuntSwap(decision.targetSlug, `${modeLabel} (${focusLabel})`);
+            if (config.huntGuideMode === 'notify') {
+                const logKey = `notify:${mode}:${decision.targetSlug}`;
+                if (objectiveLastLogKey !== logKey) {
+                    objectiveLastLogKey = logKey;
+                    pushLog('info', `${modeLabel} (${focusLabel}): próxima hunt recomendada -> ${decision.targetName} (troca pausada em "Só avisar").`);
+                }
+            } else {
+                queueObjectiveHuntSwap(decision.targetSlug, `${modeLabel} (${focusLabel})`);
+            }
         }
         return decision;
     };
@@ -4107,7 +4115,8 @@ export function createHeadlessController(options = {}) {
             ...catalog,
             huntSpeciesId: catalog.huntSpeciesBySlug?.[state?.huntSlug] ?? null,
         };
-        const effectiveTargetSlug = (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch') && objectiveTargetSlug
+        const effectiveTargetSlug = (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch') &&
+            objectiveTargetSlug && config.huntGuideMode !== 'notify'
             ? objectiveTargetSlug
             : (config.huntGuideMode === 'auto' && huntGuideTarget ? huntGuideTarget : config.targetHuntSlug);
         const syncedNow = getSyncedNowMs();
@@ -5765,6 +5774,9 @@ export function createHeadlessController(options = {}) {
                 huntGuideStatus = null;
                 huntGuideTarget = null;
                 huntGuideSwapAt = null;
+                if (config.huntGuideMode === 'notify' || (config.huntGuideMode === 'off' && config.farmObjective === 'off')) {
+                    cancelPendingHunt();
+                }
             }
             if (objectiveChanged) {
                 objectiveTargetSlug = null;

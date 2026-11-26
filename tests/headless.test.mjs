@@ -3800,3 +3800,76 @@ test('topcatch com pokemon caido no chao passa pelo Centro Medico para trocar de
         rmSync(dir, { recursive: true, force: true });
     }
 });
+
+test('huntGuideMode=notify pausa trocas automaticas (inclusive Top Catch) e cancela troca agendada', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pokebot-notify-pause-'));
+    try {
+        let fakeNow = 1_700_000_300_000;
+        const sent = [];
+        const controller = createHeadlessController({
+            cwd: dir,
+            configPath: join(dir, 'cfg.json'),
+            sessionPath: join(dir, 'sess.json'),
+            autoLoadSession: false,
+            disableHeadlessHuntGuide: true,
+            disableVotePolling: true,
+            nowFn: () => fakeNow,
+        });
+        try {
+            controller.updateConfig({
+                farmObjective: 'topcatch',
+                farmObjectiveFocus: 'fast',
+                huntGuideMode: 'auto',
+                caidosEnabled: true,
+                restockEnabled: false,
+            });
+            const hooks = controller.attachExternalBridge({
+                send: (raw) => { sent.push(typeof raw === 'string' ? JSON.parse(raw) : raw); return true; },
+                close: () => {},
+                isReady: () => true,
+            }, { waitForWelcome: true });
+
+            const week = getTopCatchWeekKey(fakeNow);
+            hooks.onFrame(JSON.stringify({
+                t: 'welcome',
+                hunts: [
+                    { slug: 'hunt-a', nome: 'Hunt A', area: 'kanto', nivel: 10, especies: [{ pokeId: 10, nome: 'Caterpie' }] },
+                    { slug: 'hunt-b', nome: 'Hunt B', area: 'kanto', nivel: 12, especies: [{ pokeId: 13, nome: 'Weedle' }] },
+                ],
+                estado: {
+                    cheio: true,
+                    nick: 'NotifyTester',
+                    level: 50,
+                    activeId: 1,
+                    huntSlug: 'hunt-a',
+                    noCentro: false,
+                    servidorAgora: fakeNow,
+                    centroLivreEm: fakeNow + 5000,
+                    balls: { 1: 50 },
+                    topCatch: { semana: week, ini: true, n: 1 },
+                    pokemons: [{ id: 1, level: 50, hp: 100, maxHp: 100 }],
+                },
+            }));
+
+            // Top Catch agenda troca para hunt-b durante combate
+            hooks.onFrame(JSON.stringify({ t: 'topCatch', s: week, ini: true, e: [[10, 1]], n: 1 }));
+            assert.equal(controller.getSnapshot({ includeHunts: false }).trainer.pendingHuntSlug, 'hunt-b');
+
+            // Usuario troca para "So avisar" (notify) -> cancela troca pendente e nao troca ao sair de combate
+            controller.updateConfig({ huntGuideMode: 'notify' });
+            assert.equal(controller.getSnapshot({ includeHunts: false }).trainer.pendingHuntSlug, null);
+
+            fakeNow += 6000;
+            hooks.onFrame(JSON.stringify({
+                t: 'estado',
+                estado: { servidorAgora: fakeNow, centroLivreEm: fakeNow - 100 },
+            }));
+            assert.equal(sent.some((m) => m.t === 'hunt.select'), false, 'nao deve trocar de hunt quando huntGuideMode=notify');
+            assert.equal(sent.some((m) => m.t === 'centro.ir'), false, 'nao deve ir ao centro para trocar de hunt quando huntGuideMode=notify');
+        } finally {
+            controller.stop();
+        }
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});
