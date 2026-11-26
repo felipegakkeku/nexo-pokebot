@@ -5,7 +5,7 @@
 <h1 align="center">Nexo PokeBot</h1>
 
 <p align="center">
-  <strong>Hub multi-contas e motor Headless Eco desenvolvidos especificamente para o <a href="https://pokeidle.io/app">PokeIdle</a> (Poke Idle World).</strong><br />
+  <strong>Hub multi-contas e motor Headless Eco desenvolvidos especificamente para o <a href="https://pokeidle.io/app">PokeIdle</a>.</strong><br />
   4 contas isoladas + ~40 lives simultâneas (Twitch e Kick) consumindo em média <strong>~400 MB de RAM</strong> (ou <strong>~60 MB</strong> no Modo Ultra-Eco).
 </p>
 
