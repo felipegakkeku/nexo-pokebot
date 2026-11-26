@@ -5,7 +5,11 @@
 <h1 align="center">Nexo PokeBot</h1>
 
 <p align="center">
-  <strong>Hub multi-contas e motor Headless Eco desenvolvidos especificamente para o <a href="https://pokeidle.io/app">PokeIdle</a>.</strong><br />
+  <em>Feito por quem ama o PokeIdle, para quem ama o PokeIdle.</em>
+</p>
+
+<p align="center">
+  <strong>Hub multi-contas e motor Headless Eco desenvolvidos especificamente para o <a href="https://pokeidle.io/app">PokeIdle</a>,<br />dentro das regras de automação dos <a href="https://pokeidle.io/terms">Termos do jogo</a>.</strong><br />
   4 contas isoladas + ~40 lives simultâneas (Twitch e Kick) consumindo em média <strong>~400 MB de RAM</strong> (ou <strong>~60 MB</strong> no Modo Ultra-Eco).
 </p>
 
@@ -21,7 +25,7 @@
 
 <p align="center">
   <a href="#instalação-e-execução">Download Windows</a> ·
-  <a href="#o-que-é-e-o-que-não-é">O que é (e o que não é)</a> ·
+  <a href="#dentro-das-regras-do-pokeidle">Dentro das regras</a> ·
   <a href="#performance-e-consumo-de-ram">Performance</a> ·
   <a href="#telas-feitas-para-acompanhar-4-contas">Telas</a> ·
   <a href="#o-que-o-nexo-pokebot-entrega-pronto-para-uso">Funcionalidades</a> ·
@@ -32,9 +36,27 @@
 
 ---
 
-O **Nexo PokeBot** é um cliente desktop gratuito e open source (licença MIT) para o **[PokeIdle (`pokeidle.io`)](https://pokeidle.io/app)**. Ele junta até **4 contas em uma única janela**, mantém o farm rodando em segundo plano gastando uma fração da memória de um navegador, acompanha as lives da Twitch e da Kick para os buffs e mostra tudo em painéis claros, em tema escuro. Tudo roda no seu PC: sem anúncios, sem servidor próprio e sem telemetria externa.
+O **Nexo PokeBot** nasceu de uma vontade simples: jogar mais e se preocupar menos. É um cliente desktop gratuito e open source (licença MIT) para o **[PokeIdle (`pokeidle.io`)](https://pokeidle.io/app)**, pensado do zero para melhorar a sua experiência no jogo e ajudar na gestão das suas contas, sempre respeitando os limites e as regras do PokeIdle.
 
-## O que é (e o que não é)
+Ele junta até **4 contas em uma única janela**, mantém o farm rodando em segundo plano gastando uma fração da memória de um navegador, acompanha as lives da Twitch e da Kick para os buffs e mostra tudo em painéis claros, em tema escuro. É o que há de melhor para o dia a dia no jogo reunido num lugar só, desenvolvido com carinho e testado em uso de verdade. Tudo roda no seu PC, sem anúncios.
+
+## Dentro das regras do PokeIdle
+
+Os [Termos do PokeIdle](https://pokeidle.io/terms) (seção 5, "Automação") **permitem automações no jogo e no Mercado**, desde que sigam as mesmas regras de quem joga na mão: sem explorar falhas, sem burlar limites do jogo e sem sobrecarregar o servidor. O Nexo PokeBot foi construído em cima dessas três regras:
+
+| Regra dos Termos | Como o Nexo PokeBot segue |
+| --- | --- |
+| **Até 4 contas por pessoa e por rede** | O Hub e o Modo Eco gerenciam no máximo 4 contas (`conta1..4`). Não existe modo para passar disso. |
+| **Respeitar as travas e retenções do Mercado** | O Sniper e o Consultor de Economia só compram e anunciam o que o jogo libera, respeitam a retenção, a reserva de gold e o limite de anúncios por hora. |
+| **Não explorar falhas** | Só envia as mesmas ações que a página oficial envia. Não altera valores, não lê memória e não usa bug. |
+| **Não sobrecarregar o servidor** | Respeita os tempos de combate, a saída do Centro, o limite de troca de hunt e os limites de requisição (inclusive o `Retry-After` da Twitch e da Kick). |
+
+> [!IMPORTANT]
+> **Para jogar tranquilo, duas regras dependem de você:**
+> - **Nada de VPN, VPS ou proxy.** Os Termos proíbem jogar por essas conexões. Rode o Hub e o Modo Eco no seu PC, com a internet de casa ou os dados móveis, nunca num servidor alugado.
+> - **No máximo 4 contas no total,** somando todas as redes e aparelhos. Passar disso leva ao banimento de todas as contas da pessoa.
+
+### O que ele é (e o que não é)
 
 **Não é cheat, hack nem modificação do jogo.** O Nexo PokeBot conversa com o servidor do PokeIdle pela mesma conexão que a página oficial usa e só faz o que um jogador faz com o mouse: atacar, lançar bola em Pokémon caído, comprar no mercado, resgatar o passe, rolar o prey, trocar de hunt e ir ao Centro Pokémon.
 
@@ -43,7 +65,9 @@ O **Nexo PokeBot** é um cliente desktop gratuito e open source (licença MIT) p
 - **Não pede nem envia sua senha**: as sessões ficam em arquivos `.pokebot-*` na pasta do app e nunca saem do seu PC.
 - **É honesto sobre o que o jogo permite**: um exemplo é o shiny, que o servidor sorteia na hora do arremesso. Como não dá para saber antes, o app não promete "bola especial para shiny"; ele explica isso na tela e deixa você escolher a bola dos arremessos.
 
-O que ele faz é **automatizar a rotina e organizar a informação**. Mesmo assim, automação pode ser tratada de formas diferentes pelas regras de cada jogo: use com bom senso e confira as regras do PokeIdle.
+- **Privacidade**: o Hub só se conecta ao jogo, às lives, ao GitHub (atualizações) e ao servidor de avisos do projeto, que manda novidades assinadas digitalmente. Esse servidor conta apenas quantos Hubs estão conectados, sem gravar conta, nick ou IP.
+
+O que ele faz é **automatizar a rotina e organizar a informação**, como os Termos permitem. As regras do jogo podem mudar: vale conferir os [Termos](https://pokeidle.io/terms) de vez em quando.
 
 ## Performance e consumo de RAM
 
@@ -84,6 +108,15 @@ flowchart LR
 - **Cuida do resto sozinho**: recarrega o jogo embutido que travar na tela de carregamento e pode manter a conta na fila do PvP ranqueado, voltando depois de cada partida.
 - **Sugere para onde ir**: integra o `/hunt for PokeIdle` para ranquear hunts por XP/h, ouro/h ou shiny/h e pode trocar de hunt sozinho em modos de coleção (Completar Pokédex, Top Catch semanal).
 
+## Gestão de verdade das suas contas
+
+- **Consultor de Economia**: avalia cada Pokémon pela nota, pelo valor no depot, pelas vendas parecidas no Mercado e pela forma final, e sugere guardar na coleção, vender no depot, anunciar, evoluir ou sacrificar. Também avalia a mochila pela média de 7 dias do Mercado.
+- **Destino dos drops**: cada Pokémon novo que cai no depot pode ir sozinho para a coleção (nota alta ou forma final que vale muito mais), para um anúncio no Mercado pela média ou seguir no depot, no modo Sugerir ou Automático.
+- **Sniper do Mercado**: procura itens e Pokémon abaixo do teto que você define, respeitando a reserva de gold, a retenção do jogo e sem comprar de você mesmo.
+- **Treinador com Exp. Share**: fila de Pokémon para treinar, com a Casa e o Exp. Share cuidando da evolução.
+- **Avisos em tempo real**: novidades do projeto chegam na hora, dentro do Hub e no Windows, com assinatura digital para ninguém se passar pelo projeto.
+- **Painéis do seu jeito**: cada cartão tem modo Resumo e Detalhado, para ver só o essencial ou tudo.
+
 ## O que o Nexo PokeBot entrega pronto para uso
 
 1. **4 contas isoladas em 1 janela (`persist:conta1..4`)**: alterne entre **Painel + Jogo**, **Grade**, **Só Painel** e **Painéis** sem abrir várias instâncias de navegador.
@@ -102,7 +135,7 @@ flowchart LR
 | Modo | Como abrir | Consumo típico | Indicado para |
 | --- | --- | --- | --- |
 | **Nexo PokeBot Hub (Recomendado)** | `Nexo PokeBot.exe` ou `Abrir Nexo PokeBot.bat` | ~400 MB RAM em média (4 contas + ~40 lives) | Gerenciar até 4 contas com jogo embutido, `/hunt`, grade 2x2 e lives simultâneas |
-| **Modo Ultra-Eco (1 Processo)** | `Abrir Nexo PokeBot Eco (1 Processo).bat` ou `Nexo PokeBot.exe --eco` | ~60 MB RAM total (zero Chromium/GPU) | Farmar 24/7 em segundo plano acessando os painéis em `127.0.0.1:17890..17893` |
+| **Modo Ultra-Eco (1 Processo)** | `Abrir Nexo PokeBot Eco (1 Processo).bat` ou `Nexo PokeBot.exe --eco` | ~60 MB RAM total (zero Chromium/GPU) | Farmar 24/7 em segundo plano no seu próprio PC (nunca em VPS), acessando os painéis em `127.0.0.1:17890..17893` |
 | **Headless CLI** | `npm run headless` | ~35 MB RAM | Sessão única direto no terminal |
 
 ## Instalação e execução
@@ -146,7 +179,7 @@ Todas as sessões, cookies e configurações ficam salvos localmente em arquivos
 - `src/desktop/`: launcher Windows (`PokeBotApp.cs`, `build-exe.mjs`), patch de ícone/metadados PE do runtime Electron (`brand-runtime.mjs`, `launch-hub.mjs`) e gerador do ZIP limpo (`build-friend-zip.mjs`).
 - `src/modules/`: módulos de regras de automação compartilhados (`live-rewards.js`, `capture.js`, `restock.js`, `boss-loot.js`, `prey.js`, `daily-pass.js`, entre outros).
 - `assets/` e `docs/`: ícone original multi-resolução (`nexo-pokebot-icon.png`, `nexo-pokebot.ico`) e QR Code Pix offline (`docs/pix-qr.png`).
-- `tests/`: suíte automatizada com `node:test` + `jsdom` (279 testes cobrindo protocolo, lives, perfis, Centro Médico, `/hunt` e build desktop).
+- `tests/`: suíte automatizada com `node:test` + `jsdom` (293 testes cobrindo protocolo, lives, perfis, Centro Médico, `/hunt` e build desktop).
 
 ## Referências e ecossistema PokeIdle
 
@@ -163,7 +196,7 @@ O **Nexo PokeBot** foi construído especificamente para a comunidade do **[PokeI
 
 ```powershell
 npm.cmd ci                  # instala dependências exatas do package-lock.json
-npm.cmd run check           # ESLint + build + 279 testes automatizados
+npm.cmd run check           # ESLint + build + 293 testes automatizados
 npm.cmd run brand:runtime   # aplica ícone e metadados PE no runtime Electron local
 npm.cmd run build:exe       # compila Nexo PokeBot.exe via csc.exe
 npm.cmd run package:friend  # gera release/Nexo-PokeBot-v1.0.zip limpo (sem dados pessoais)
@@ -173,7 +206,7 @@ O workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) roda
 
 ## Apoiar o projeto
 
-O Nexo PokeBot é 100% gratuito, open source (MIT), sem anúncios e sem telemetria. Se o projeto ajudou no seu farm e você quiser apoiar o desenvolvimento contínuo:
+O Nexo PokeBot é feito com 💜 por um jogador para a comunidade: 100% gratuito, open source (MIT), sem anúncios e sem coletar dados de conta. Se o projeto ajudou no seu farm e você quiser apoiar o desenvolvimento contínuo:
 
 <img src="docs/pix-qr.png" alt="QR Code Pix para apoiar o Nexo PokeBot" width="200" />
 
