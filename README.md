@@ -34,6 +34,10 @@
   <a href="#apoiar-o-projeto">Apoiar</a>
 </p>
 
+<p align="center">
+  <img src="docs/telas/grade-2x2-jogo.webp" alt="Grade 2x2 com as 4 contas jogando no jogo embutido" width="900" />
+</p>
+
 ---
 
 O **Nexo PokeBot** nasceu de uma vontade simples: jogar mais e se preocupar menos. É um cliente desktop gratuito e open source (licença MIT) para o **[PokeIdle (`pokeidle.io`)](https://pokeidle.io/app)**, pensado do zero para melhorar a sua experiência no jogo e ajudar na gestão das suas contas, sempre respeitando os limites e as regras do PokeIdle.
@@ -93,6 +97,17 @@ flowchart LR
 ```
 
 ## Telas feitas para acompanhar 4 contas
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/telas/paineis.webp" alt="Tela Painéis: um cartão por conta com XP/h, lucro/h, buffs das lives e eventos" /><br /><sub><b>Painéis</b>: as 4 contas num olhar, com a Atividade ao lado.</sub></td>
+    <td width="50%"><img src="docs/telas/painel-e-jogo.webp" alt="Tela Painel + Jogo: painel completo da conta ao lado do jogo embutido" /><br /><sub><b>Painel + Jogo</b>: uma conta em foco, com o jogo aberto e o painel completo.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/telas/destaque-1-3.webp" alt="Grade Destaque 1+3: uma conta jogando e três farmando no Modo Eco" /><br /><sub><b>Destaque 1+3</b>: jogue numa conta enquanto as outras farmam no Modo Eco.</sub></td>
+    <td width="50%"><img src="docs/telas/grade-colunas-eco.webp" alt="Grade em colunas com as 4 contas farmando em headless" /><br /><sub><b>Colunas no Modo Eco</b>: as 4 contas farmando sem abrir o jogo.</sub></td>
+  </tr>
+</table>
 
 - **Quatro formas de ver**: **Painel + Jogo** (uma conta em foco), **Grade** (todas as contas lado a lado, em 2x2, Destaque 1+3, Colunas ou Linhas, com divisórias arrastáveis e troca de lugar), **Só Painel** (colunas de Visão geral, Automação e Atividade) e **Painéis** (um cartão por conta com XP/h, lucro/h, abates, capturas, buffs das lives e eventos recentes).
 - **Jogo embutido que se ajusta**: o jogo abre dentro do slot da conta, ajusta o zoom sozinho em telas baixas para o mapa não sumir e tem uma barra fina com Pokémon ativo, HP, XP/h, lucro/h e shinies, que você arrasta para onde quiser.
