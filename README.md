@@ -135,6 +135,18 @@ flowchart LR
 - **Avisos em tempo real**: novidades do projeto chegam na hora, dentro do Hub e no Windows, com assinatura digital para ninguém se passar pelo projeto.
 - **Painéis do seu jeito**: cada cartão tem modo Resumo e Detalhado, para ver só o essencial ou tudo.
 
+<p align="center">
+  <img src="docs/telas/automacao-e-consultor.webp" alt="Aba Automação com rotinas, compras, /hunt, lives e o Consultor de Economia" width="900" /><br />
+  <sub><b>Automação</b>: rotinas, compras com reserva de gold, /hunt, lives e o Consultor de Economia, tudo na mesma aba.</sub>
+</p>
+
+<table>
+  <tr>
+    <td width="60%"><img src="docs/telas/lives.webp" alt="Aba Lives com o gestor inteligente de buffs da Twitch e da Kick" /><br /><sub><b>Lives</b>: o gestor inteligente de buffs completa XP, Captura e Shiny na Twitch e na Kick.</sub></td>
+    <td width="40%"><img src="docs/telas/ficha-shiny.webp" alt="Ficha de um shiny com nota, IVs, qualidade, potência e status" /><br /><sub><b>Ficha do shiny</b>: nota, IVs, qualidade, potência e mercado de cada shiny.</sub></td>
+  </tr>
+</table>
+
 ## O que o Nexo PokeBot entrega pronto para uso
 
 1. **4 contas isoladas em 1 janela (`persist:conta1..4`)**: alterne entre **Painel + Jogo**, **Grade**, **Só Painel** e **Painéis** sem abrir várias instâncias de navegador.
