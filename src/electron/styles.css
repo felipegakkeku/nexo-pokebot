@@ -2477,7 +2477,7 @@ kbd {
 .bell-empty { display: flex; align-items: center; gap: 8px; padding: 18px 12px; color: var(--ok-text); font-weight: 600; justify-content: center; }
 
 /* ===== S15: números grandes ===== */
-.hero-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.hero-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
 .hero-kpis { container-type: inline-size; }
 .hero-kpis:empty { display: none; }
 .hero {
@@ -2488,13 +2488,21 @@ kbd {
 }
 .hero.gold { --hc: var(--shiny); }
 .hero.gold.neg { --hc: var(--red); }
+.hero.catch { --hc: var(--teal); }
 .hero.shiny { --hc: var(--purple); }
 .hero.shiny.has-miss { --hc: var(--shiny); }
 .hero-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
 .hero-lbl { display: inline-flex; align-items: center; gap: 5px; font-size: var(--fs-xs); letter-spacing: 0.4px; font-weight: 700; color: var(--muted); white-space: nowrap; }
 .hero-lbl .ico { width: 13px; height: 13px; color: var(--hc); }
-.hero-val { font-size: 26px; font-weight: 700; line-height: 1.1; color: var(--text-strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hero-val { display: flex; align-items: baseline; gap: 6px; font-size: 26px; font-weight: 700; line-height: 1.1; color: var(--text-strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hero-val small { font-size: var(--fs-md); font-weight: 600; color: var(--muted); }
+.hero-rate-pill {
+  font-size: var(--fs-xs); font-weight: 600; line-height: 1.25; padding: 2px 7px; border-radius: var(--r-pill);
+  color: color-mix(in srgb, var(--teal) 70%, #ffffff);
+  background: color-mix(in srgb, var(--teal) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--teal) 36%, transparent);
+  font-variant-numeric: tabular-nums;
+}
 .hero.gold.neg .hero-val { color: var(--err-text); }
 .hero-sub { font-size: var(--fs-xs); color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .hero-sprites { display: flex; align-items: center; gap: 2px; min-height: 30px; margin-top: 2px; }
@@ -2510,7 +2518,13 @@ kbd {
 .spark.empty line { stroke: var(--border-hi); stroke-dasharray: 3 3; }
 .spark.xp { --sc: var(--accent-hi); }
 .spark.gold { --sc: var(--shiny); }
+.spark.catch { --sc: var(--teal); }
 .spark.neg { --sc: var(--red); }
+.eff-chip.catch-hi { border-color: color-mix(in srgb, var(--teal) 40%, var(--border)); background: color-mix(in srgb, var(--teal) 7%, var(--tile)); }
+.eff-chip.catch-hi b { color: color-mix(in srgb, var(--teal) 75%, #ffffff); }
+@container (max-width: 680px) {
+  .hero-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 @container (max-width: 560px) {
   .hero { padding: 9px 10px 7px; }
   .hero-val { font-size: 20px; }

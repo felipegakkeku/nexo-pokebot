@@ -42,6 +42,7 @@ import {
     evaluateHeadlessTick,
     computeModeWarnings,
     getPokedexCapturedSet,
+    getTopCatchWeekKey,
     getTopCatchWeekWindow,
     selectObjectiveHunt,
 } from '../src/headless/protocol-engine.mjs';
@@ -2455,6 +2456,7 @@ test('telemetria eco: mapeia foco Outland/Unova/Boss/Hunt, contabiliza drops, te
             sessionPath: join(dir, 'sess.json'),
             autoLoadSession: false,
             disableHeadlessHuntGuide: true,
+            disableVotePolling: true,
             nowFn: () => fakeNow,
         });
         try {
@@ -2575,6 +2577,7 @@ test('centro medico + troca de hunt: bloqueia durante combate, agenda troca e li
             sessionPath: join(dir, 'sess.json'),
             autoLoadSession: false,
             disableHeadlessHuntGuide: true,
+            disableVotePolling: true,
             nowFn: () => fakeNow,
         });
         try {
@@ -3709,4 +3712,91 @@ test('etapa1: selectObjectiveHunt pula hunts estagnadas quando ha outras pendent
         capturedSet: new Set(),
     });
     assert.equal(dec.targetSlug, 'outra');
+});
+
+test('topcatch com pokemon caido no chao passa pelo Centro Medico para trocar de mapa sem travar', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pokebot-tc-corpse-'));
+    try {
+        let fakeNow = 1_700_000_200_000;
+        const sent = [];
+        const controller = createHeadlessController({
+            cwd: dir,
+            configPath: join(dir, 'cfg.json'),
+            sessionPath: join(dir, 'sess.json'),
+            autoLoadSession: false,
+            disableHeadlessHuntGuide: true,
+            disableVotePolling: true,
+            nowFn: () => fakeNow,
+        });
+        try {
+            controller.updateConfig({
+                farmObjective: 'topcatch',
+                farmObjectiveFocus: 'fast',
+                caidosEnabled: true,
+                restockEnabled: false,
+            });
+            const hooks = controller.attachExternalBridge({
+                send: (raw) => { sent.push(typeof raw === 'string' ? JSON.parse(raw) : raw); return true; },
+                close: () => {},
+                isReady: () => true,
+            }, { waitForWelcome: true });
+
+            const week = getTopCatchWeekKey(fakeNow);
+            hooks.onFrame(JSON.stringify({
+                t: 'welcome',
+                hunts: [
+                    { slug: 'hunt-a', nome: 'Hunt A', area: 'kanto', nivel: 10, especies: [{ pokeId: 10, nome: 'Caterpie' }] },
+                    { slug: 'hunt-b', nome: 'Hunt B', area: 'kanto', nivel: 12, especies: [{ pokeId: 13, nome: 'Weedle' }] },
+                ],
+                estado: {
+                    cheio: true,
+                    nick: 'TopCatchTester',
+                    level: 50,
+                    activeId: 1,
+                    huntSlug: 'hunt-a',
+                    noCentro: false,
+                    servidorAgora: fakeNow,
+                    centroLivreEm: 0,
+                    balls: { 1: 50 },
+                    topCatch: { semana: week, ini: true, n: 1 },
+                    pokemons: [{ id: 1, level: 50, hp: 100, maxHp: 100 }],
+                },
+            }));
+
+            // Outro pokemon da onda ficou caido no chao (ja capturado nesta semana)
+            hooks.onFrame(JSON.stringify({
+                t: 'campo.init',
+                slug: 'hunt-a',
+                ts: fakeNow,
+                mobs: [{ s: 's2', n: 'Caterpie', speciesId: 10, nv: 10, x: true, xr: 20_000 }],
+            }));
+
+            // Recebe a lista semanal contendo Caterpie (10) -> hunt-a concluida, deve ir para hunt-b via Centro
+            hooks.onFrame(JSON.stringify({
+                t: 'topCatch',
+                s: week,
+                ini: true,
+                e: [[10, 1]],
+                n: 1,
+            }));
+
+            assert.equal(controller.getSnapshot({ includeHunts: false }).trainer.pendingHuntSlug, 'hunt-b');
+            assert.ok(sent.some((m) => m.t === 'centro.ir'), 'deve enviar centro.ir quando ha caido no chao');
+            assert.equal(sent.some((m) => m.t === 'hunt.select' && m.slug === 'hunt-b'), false, 'nao tenta hunt.select direto com caido no chao');
+
+            // Ao chegar no Centro Medico, limpa o campo e entra direto na proxima hunt
+            fakeNow += 500;
+            hooks.onFrame(JSON.stringify({
+                t: 'estado',
+                estado: { noCentro: true, huntSlug: null, servidorAgora: fakeNow, centroLivreEm: 0 },
+            }));
+
+            assert.ok(sent.some((m) => m.t === 'hunt.select' && m.slug === 'hunt-b'), 'deve enviar hunt.select para hunt-b assim que chegar no Centro');
+            assert.equal(controller.getSnapshot({ includeHunts: false }).trainer.pendingHuntSlug, null);
+        } finally {
+            controller.stop();
+        }
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
 });

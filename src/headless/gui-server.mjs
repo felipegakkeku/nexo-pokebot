@@ -2580,6 +2580,7 @@ export function createHeadlessController(options = {}) {
     let battleKillsWithoutCampo = 0;
     let campoFeedDegraded = false;
     let pendingHuntSlug = null;
+    let lastCenterEscapeAt = 0;
     let huntFlushTimer = null;
     let campoDrainTimer = null;
 
@@ -3247,14 +3248,48 @@ export function createHeadlessController(options = {}) {
         if (!b) return false;
         return [1, 2, 3, 4, 5].some((id) => Number(b[id] ?? b[String(id)] ?? 0) > 0);
     };
-    const hasFieldCatchPriority = (state = merger.getState()) => {
+    const hasFieldCatchPriority = (state = merger.getState(), { nextSlug = null } = {}) => {
+        if (state?.noCentro) return false;
         if (pendingShinies.size > 0) return true;
         if (field.getMobs().some((m) => isWildCampoMob(m) && m.shiny)) return true;
         if (config.caidosEnabled !== false && hasAnyBallStock(state)) {
-            return field.getFallenCorpses(getSyncedNowMs(), config.prioritizeExpiring !== false).length > 0;
+            const corpses = field.getFallenCorpses(getSyncedNowMs(), config.prioritizeExpiring !== false);
+            if (corpses.length === 0) return false;
+            const collectionMode = config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch';
+            if (collectionMode && config.farmObjectiveFocus !== 'shiny') {
+                if (corpses.some((c) => c.shiny === true)) return true;
+                const swapTarget = nextSlug || pendingHuntSlug;
+                if (swapTarget && swapTarget !== state?.huntSlug) return false;
+                const desired = getDesiredMissingKeysForTick(state);
+                if (desired instanceof Set) {
+                    if (desired.size === 0) return false;
+                    const sceneSlug = field.getScene?.()?.slug || state?.huntSlug || '';
+                    const sceneSpecies = Array.isArray(catalog.huntsBySlug?.[sceneSlug]?.especies)
+                        ? catalog.huntsBySlug[sceneSlug].especies
+                        : [];
+                    const sceneIdByName = new Map();
+                    for (const sp of sceneSpecies) {
+                        const nm = String(sp?.nome || '').trim().toLowerCase();
+                        if (nm && sp?.pokeId != null) sceneIdByName.set(nm, Number(sp.pokeId));
+                    }
+                    return corpses.some((c) => {
+                        const spId = c.speciesId != null
+                            ? c.speciesId
+                            : (sceneIdByName.get(String(c.nome || '').trim().toLowerCase()) ??
+                                catalog.pokemonIdByName?.[String(c.nome || '').trim().toLowerCase()] ?? null);
+                        const k = chavePokedex(spId);
+                        return k != null && desired.has(String(k));
+                    });
+                }
+            }
+            return true;
         }
         return false;
     };
+    const hasLeftoverFallenCorpses = (state = merger.getState()) => (
+        Boolean(state && !state.noCentro) &&
+        field.getFallenCorpses(getSyncedNowMs(), false).length > 0
+    );
     const hasLiveMobInField = () => field.getMobs().some((mob) => !mob.morto && Number(mob.hp ?? 0) > 0);
     const getCombatLockMs = (state = merger.getState()) => {
         if (!state || state.noCentro || (!state.huntSlug && !state.safari?.dentro) || state.casa?.dentro || state.boss?.arena) {
@@ -3752,12 +3787,23 @@ export function createHeadlessController(options = {}) {
         if (pendingHuntSlug === slug) return false;
         const waitMs = Math.max(getCombatLockMs(state), getHuntSwapLockMs());
         const huntLabel = catalog.huntNames?.[slug] || slug;
-        if (waitMs > 0 || hasFieldCatchPriority(state)) {
+        if (waitMs > 0 || hasFieldCatchPriority(state, { nextSlug: slug })) {
             pendingHuntSlug = slug;
             schedulePendingHuntFlush();
             if (waitMs > 0) {
                 pushLog('info', `${reasonLabel}: troca para ${huntLabel} agendada (${(waitMs / 1000).toFixed(1)}s fora de combate).`);
             }
+            return true;
+        }
+        if (hasLeftoverFallenCorpses(state)) {
+            pendingHuntSlug = slug;
+            if (nowFn() - lastCenterEscapeAt >= 3000) {
+                lastCenterEscapeAt = nowFn();
+                if (sendFrame({ t: 'centro.ir' })) {
+                    pushLog('info', `${reasonLabel}: pokémons caídos no chão — voltando ao Centro Médico para trocar para ${huntLabel}.`);
+                }
+            }
+            schedulePendingHuntFlush(1300);
             return true;
         }
         if (sendFrame({ t: 'hunt.select', slug })) {
@@ -4562,6 +4608,7 @@ export function createHeadlessController(options = {}) {
             ingestWelcomeCatalog(m, catalog);
             if (m.estado) merger.merge(m.estado);
             const state = merger.getState();
+            if (state?.noCentro === true) field.reset();
             syncCombatTimersFromState(m.estado, state);
             syncTopCatchFromState(state);
             tracker.lastHuntSlug = state?.huntSlug || tracker.lastHuntSlug;
@@ -4623,6 +4670,7 @@ export function createHeadlessController(options = {}) {
             liveBridge.ingestWsMessage(m);
             if (m.estado) merger.merge(m.estado);
             const state = merger.getState();
+            if (state?.noCentro === true) field.reset();
             syncCombatTimersFromState(m.estado, state);
             syncTopCatchFromState(state);
             if (pendingHuntSlug && state?.huntSlug === pendingHuntSlug) {
@@ -5560,13 +5608,23 @@ export function createHeadlessController(options = {}) {
             return true;
         }
         const waitMs = Math.max(getCombatLockMs(state), getHuntSwapLockMs());
-        if (waitMs > 0 || hasFieldCatchPriority(state)) {
+        if (waitMs > 0 || hasFieldCatchPriority(state, { nextSlug: pendingHuntSlug })) {
             schedulePendingHuntFlush();
             return false;
         }
         const slug = pendingHuntSlug;
-        pendingHuntSlug = null;
         const huntLabel = catalog.huntNames?.[slug] || slug;
+        if (hasLeftoverFallenCorpses(state)) {
+            if (nowFn() - lastCenterEscapeAt >= 3000) {
+                lastCenterEscapeAt = nowFn();
+                if (sendFrame({ t: 'centro.ir' })) {
+                    pushLog('info', `Pokémons caídos no chão: voltando ao Centro Médico para trocar para ${huntLabel}.`);
+                }
+            }
+            schedulePendingHuntFlush(1300);
+            return false;
+        }
+        pendingHuntSlug = null;
         if (sendFrame({ t: 'hunt.select', slug })) {
             tracker.lastHuntSlug = slug;
             pushLog('ok', `Troca de hunt executada: ${huntLabel}`);
@@ -5576,17 +5634,17 @@ export function createHeadlessController(options = {}) {
         return false;
     };
 
-    const schedulePendingHuntFlush = () => {
+    const schedulePendingHuntFlush = (minDelayMs = 0) => {
         clearHuntFlushTimer();
         if (disposed || !pendingHuntSlug) return;
         const stNow = merger.getState();
         const waitMs = Math.max(getCombatLockMs(stNow), getHuntSwapLockMs());
-        const fieldBusy = hasFieldCatchPriority(stNow);
-        if (waitMs <= 0 && !fieldBusy) {
+        const fieldBusy = hasFieldCatchPriority(stNow, { nextSlug: pendingHuntSlug });
+        if (minDelayMs <= 0 && waitMs <= 0 && !fieldBusy) {
             flushPendingHunt();
             return;
         }
-        const delayMs = waitMs > 0 ? Math.min(waitMs + 80, 15_000) : 1300;
+        const delayMs = Math.max(minDelayMs, waitMs > 0 ? Math.min(waitMs + 80, 15_000) : 1300);
         huntFlushTimer = setTimeout(() => {
             huntFlushTimer = null;
             flushPendingHunt();

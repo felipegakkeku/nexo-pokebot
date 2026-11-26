@@ -60,13 +60,21 @@
             const xp = Number(st.xpGained || 0);
             const gold = Number(st.goldGained || 0) - Number(st.spentGold || 0);
             const kills = Number(st.kills || 0);
-            if (last && (xp < last.xp || kills < last.kills)) list.length = 0; // sessão zerada
+            const captures = Number(st.captures || 0);
+            if (last && (xp < last.xp || kills < last.kills || captures < last.captures)) list.length = 0; // sessão zerada
             const prev = list[list.length - 1];
             const h = prev ? (now - prev.t) / 3_600_000 : 0;
+            const dKills = prev ? kills - prev.kills : 0;
+            const dCaps = prev ? captures - prev.captures : 0;
+            const capPerKill = dKills > 0
+                ? (dCaps / dKills) * 100
+                : (kills > 0 ? Number(st.capturePerKillPct ?? ((captures / kills) * 100)) : 0);
             list.push({
-                t: now, xp, gold, kills,
+                t: now, xp, gold, kills, captures,
                 xpRate: prev && h > 0 ? (xp - prev.xp) / h : Number(st.xpPerHour || 0),
                 goldRate: prev && h > 0 ? (gold - prev.gold) / h : Number(st.netGoldPerHour || 0),
+                capRate: prev && h > 0 ? dCaps / h : (Number(st.uptimeSec || 0) > 0 ? (captures / (Number(st.uptimeSec) / 3600)) : 0),
+                capPerKill,
             });
             if (list.length > HIST_MAX) list.shift();
         }
@@ -108,10 +116,19 @@
         const list = hist[acc];
         const xpVals = list.map((p) => p.xpRate);
         const goldVals = list.map((p) => p.goldRate);
+        const capVals = list.map((p) => p.capPerKill);
         const gold = Number(st.netGoldPerHour || 0);
+        const kills = Number(st.kills || 0);
+        const caps = Number(st.captures || 0);
+        const capPct = kills > 0 ? Number(st.capturePerKillPct ?? ((caps / kills) * 100)) : null;
+        const capPctTxt = capPct !== null ? `${String(Number(capPct.toFixed(1))).replace('.', ',')}%` : '-';
+        const capPerHour = Number(st.uptimeSec || 0) > 0 ? Math.round(caps / (Number(st.uptimeSec) / 3600)) : 0;
+        const kpcTxt = st.killsPerCapture > 0
+            ? `1 a cada ${String(st.killsPerCapture).replace('.', ',')} abates`
+            : (kills > 0 ? 'sem capturas ainda' : 'aguardando abates');
         const own = Array.isArray(s.ownShinies) ? s.ownShinies.slice(0, 3) : [];
         const missed = Number(st.shiniesMissed || 0);
-        const sig = `${acc}|${st.xpPerHour}|${gold}|${st.shiniesCaptured}|${st.shiniesSeen}|${missed}|${list.length}|${list[list.length - 1]?.t || 0}|${own.map((o) => o.ts).join(',')}`;
+        const sig = `${acc}|${st.xpPerHour}|${gold}|${caps}|${kills}|${st.capturePerKillPct}|${st.shiniesCaptured}|${st.shiniesSeen}|${missed}|${list.length}|${list[list.length - 1]?.t || 0}|${own.map((o) => o.ts).join(',')}`;
         if (sig === lastHeroSig) return;
         lastHeroSig = sig;
         box.innerHTML = `
@@ -126,6 +143,12 @@
             <div class="hero-val">${signed(gold)}</div>
             <div class="hero-sub">Já descontado o gasto em itens</div>
             ${sparkSvg(goldVals, gold < 0 ? 'neg' : 'gold')}
+          </div>
+          <div class="hero catch" title="Capturas na sessão e taxa de capturas por abate. A curva mostra a variação de capturas por abate a cada 30 s.">
+            <div class="hero-top"><span class="hero-lbl">${IC('pokeball')}Capturas</span>${trendHtml(trendOf(acc, 'capPerKill'))}</div>
+            <div class="hero-val">${fmtCompact(caps)}<span class="hero-rate-pill" title="Capturas por abate">${capPctTxt} / abate</span></div>
+            <div class="hero-sub">${kpcTxt}${capPerHour > 0 ? ` · ${fmtCompact(capPerHour)}/h` : ''}</div>
+            ${sparkSvg(capVals, 'catch')}
           </div>
           <div class="hero shiny${missed ? ' has-miss' : ''}" title="Shinies capturados e vistos nesta sessão.">
             <div class="hero-top"><span class="hero-lbl">${IC('sparkles')}Shinies</span></div>
@@ -341,7 +364,10 @@
         set('kills', fmtCompact(st.kills));
         set('killsSub', `${String(st.killsPerMin || 0).replace('.', ',')}/min · ${st.avgKillSec ? `${String(st.avgKillSec).replace('.', ',')}s cada` : '-'}`);
         set('shiny', `${Number(st.shiniesCaptured || 0)}<small> / ${Number(st.shiniesSeen || 0)}</small>`);
-        set('shinySub', Number(st.shiniesMissed || 0) ? `${st.shiniesMissed} escaparam` : `${fmtCompact(st.captures)} capturas`);
+        const slCapPct = Number(st.kills || 0) > 0 ? `${String(st.capturePerKillPct || 0).replace('.', ',')}%/abate` : '';
+        set('shinySub', Number(st.shiniesMissed || 0)
+            ? `${st.shiniesMissed} escaparam`
+            : `${fmtCompact(st.captures)} cap${slCapPct ? ` · ${slCapPct}` : ''}`);
         host.querySelectorAll('button[data-ev-size]:empty').forEach((b) => { b.textContent = EV_SIZES.find((x) => x[0] === evSize)[1]; });
         syncBuffViewButtons(host);
         const bbox = q('.sl-buffs');
