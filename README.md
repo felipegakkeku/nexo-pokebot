@@ -107,6 +107,9 @@ flowchart LR
     <td width="50%"><img src="docs/telas/destaque-1-3.webp" alt="Grade Destaque 1+3: uma conta jogando e três farmando no Modo Eco" /><br /><sub><b>Destaque 1+3</b>: jogue numa conta enquanto as outras farmam no Modo Eco.</sub></td>
     <td width="50%"><img src="docs/telas/grade-colunas-eco.webp" alt="Grade em colunas com as 4 contas farmando em headless" /><br /><sub><b>Colunas no Modo Eco</b>: as 4 contas farmando sem abrir o jogo.</sub></td>
   </tr>
+  <tr>
+    <td colspan="2"><img src="docs/telas/grade-colunas-jogo.webp" alt="Grade em colunas com as 4 contas jogando lado a lado no jogo embutido" /><br /><sub><b>Colunas com o jogo</b>: as 4 contas jogando lado a lado, cada uma com sua barra de XP/h, lucro/h e abates.</sub></td>
+  </tr>
 </table>
 
 - **Quatro formas de ver**: **Painel + Jogo** (uma conta em foco), **Grade** (todas as contas lado a lado, em 2x2, Destaque 1+3, Colunas ou Linhas, com divisórias arrastáveis e troca de lugar), **Só Painel** (colunas de Visão geral, Automação e Atividade) e **Painéis** (um cartão por conta com XP/h, lucro/h, abates, capturas, buffs das lives e eventos recentes).
