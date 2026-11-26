@@ -34,10 +34,6 @@
   <a href="#apoiar-o-projeto">Apoiar</a>
 </p>
 
-<p align="center">
-  <img src="docs/telas/grade-2x2-jogo.webp" alt="Grade 2x2 com as 4 contas jogando no jogo embutido" width="900" />
-</p>
-
 ---
 
 O **Nexo PokeBot** nasceu de uma vontade simples: jogar mais e se preocupar menos. É um cliente desktop gratuito e open source (licença MIT) para o **[PokeIdle (`pokeidle.io`)](https://pokeidle.io/app)**, pensado do zero para melhorar a sua experiência no jogo e ajudar na gestão das suas contas, sempre respeitando os limites e as regras do PokeIdle.
@@ -109,6 +105,9 @@ flowchart LR
   </tr>
   <tr>
     <td colspan="2"><img src="docs/telas/grade-colunas-jogo.webp" alt="Grade em colunas com as 4 contas jogando lado a lado no jogo embutido" /><br /><sub><b>Colunas com o jogo</b>: as 4 contas jogando lado a lado, cada uma com sua barra de XP/h, lucro/h e abates.</sub></td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/telas/grade-2x2-jogo.webp" alt="Grade 2x2 com as 4 contas jogando no jogo embutido" /><br /><sub><b>Grade 2x2 com o jogo</b>: as 4 contas jogando ao mesmo tempo, uma em cada canto.</sub></td>
   </tr>
 </table>
 
