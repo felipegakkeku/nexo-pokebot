@@ -1504,7 +1504,7 @@ function initGridControls() {
         renderTopIntelBar(snapshots[activeAccount]);
     });
     $('browserStage')?.addEventListener('click', (ev) => {
-        const densBtn = ev.target.closest('[data-sum-density]');
+        const densBtn = ev.target.closest('button[data-sum-density]');
         if (densBtn) {
             const acc = Number(densBtn.dataset.slot || densBtn.closest('.wv-summary')?.dataset?.slot || 0);
             const nextDensity = densBtn.dataset.sumDensity;

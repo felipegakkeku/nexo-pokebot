@@ -4183,3 +4183,60 @@ button.btn.claim-btn.claim-ready {
   background: color-mix(in srgb, var(--amber) 16%, transparent);
   border: 1px solid color-mix(in srgb, var(--amber) 42%, transparent);
 }
+
+/* ===== Responsividade e acabamento: sidebar de resumo, barra da tela e cabecalho ===== */
+.wv-slot { container: wvslot / inline-size; }
+.wv-bar { flex-wrap: wrap; row-gap: 4px; }
+.wv-bar-left { flex: 1 1 140px; min-width: 0; }
+.wv-bar-actions { flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; min-width: 0; }
+@container wvslot (max-width: 560px) {
+  .wv-hunt { display: none; }
+  .wv-bar { padding: 5px 8px; gap: 6px; }
+  .wv-bar-actions .btn.sm { padding: 3px 6px; }
+}
+@container wvslot (max-width: 380px) {
+  .wv-grip { display: none; }
+  .slot-audio span { display: none; }
+}
+
+.acc-header-top { flex-wrap: wrap; row-gap: 6px; }
+.acc-header-title { flex: 1 1 140px; }
+.acc-header-right { flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; }
+.split-dock-quick .btn.sm { padding: 3px 7px; min-width: 0; }
+
+.wv-summary { container: wvsum / inline-size; scrollbar-width: thin; scrollbar-color: var(--border-hi) transparent; }
+.wv-sum-head { flex-wrap: wrap; row-gap: 4px; }
+.wv-sum-title { flex: 1 1 auto; white-space: nowrap; }
+.wv-sum-pos { flex-wrap: wrap; justify-content: flex-end; }
+.wv-sum-btn { padding: 2px 6px; line-height: 1.3; }
+.wv-sum-kpis > div { display: flex; flex-direction: column; gap: 1px; }
+.wv-sum-kpis dd { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wv-sum-poke-name { font-size: var(--fs-sm); }
+.wv-sum-spark .spark, .wv-sum-spark svg { min-width: 0; width: 100%; height: 20px; }
+.wv-sum-events .ev-text { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+@container wvsum (max-width: 230px) {
+  .wv-sum-title { display: none; }
+  .wv-sum-pos { width: 100%; justify-content: space-between; }
+  .wv-sum-btn { flex: 1 1 auto; text-align: center; }
+  .wv-sum-sprite { width: 28px; height: 28px; }
+  .wv-sum-sprite img { width: 26px; height: 26px; }
+  .wv-sum-buffs { grid-template-columns: minmax(0, 1fr); }
+  .wv-sum-spark { grid-template-columns: minmax(0, 1fr); }
+  .wv-sum-spark > span { display: none; }
+}
+
+/* Embaixo: layout horizontal que aproveita a largura inteira da tela */
+@container wvsum (min-width: 520px) {
+  .wv-slot[data-summary-dock="bottom"] .wv-summary { display: grid; grid-template-columns: minmax(170px, 1.1fr) minmax(0, 2fr) minmax(120px, 1fr); align-items: start; column-gap: 10px; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary > .wv-sum-head,
+  .wv-slot[data-summary-dock="bottom"] .wv-summary > .wv-sum-sec,
+  .wv-slot[data-summary-dock="bottom"] .wv-summary > .wv-sum-events,
+  .wv-slot[data-summary-dock="bottom"] .wv-summary > .wv-sum-buffs,
+  .wv-slot[data-summary-dock="bottom"] .wv-summary > .wv-sum-drops { grid-column: 1 / -1; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary > .wv-sum-compact-meta { grid-column: 3; grid-row: 3; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary > .wv-sum-spark { grid-column: 3; }
+}
+@container wvsum (max-width: 519px) {
+  .wv-slot[data-summary-dock="bottom"] .wv-sum-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
