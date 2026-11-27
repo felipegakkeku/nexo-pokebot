@@ -1746,12 +1746,12 @@
             const headHtml = `
               <div class="wv-sum-head">
                 <span class="wv-sum-title">${density === 'compact' ? 'Resumo' : 'Visão geral'}</span>
-                <div class="wv-sum-pos" role="group" aria-label="Sidebar da conta ${acc}">
+                <div class="wv-sum-pos" role="group" aria-label="Posição do resumo da conta ${acc}">
                   <button type="button" class="wv-sum-btn" data-sum-density="${density === 'compact' ? 'full' : 'compact'}" data-slot="${acc}" title="${density === 'compact' ? 'Mostrar detalhes completos nesta conta' : 'Mostrar só o resumo nesta conta'}">${density === 'compact' ? 'Detalhes' : 'Resumir'}</button>
-                  <button type="button" class="wv-sum-btn${curDock === 'left' ? ' active' : ''}" data-sum-pos="left" data-slot="${acc}" title="Sidebar à esquerda nesta conta">Esq</button>
-                  <button type="button" class="wv-sum-btn${curDock === 'right' ? ' active' : ''}" data-sum-pos="right" data-slot="${acc}" title="Sidebar à direita nesta conta">Dir</button>
-                  <button type="button" class="wv-sum-btn${curDock === 'bottom' ? ' active' : ''}" data-sum-pos="bottom" data-slot="${acc}" title="Sidebar embaixo nesta conta">Baixo</button>
-                  <button type="button" class="wv-sum-btn close" data-sum-pos="close" data-slot="${acc}" title="Remover sidebar desta conta">×</button>
+                  <button type="button" class="wv-sum-btn${curDock === 'left' ? ' active' : ''}" data-sum-pos="left" data-slot="${acc}" title="Resumo à esquerda nesta conta">Esq</button>
+                  <button type="button" class="wv-sum-btn${curDock === 'right' ? ' active' : ''}" data-sum-pos="right" data-slot="${acc}" title="Resumo à direita nesta conta">Dir</button>
+                  <button type="button" class="wv-sum-btn${curDock === 'bottom' ? ' active' : ''}" data-sum-pos="bottom" data-slot="${acc}" title="Resumo embaixo nesta conta">Baixo</button>
+                  <button type="button" class="wv-sum-btn close" data-sum-pos="close" data-slot="${acc}" title="Ocultar o resumo desta conta">×</button>
                 </div>
               </div>`;
 

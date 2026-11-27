@@ -3987,6 +3987,8 @@ button.btn.claim-btn.claim-ready {
   height: auto;
   max-height: 46%;
   border-top: 1px solid var(--border);
+  /* altura arrastada maior que o conteúdo: sobra fica embaixo, não entre as linhas */
+  align-content: start;
 }
 .wv-slot[data-summary-dock="right"] .wv-summary[data-sum-density="compact"],
 .wv-slot[data-summary-dock="left"] .wv-summary[data-sum-density="compact"] {
@@ -4284,6 +4286,7 @@ button.btn.claim-btn.claim-ready {
 .wv-bar-actions { flex-wrap: wrap; justify-content: flex-end; row-gap: 4px; min-width: 0; }
 @container wvslot (max-width: 560px) {
   .wv-hunt { display: none; }
+  .wv-bar-actions .lbl-pre { display: none; }
   .wv-bar { padding: 5px 8px; gap: 6px; }
   .wv-bar-actions .btn.sm { padding: 3px 6px; }
 }
@@ -4819,3 +4822,12 @@ button.btn.claim-btn.claim-ready {
 }
 .pg-table th { color: var(--dim); font-weight: 600; }
 .pg-table td { color: var(--text-soft); }
+
+/* Cabeçalho do resumo: os botões de posição repetiam em toda conta. Ficam escondidos e aparecem
+   ao passar o mouse ou focar o resumo; a barra da grade já tem os mesmos controles para todas. */
+@container wvsum (min-width: 231px) {
+  .wv-sum-pos { opacity: 0; transition: opacity var(--t-fast) ease; }
+  .wv-summary:hover .wv-sum-pos,
+  .wv-summary:focus-within .wv-sum-pos { opacity: 1; }
+}
+@media (hover: none) { .wv-sum-pos { opacity: 1 !important; } }
