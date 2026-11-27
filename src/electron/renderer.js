@@ -5716,10 +5716,20 @@ function renderAllInner() {
     hubHook('afterRender');
 }
 
+// Janela minimizada ou na bandeja: os dados e os alertas (som, aviso de shiny) seguem a cada
+// tique, mas a tela só é redesenhada a cada 10s; volta ao normal na hora em que ela reaparece.
+let hubOnScreen = true;
+let lastHiddenRenderAt = 0;
+const HIDDEN_RENDER_EVERY_MS = 10_000;
 async function pollSnapshots() {
     try {
         snapshots = await window.pokeHub.getAllSnapshots();
         processActivityToasts(snapshots);
+        if (!hubOnScreen) {
+            const now = Date.now();
+            if (now - lastHiddenRenderAt < HIDDEN_RENDER_EVERY_MS) return;
+            lastHiddenRenderAt = now;
+        }
         renderAll();
     } catch {
         // aguarda proximo ciclo
@@ -6763,6 +6773,11 @@ function wireEvents() {
             void pollSnapshots();
         }
     });
+    window.pokeHub.onHubVisibility?.((onScreen) => {
+        const wasHidden = !hubOnScreen;
+        hubOnScreen = onScreen;
+        if (onScreen && wasHidden) void pollSnapshots();
+    });
 }
 
 function startPolling() {
@@ -6779,7 +6794,7 @@ function startPolling() {
     let fastCountdown = true;
     let lastCountdownAt = 0;
     huntCountdownTimer = setInterval(() => {
-        if (document.hidden) return;
+        if (document.hidden || !hubOnScreen) return;
         const now = Date.now();
         if (!fastCountdown && now - lastCountdownAt < 1000) return;
         lastCountdownAt = now;

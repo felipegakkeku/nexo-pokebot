@@ -1692,6 +1692,14 @@
         }
     }
 
+    function fmtSumUptime(sec) {
+        const sNum = Math.max(0, Math.floor(Number(sec) || 0));
+        const h = Math.floor(sNum / 3600);
+        const m = Math.floor((sNum % 3600) / 60);
+        const sc = sNum % 60;
+        return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sc).padStart(2, '0')}`;
+    }
+
     function renderWvSummaries() {
         for (const acc of ACCOUNTS) {
             const box = $(`wv-summary-${acc}`);
@@ -1716,23 +1724,23 @@
                 acc, curDock, density,
                 pk?.speciesId, pk?.shiny, pk?.name, pk?.level, pk?.hp, pk?.maxHp, pct,
                 st.xpPerHour, profitH, st.kills, st.captures, st.shiniesCaptured,
-                st.avgKillSec, st.capturePerKillPct, st.uptimeSec,
+                st.avgKillSec, st.capturePerKillPct,
                 density === 'full' ? hitDrops.map((d) => `${d.key}:${d.qty}`).join(',') : '',
                 list.length, list[list.length - 1]?.t || 0,
                 density === 'full' ? evs.map((e) => e.id).join(',') : '',
                 density === 'full' ? Math.floor(Date.now() / 30_000) : 0,
                 density === 'full' ? buffs.length : 0,
             ].join('|');
-            if (box.dataset.sig === sig) continue;
+            // O tempo ativo muda todo segundo: fica fora da assinatura e é trocado só no próprio
+            // texto, em vez de redesenhar o resumo inteiro (4 telas x 1 vez por segundo).
+            const uptimeTxt = fmtSumUptime(st.uptimeSec);
+            if (box.dataset.sig === sig) {
+                const up = box.querySelector('[data-sum-uptime]');
+                if (up && up.textContent !== uptimeTxt) up.textContent = uptimeTxt;
+                continue;
+            }
             box.dataset.sig = sig;
 
-            const fmtSumUptime = (sec) => {
-                const sNum = Math.max(0, Math.floor(Number(sec) || 0));
-                const h = Math.floor(sNum / 3600);
-                const m = Math.floor((sNum % 3600) / 60);
-                const sc = sNum % 60;
-                return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sc).padStart(2, '0')}`;
-            };
 
             const capPctStr = st.kills > 0 ? `${String(st.capturePerKillPct || 0).replace('.', ',')}%` : '-';
             const headHtml = `
@@ -1772,7 +1780,7 @@
                 const kpisHtml = `<dl class="wv-sum-kpis">${compactTiles.map(([k, v, cls]) =>
                     `<div${cls ? ` class="${cls}"` : ''}><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd></div>`
                 ).join('')}</dl>`;
-                const metaHtml = `<div class="wv-sum-compact-meta">Abates: <b>${fmtNum(st.kills)}</b> · Ativo: <b>${fmtSumUptime(st.uptimeSec)}</b></div>`;
+                const metaHtml = `<div class="wv-sum-compact-meta">Abates: <b>${fmtNum(st.kills)}</b> · Ativo: <b data-sum-uptime>${uptimeTxt}</b></div>`;
                 box.innerHTML = headHtml + pokeHtml + kpisHtml + metaHtml + sparkHtml;
                 continue;
             }
@@ -1785,11 +1793,11 @@
                 ['Shinies', fmtNum(st.shiniesCaptured), ''],
                 ['Tempo/abate', st.avgKillSec > 0 ? `${String(st.avgKillSec).replace('.', ',')}s` : '-', ''],
                 ['Cap./abate', capPctStr, ''],
-                ['Ativo', fmtSumUptime(st.uptimeSec), ''],
+                ['Ativo', uptimeTxt, 'uptime'],
             ];
 
             const kpisHtml = `<dl class="wv-sum-kpis">${tiles.map(([k, v, cls]) =>
-                `<div${cls ? ` class="${cls}"` : ''}><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd></div>`
+                `<div${cls ? ` class="${cls}"` : ''}><dt>${escapeHtml(k)}</dt><dd${cls === 'uptime' ? ' data-sum-uptime' : ''}>${escapeHtml(String(v))}</dd></div>`
             ).join('')}</dl>`;
 
             const dropsHtml = `<div class="wv-sum-drops">${hitDrops.length
@@ -2528,8 +2536,7 @@
             ensurePaneResizer();
         }
         syncMenuState();
-        ensureAria(true);
-        setInterval(() => { if (!document.hidden) ensureAria(); }, 4000);
+        ensureAria(true); // depois disso o afterRender de cada tique chama, com limite de 3s
     }
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire, { once: true });

@@ -2464,6 +2464,15 @@ async function createMainWindow() {
         }
     });
 
+    // Com backgroundThrottling desligado (alertas sonoros), a página nunca fica "hidden": avisa o
+    // renderer quando a janela sai da tela, para ele desenhar menos sem parar os alertas.
+    const sendHubVisibility = () => {
+        if (!mainWindow || mainWindow.isDestroyed()) return;
+        const onScreen = mainWindow.isVisible() && !mainWindow.isMinimized();
+        mainWindow.webContents.send('hub:visibility', onScreen);
+    };
+    for (const ev of ['minimize', 'restore', 'hide', 'show']) mainWindow.on(ev, sendHubVisibility);
+
     mainWindow.on('close', () => {
         isQuitting = true;
         closeExtraWindows();
