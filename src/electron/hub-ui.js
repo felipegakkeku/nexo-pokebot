@@ -882,7 +882,7 @@
         const accSig = ACCOUNTS.map((a) => ni?.accountAccent?.(a) || 'azul').join(',');
         const all = gatherLogs(state.scope);
         const last = all[all.length - 1];
-        const sig = `${activeAccount}|${state.scope}|${state.filter}|${state.query}|${accSig}|${all.length}|${last?.id}|${last?.acc}|${Math.floor(Date.now() / 20_000)}`;
+        const sig = `${activeAccount}|${state.scope}|${state.filter}|${state.query}|${accSig}|${all.length}|${last?.id}|${last?.repeat || 1}|${last?.acc}|${Math.floor(Date.now() / 20_000)}`;
         if (!force && sig === view.sig) return;
         view.sig = sig;
         host.querySelectorAll('.log-chip').forEach((b) => {
@@ -900,12 +900,14 @@
             if (wantFilter !== 'all' && !meta.cats.includes(wantFilter)) continue;
             if (q && !String(meta.cleanText || '').toLowerCase().includes(q) && !meta.tag.toLowerCase().includes(q)) continue;
             const prev = rows[rows.length - 1];
+            const reps = Math.max(1, Number(l.repeat) || 1); // o controlador já junta repetições seguidas
+            const lastTs = Number(l.lastTs) || l.ts;
             if (prev && prev.acc === l.acc && prev.meta.vKind === meta.vKind && prev.meta.cleanText === meta.cleanText) {
-                prev.count += 1;
-                prev.ts = l.ts;
+                prev.count += reps;
+                prev.ts = lastTs;
                 continue;
             }
-            rows.push({ ...l, meta, count: 1, firstTs: l.ts });
+            rows.push({ ...l, ts: lastTs, meta, count: reps, firstTs: l.ts });
         }
         const shown = rows.slice(-300).reverse();
         const list = host.querySelector('.log-list');

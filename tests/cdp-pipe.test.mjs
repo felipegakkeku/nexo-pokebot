@@ -152,7 +152,16 @@ test('Chrome real (só se instalado): sem porta nem DevToolsActivePort, e encerr
         const spawned = await spawnBrowserWithPipe(CHROME, [`--user-data-dir=${dir}`, '--headless=new', '--no-first-run', 'about:blank']);
         child = spawned.child;
         const h = spawned.hub.handle();
-        assert.match((await h.send('Browser.getVersion')).product, /Chrome|Edg/);
+        // Chrome frio, com a suíte inteira rodando junto, pode passar dos 8s no primeiro comando.
+        let version;
+        for (let tries = 0; !version; tries++) {
+            try {
+                version = await h.send('Browser.getVersion');
+            } catch (err) {
+                if (tries >= 3 || !/Timeout/.test(String(err?.message))) throw err;
+            }
+        }
+        assert.match(version.product, /Chrome|Edg/);
         assert.equal(existsSync(join(dir, 'DevToolsActivePort')), false);
         const exited = new Promise((r) => child.once('exit', r));
         spawned.hub.destroy();
@@ -160,6 +169,7 @@ test('Chrome real (só se instalado): sem porta nem DevToolsActivePort, e encerr
     } finally {
         try { child?.kill(); } catch { /* já encerrado */ }
         await new Promise((r) => setTimeout(r, 300));
-        rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+        // limpeza é melhor esforço: o Windows pode segurar arquivos do perfil por alguns segundos
+        try { rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }); } catch { /* fica no %TEMP% */ }
     }
 });

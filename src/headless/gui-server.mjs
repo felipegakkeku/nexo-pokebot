@@ -3895,14 +3895,26 @@ export function createHeadlessController(options = {}) {
             }
         }
     };
+    const LOG_REPEAT_WINDOW_MS = 120_000;
     const pushLog = (kind, text) => {
         const ts = nowFn();
+        const k = String(kind || 'info');
+        const t = String(text || '');
+        // Mesma linha de rotina repetida em sequência (salvar config, reconexão) vira um contador
+        // na linha que já existe, em vez de encher a Atividade. Shiny, erro e bônus sempre entram.
+        const last = logs[logs.length - 1];
+        if (last && (k === 'info' || k === 'ok') && last.kind === k && last.text === t
+            && ts - (last.lastTs || last.ts) < LOG_REPEAT_WINDOW_MS) {
+            last.repeat = (last.repeat || 1) + 1;
+            last.lastTs = ts;
+            return;
+        }
         logs.push({
             id: nextLogId++,
             ts,
             time: formatLogTime(ts),
-            kind: String(kind || 'info'),
-            text: String(text || ''),
+            kind: k,
+            text: t,
         });
         if (logs.length > MAX_LOGS) {
             logs.splice(0, logs.length - MAX_LOGS);
@@ -5220,12 +5232,14 @@ export function createHeadlessController(options = {}) {
             syncTopCatchFromState(state);
             checkGymPodiumLoss(state, lastMsgAt);
             tracker.lastHuntSlug = state?.huntSlug || tracker.lastHuntSlug;
-            pushLog(
-                'ok',
-                isBridge
-                    ? `Bot acoplado ao jogo como ${state?.nick || session?.nick || '-'} (Hunt: ${state?.huntSlug || '-'}).`
-                    : `Conectado em wss://pokeidle.io como ${state?.nick || session?.nick} (Hunt: ${state?.huntSlug || '-'}).`
-            );
+            {
+                const nickTxt = state?.nick || session?.nick || '-';
+                const slugNow = state?.huntSlug || '';
+                const huntTxt = slugNow ? ` · hunt ${catalog.huntNames?.[slugNow] || slugNow}` : '';
+                pushLog('ok', isBridge
+                    ? `Bot acoplado ao jogo como ${nickTxt}${huntTxt}.`
+                    : `Conectado ao servidor como ${nickTxt}${huntTxt}.`);
+            }
 
             if (!isBridge && config.farmObjective === 'off' && config.targetHuntSlug && state?.huntSlug !== config.targetHuntSlug) {
                 pushLog('info', `Selecionando hunt configurada: ${config.targetHuntSlug}`);
@@ -6515,7 +6529,7 @@ export function createHeadlessController(options = {}) {
         if (state && isLiveOnline) {
             runTickForState(state);
         }
-        pushLog('info', 'Configuracoes salvas.');
+        pushLog('info', 'Configurações salvas.');
         return { ...config };
     };
 
@@ -7499,7 +7513,7 @@ export function createHeadlessController(options = {}) {
             probAlerts.push({
                 id: 'lure-fraction-risk',
                 level: 'warn',
-                title: 'Risco de perda de fracao do Shiny Lure',
+                title: 'Risco de perda de fração do Shiny Lure',
                 detail: lureRisk.message,
             });
         }
@@ -7507,23 +7521,23 @@ export function createHeadlessController(options = {}) {
             probAlerts.push({
                 id: 'egg-step',
                 level: 'info',
-                title: 'Proximo degrau de Ovo Shiny perto',
-                detail: `Faltam ${nextEggInfo.deltaLevel} niveis para aumentar o drop de fragmentos`,
+                title: 'Próximo degrau de Ovo Shiny perto',
+                detail: `Faltam ${nextEggInfo.deltaLevel} níveis para aumentar o drop de fragmentos`,
             });
         }
         if (safariTickets >= 6) {
             probAlerts.push({
                 id: 'safari-6x',
                 level: 'good',
-                title: 'Combo 6x Safari disponivel',
-                detail: 'Usar multiplos de 6 tickets rende +30m bonus e 3,04x Shiny',
+                title: 'Combo 6x Safari disponível',
+                detail: 'Usar múltiplos de 6 tickets rende +30m bônus e 3,04x Shiny',
             });
         }
         if (tipoDia && activeHasBuff) {
             probAlerts.push({
                 id: 'seasonal-match',
                 level: 'good',
-                title: 'Dia Sazonal ativo no seu Pokemon',
+                title: 'Dia Sazonal ativo no seu Pokémon',
                 detail: '2x dano e 1/4 de dano recebido nas hunts do Mapa',
             });
         }
@@ -7533,15 +7547,15 @@ export function createHeadlessController(options = {}) {
             probAlerts.push({
                 id: 'boss-rotation',
                 level: 'info',
-                title: 'Rotacao de Boss vira em breve',
-                detail: `Faltam ${minsLeft} min para a virada diaria das 18h BRT.`,
+                title: 'Rotação de Boss vira em breve',
+                detail: `Faltam ${minsLeft} min para a virada diária das 18h BRT.`,
             });
         }
         if (gymRec.cooldownReady && gymRec.recommendedType && (gymState != null || state?.ginasioCooldownAte != null || state?.ginasiosPodio != null || state?.ginasios != null)) {
             probAlerts.push({
                 id: 'gym-cooldown-ready',
                 level: 'good',
-                title: `Ginasio ${gymRec.recommendedType} liberado`,
+                title: `Ginásio ${gymRec.recommendedType} liberado`,
                 detail: gymRec.recommendedSummary,
             });
         }
@@ -7549,15 +7563,15 @@ export function createHeadlessController(options = {}) {
             probAlerts.push({
                 id: 'gym-lost',
                 level: 'warn',
-                title: 'Podio de Ginasio perdido',
-                detail: 'Seu buff ou quantidade de podios de ginasio caiu nesta sessao.',
+                title: 'Pódio de Ginásio perdido',
+                detail: 'Seu buff ou quantidade de pódios de ginásio caiu nesta sessão.',
             });
         }
         if (pvpRankIntel.decayWarning) {
             probAlerts.push({
                 id: 'pvp-decay',
                 level: pvpRankIntel.decayActive ? 'danger' : 'warn',
-                title: pvpRankIntel.decayActive ? 'Decaimento de PR PvP ativo' : 'Decaimento de PR PvP proximo',
+                title: pvpRankIntel.decayActive ? 'Decaimento de PR PvP ativo' : 'Decaimento de PR PvP próximo',
                 detail: pvpRankIntel.decayActive
                     ? 'Mais de 24h sem partida ranqueada.'
                     : `Faltam ${Math.ceil((pvpRankIntel.decayRemainingMs || 0) / 60_000)} min para o decaimento de 24h.`,
@@ -7584,8 +7598,8 @@ export function createHeadlessController(options = {}) {
             probAlerts.push({
                 id: 'event-closing',
                 level: 'warn',
-                title: `${ev0.label} comeca em ${Math.max(1, Math.ceil(ev0.inMs / 60_000))} min`,
-                detail: 'Inscricao aberta e voce ainda nao esta inscrito.',
+                title: `${ev0.label} começa em ${Math.max(1, Math.ceil(ev0.inMs / 60_000))} min`,
+                detail: 'Inscrição aberta e você ainda não está inscrito.',
             });
         }
         if (capIntel.depot.pct >= 90) {
@@ -7593,7 +7607,7 @@ export function createHeadlessController(options = {}) {
                 id: 'depot-cap',
                 level: capIntel.depot.danger ? 'danger' : 'warn',
                 title: `Depot em ${capIntel.depot.pct}% (${capIntel.depot.count}/${capIntel.depot.cap})`,
-                detail: 'Capacidade proxima do teto de 3.000 Pokemons. Limpe excedentes.',
+                detail: 'Capacidade próxima do teto de 3.000 Pokémons. Limpe excedentes.',
                 action: 'quick-clean',
             });
         }

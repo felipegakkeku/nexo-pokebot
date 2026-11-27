@@ -3180,14 +3180,14 @@ function renderActivity(data) {
     // Logs (so atualiza DOM quando houver linha nova)
     const logs = data.logs || [];
     const lastLog = logs[logs.length - 1];
-    const logSig = `${activeAccount}:${logs.length}:${lastLog?.time || ''}:${lastLog?.text || ''}`;
+    const logSig = `${activeAccount}:${logs.length}:${lastLog?.time || ''}:${lastLog?.text || ''}:${lastLog?.repeat || 1}`;
     if (hubHook('renderMainLog', data) === true) return;
     if (logSig !== lastLogSig) {
         lastLogSig = logSig;
         const logBox = $('logBox');
         const atBottom = logBox.scrollHeight - logBox.scrollTop - logBox.clientHeight < 28;
         logBox.innerHTML = logs
-            .map((l) => `<div class="log-line ${escapeHtml(l.kind)}">[${escapeHtml(l.time)}] ${escapeHtml(l.text)}</div>`)
+            .map((l) => `<div class="log-line ${escapeHtml(l.kind)}">[${escapeHtml(l.time)}] ${escapeHtml(l.text)}${l.repeat > 1 ? ` <span class="log-count" title="Repetiu ${Number(l.repeat)} vezes">×${Number(l.repeat)}</span>` : ''}</div>`)
             .join('');
         if (atBottom) logBox.scrollTop = logBox.scrollHeight;
     }
@@ -3826,7 +3826,9 @@ function isToastWorthyLog(entry, cfg = null) {
     if (k === 'shiny' || k === 'shiny-miss' || k === 'reward' || k === 'error') return true;
     if (k === 'live') return /caixinha|ba[úu] \+\d+|resgatad|coletad|b[ôo]nus|cookies|sincronizad|429/i.test(txt);
     if (k === 'warn') return /sess[aã]o|combate|falha|desconect|expir|erro|morreu|morte|cancelad|limita|shiny|captura|somente ping|feed de campo|429|live/i.test(txt);
-    if (k === 'ok') return /troca de hunt|centro m[eé]dico|equipe curada|conectad|cookies|sincronizad|salva|pok[eé]dex|top catch|treinador: .* (?:atingiu|concluiu|equipado)/i.test(txt);
+    // "Conectado ao servidor" é rotina (a aba da conta já mostra o estado): fica só na Atividade.
+    // A queda continua avisando pelo ramo 'warn' acima.
+    if (k === 'ok') return /troca de hunt|centro m[eé]dico|equipe curada|cookies|sincronizad|salva|pok[eé]dex|top catch|treinador: .* (?:atingiu|concluiu|equipado)/i.test(txt);
     if (k === 'info') return /\/hunt recomenda|troca .* agendada|indo para o centro|pok[eé]dex|top catch/i.test(txt);
     return false;
 }
