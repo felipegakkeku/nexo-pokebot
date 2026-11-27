@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startGuiServer } from '../headless/gui-server.mjs';
+import { prepareDataRoot } from '../headless/data-dir.mjs';
 import { createPerfSampler } from './perf-meter.mjs';
 import { ensureHuntExtension } from '../headless/hunt-ext-install.mjs';
 import { createHeadlessHuntGuideEvaluator, findHuntExtensionDir } from '../headless/hunt-guide.mjs';
@@ -24,12 +25,15 @@ import {
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', '..');
+// Dados de execução (sessões, cookies, perfis) ficam fora da pasta do app: ela costuma estar no
+// Desktop/OneDrive e o que fica nela sobe para a nuvem. Migra o que já existir na pasta antiga.
+const { dataRoot: DATA_ROOT } = prepareDataRoot({ legacyRoot: ROOT, log: (msg) => console.log(msg) });
 const GAME_ORIGIN = 'https://pokeidle.io';
 const ACCOUNT_IDS = [1, 2, 3, 4];
 
 app.setName('Nexo PokeBot');
 app.setAppUserModelId('com.nexo.pokebot');
-app.setPath('userData', join(ROOT, '.pokebot-hub-data'));
+app.setPath('userData', join(DATA_ROOT, '.pokebot-hub-data'));
 app.commandLine.appendSwitch('disk-cache-size', String(32 * 1024 * 1024));
 app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling,MediaRouter');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
@@ -399,7 +403,7 @@ async function runUpdateInstall() {
     }
 }
 
-const sharedHuntGuide = createHeadlessHuntGuideEvaluator({ cwd: ROOT });
+const sharedHuntGuide = createHeadlessHuntGuideEvaluator({ cwd: DATA_ROOT });
 const servers = new Map(); // account (1..4) -> { instance, port, attached: { onFrame, onDetach, bridgeId } | null }
 const actionPopups = new Map(); // key -> BrowserWindow (voto ou caixinha +50 embutido leve)
 let nextBridgeId = 1;
@@ -446,7 +450,7 @@ function getAppIcon() {
 async function startAccountServer(account) {
     const basePort = 17889 + account;
     const isPrimary = account === 1;
-    const cwd = isPrimary ? ROOT : resolve(ROOT, '.pokebot-accounts', String(account));
+    const cwd = isPrimary ? DATA_ROOT : resolve(DATA_ROOT, '.pokebot-accounts', String(account));
     const opts = {
         port: basePort,
         host: '127.0.0.1',
@@ -484,7 +488,7 @@ async function startAccountServer(account) {
 
 let loadedHuntExtDir = null;
 async function loadHuntExtensionIntoPartitions(dir = null) {
-    const extDir = dir || findHuntExtensionDir({ cwd: ROOT });
+    const extDir = dir || findHuntExtensionDir({ cwd: DATA_ROOT });
     if (!extDir || extDir === loadedHuntExtDir) return extDir;
     for (const acc of ACCOUNT_IDS) {
         const ses = session.fromPartition(`persist:conta${acc}`);
@@ -506,7 +510,7 @@ async function loadHuntExtensionIntoPartitions(dir = null) {
 async function syncHuntExtension({ force = false } = {}) {
     try {
         const res = await ensureHuntExtension({
-            root: ROOT,
+            root: DATA_ROOT,
             fetchImpl: (url, opts) => net.fetch(url, opts),
             prodVersion: process.versions.chrome,
             force,
@@ -1164,7 +1168,7 @@ function startAutoChestWatcher() {
 const LIVE_WATCH_TICK_MS = 30_000;
 const LIVE_WATCH_MINUTES = 15;
 const LIVE_WATCH_MAX_PARALLEL = 2;
-const LIVE_WATCH_STATE_PATH = join(ROOT, '.pokebot-live-streaks.json');
+const LIVE_WATCH_STATE_PATH = join(DATA_ROOT, '.pokebot-live-streaks.json');
 const LIVE_WATCH_REASONS = {
     'not-logged': 'a Twitch não está logada nesta conta, reconecte a Twitch',
     'no-video': 'o player não carregou o vídeo',
@@ -1437,7 +1441,7 @@ function liveWatchTick() {
 // ===== Sons de alerta =====
 // O som escolhido (link do myinstants ou de um arquivo de audio) e baixado uma vez
 // para .pokebot-sounds e tocado pela janela do Hub, mesmo minimizada na bandeja.
-const SOUND_DIR = join(ROOT, '.pokebot-sounds');
+const SOUND_DIR = join(DATA_ROOT, '.pokebot-sounds');
 const SOUND_CFG_PATH = join(SOUND_DIR, 'sounds.json');
 const SOUND_EVENTS = ['shinyMiss', 'shinyCaught', 'rareDrop', 'error', 'chest', 'vote'];
 // canais padrão por evento: som, aviso no Hub (toast) e aviso do Windows

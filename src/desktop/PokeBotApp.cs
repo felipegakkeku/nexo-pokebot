@@ -2561,18 +2561,41 @@ namespace PokeBotDesktop
             }
         }
 
+        // Dados de execução ficam fora da pasta do app (que costuma estar no OneDrive): %LOCALAPPDATA%\Nexo PokeBot.
+        // Espelha src/headless/data-dir.mjs; NEXO_DATA_DIR sobrescreve.
+        private static string DataRoot()
+        {
+            string forced = Environment.GetEnvironmentVariable("NEXO_DATA_DIR");
+            if (!string.IsNullOrWhiteSpace(forced)) return Path.GetFullPath(forced.Trim());
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "Nexo PokeBot");
+        }
+
+        private static string AccountDir(string baseRoot, int account)
+        {
+            return account == 1 ? baseRoot : Path.Combine(baseRoot, ".pokebot-accounts", account.ToString());
+        }
+
+        // Antes da primeira migração (feita pelo Node ao abrir) o item ainda está na pasta antiga do app.
+        private static string ResolveDataPath(string projectRoot, int account, string name, bool isDirectory)
+        {
+            string current = Path.Combine(AccountDir(DataRoot(), account), name);
+            bool exists = isDirectory ? Directory.Exists(current) : File.Exists(current);
+            if (exists) return current;
+            string legacy = Path.Combine(AccountDir(projectRoot, account), name);
+            bool legacyExists = isDirectory ? Directory.Exists(legacy) : File.Exists(legacy);
+            return legacyExists ? legacy : current;
+        }
+
         private static string BrowserProfileDir(string projectRoot, int account)
         {
-            string root = account == 1 ? projectRoot : Path.Combine(projectRoot, ".pokebot-accounts", account.ToString());
-            return Path.Combine(root, ".pokebot-browser-profile");
+            return ResolveDataPath(projectRoot, account, ".pokebot-browser-profile", true);
         }
 
         private static string ReadConfiguredBrowserProfile(string projectRoot, int account)
         {
             try
             {
-                string dir = account == 1 ? projectRoot : Path.Combine(projectRoot, ".pokebot-accounts", account.ToString());
-                string cfgPath = Path.Combine(dir, ".pokebot-headless-config.json");
+                string cfgPath = ResolveDataPath(projectRoot, account, ".pokebot-headless-config.json", false);
                 if (!File.Exists(cfgPath)) return "";
                 var js = new JavaScriptSerializer();
                 var cfg = js.Deserialize<Dictionary<string, object>>(File.ReadAllText(cfgPath, Encoding.UTF8));

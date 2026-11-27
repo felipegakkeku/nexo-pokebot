@@ -1,5 +1,6 @@
 // Controlador stateful de farm headless e servidor HTTP/API para Dashboard Web e App Desktop.
 import { createServer } from 'node:http';
+import { prepareDataRoot } from './data-dir.mjs';
 import {
     TOKEN_QUERY_PARAM,
     UNAUTHORIZED_PAGE,
@@ -8278,15 +8279,18 @@ if (isEntrypoint) {
         instance.close().then(() => process.exit(0));
     };
 
+    const { dataRoot } = prepareDataRoot({
+        legacyRoot: resolve(dirname(fileURLToPath(import.meta.url)), '..', '..'),
+        log: (msg) => console.log(msg),
+    });
     const instance = await startGuiServer({
         port,
         useExistingBrowser: accountIndex !== -1 && account === 1,
         enableBrowserProfilePicker: accountIndex !== -1,
         useEmbeddedBrowser: accountIndex !== -1,
-        ...(account > 1 ? {
-            cwd: resolve(process.cwd(), '.pokebot-accounts', String(account)),
-            isolatedAccount: true,
-        } : {}),
+        // Dados fora da pasta do app (que costuma estar no OneDrive): ver data-dir.mjs.
+        cwd: account > 1 ? resolve(dataRoot, '.pokebot-accounts', String(account)) : dataRoot,
+        ...(account > 1 ? { isolatedAccount: true } : {}),
         autoStart,
         autoLoginOnMissingSession: true,
         onShutdown: () => {

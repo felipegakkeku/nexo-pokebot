@@ -1,6 +1,7 @@
 // Modo Ultra-Eco: roda as 4 contas em 1 unico processo Node (~60 MB RAM, zero Chromium/Electron/GPU).
-import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { prepareDataRoot } from './data-dir.mjs';
 import { startGuiServer } from './gui-server.mjs';
 import { createHeadlessHuntGuideEvaluator } from './hunt-guide.mjs';
 
@@ -81,7 +82,12 @@ export async function startMultiAccountDaemon(options = {}) {
 const isCliEntry = process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
 
 if (isCliEntry) {
-    const daemon = await startMultiAccountDaemon();
+    // Dados fora da pasta do app (que costuma estar no OneDrive): ver data-dir.mjs.
+    const { dataRoot } = prepareDataRoot({
+        legacyRoot: resolve(dirname(fileURLToPath(import.meta.url)), '..', '..'),
+        log: (msg) => console.log(msg),
+    });
+    const daemon = await startMultiAccountDaemon({ rootDir: dataRoot });
     console.log('[Nexo PokeBot Eco] 1 unico processo Node ativo. Pressione Ctrl+C para encerrar todas as contas.');
 
     let exiting = false;
