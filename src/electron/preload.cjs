@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('pokeHub', {
     getUpdateState: () => ipcRenderer.invoke('hub:update-get-state'),
     checkUpdate: () => ipcRenderer.invoke('hub:update-check'),
     installUpdate: () => ipcRenderer.invoke('hub:update-install'),
+    setMainSync: (enabled) => ipcRenderer.invoke('hub:mainsync-set', enabled === true),
     onUpdateState: (cb) => {
         const fn = (_ev, data) => cb(data);
         ipcRenderer.on('hub:update-state', fn);

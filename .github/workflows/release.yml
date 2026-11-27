@@ -1,5 +1,6 @@
 # Publica uma Release a cada tag vX.Y.Z (ex.: v6.6.0).
 # A tag precisa bater com "version" do package.json e o dist/ commitado precisa estar atualizado.
+# A Release sai como rascunho e só vale para o auto-update depois de assinada: npm run sign-release -- vX.Y.Z
 name: release
 
 on:
@@ -14,9 +15,10 @@ jobs:
   release:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      # Actions fixadas por SHA (a tag pode ser movida por quem controlar o repositório da action).
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
           cache: npm
@@ -62,8 +64,11 @@ jobs:
       - name: Empacotar o Nexo PokeBot para Windows
         run: npm run package:friend
 
-      - uses: softprops/action-gh-release@v2
+      # Rascunho: o auto-update só enxerga a Release depois que o dono assina e publica
+      # (npm run sign-release -- vX.Y.Z, na máquina dele; a chave privada nunca entra no GitHub).
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
+          draft: true
           name: Nexo PokeBot v${{ steps.meta.outputs.short_version }}
           body_path: release-notes.md
           files: |

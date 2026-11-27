@@ -2,6 +2,11 @@
 // Baixa o código do commit novo em segundo plano e deixa pronto; aplica quando o Hub reinicia
 // (ou na hora, se a pessoa pedir). Só troca src, assets, docs e o userscript: o runtime do Electron
 // e o .exe continuam vindo das Releases. Se o commit mudar dependências, espera a Release.
+//
+// DESLIGADO POR PADRÃO (segurança): um commit do main não tem assinatura do dono, então quem controlar
+// o repositório executaria código em todas as instalações. As Releases são assinadas (update-signature.mjs);
+// o main não é. Cada pessoa liga o "Sincronizar tudo" por conta própria no painel de atualizações do Hub
+// (fica gravado em .pokebot-main-sync-optin.json) ou com NEXO_MAIN_SYNC=1 no ambiente.
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
@@ -29,6 +34,9 @@ export function depsSignature(pkg) {
     return `${sorted(deps)}|${sorted(opt)}|electron@${electron}`;
 }
 
+/** Escolha da pessoa ("Sincronizar tudo"). Começa com .pokebot- para nunca ser apagada por uma atualização. */
+export const MAIN_SYNC_OPTIN_FILE = '.pokebot-main-sync-optin.json';
+
 const readJson = (path) => {
     try {
         return JSON.parse(readFileSync(path, 'utf8'));
@@ -36,6 +44,24 @@ const readJson = (path) => {
         return null;
     }
 };
+
+/** O main-sync só roda se a pessoa ligou o "Sincronizar tudo" (ou NEXO_MAIN_SYNC=1). Padrão: desligado. */
+export function isMainSyncEnabled(rootDir = DEFAULT_APP_ROOT, env = process.env) {
+    if (String(env?.NEXO_MAIN_SYNC || '').trim() === '1') return true;
+    return readJson(join(rootDir, MAIN_SYNC_OPTIN_FILE))?.enabled === true;
+}
+
+/** Liga ou desliga o "Sincronizar tudo". Ao desligar, descarta o que já estava baixado. */
+export function setMainSyncEnabled(rootDir, enabled) {
+    const file = join(rootDir, MAIN_SYNC_OPTIN_FILE);
+    if (enabled) {
+        writeFileSync(file, JSON.stringify({ enabled: true, at: Date.now() }), 'utf8');
+        return true;
+    }
+    try { rmSync(file, { force: true }); } catch { /* ignore */ }
+    discardStagedMain(rootDir);
+    return false;
+}
 
 export function readMainSyncState(rootDir = DEFAULT_APP_ROOT) {
     return readJson(join(rootDir, MAIN_SYNC_FILE)) || {};
@@ -58,6 +84,7 @@ export function discardStagedMain(rootDir = DEFAULT_APP_ROOT) {
 
 /** Pacote do main pronto para aplicar (script ainda existe e é de outro commit). */
 export function stagedMainReady(rootDir = DEFAULT_APP_ROOT) {
+    if (!isMainSyncEnabled(rootDir)) return null; // pacote baixado antes do recurso ser desligado nunca é aplicado
     const st = readMainSyncState(rootDir);
     if (!st.sha || !st.scriptPath || !existsSync(st.scriptPath)) return null;
     if (sameCommit(st.sha, readInstalledBuild(rootDir).commit)) return null;
@@ -71,6 +98,7 @@ export function stagedMainReady(rootDir = DEFAULT_APP_ROOT) {
  */
 export async function checkMainAhead({ rootDir = DEFAULT_APP_ROOT, repo = DEFAULT_UPDATE_REPO, fetchImpl = fetch, timeoutMs = 8_000 } = {}) {
     const root = resolve(rootDir);
+    if (!isMainSyncEnabled(root)) return { ok: true, ahead: false, reason: 'desligado' };
     if (existsSync(join(root, '.git'))) return { ok: true, ahead: false, reason: 'git' };
     const installedCommit = readInstalledBuild(root).commit;
     if (!installedCommit) return { ok: true, ahead: false, reason: 'sem-commit' };
@@ -92,6 +120,7 @@ export async function checkMainAhead({ rootDir = DEFAULT_APP_ROOT, repo = DEFAUL
  */
 export async function stageMainCommit({ rootDir = DEFAULT_APP_ROOT, repo = DEFAULT_UPDATE_REPO, sha, aheadBy = 0, lastMessage = '', fetchImpl, signal, waitPids } = {}) {
     const root = resolve(rootDir);
+    if (!isMainSyncEnabled(root)) return { ok: false, reason: 'desligado' };
     if (!/^[0-9a-f]{40}$/.test(String(sha || ''))) return { ok: false, reason: 'commit inválido' };
     const prev = readMainSyncState(root);
     if (prev.sha === sha && prev.scriptPath && existsSync(prev.scriptPath)) return { ok: true, sha, scriptPath: prev.scriptPath, cached: true };
@@ -109,6 +138,7 @@ export async function stageMainCommit({ rootDir = DEFAULT_APP_ROOT, repo = DEFAU
             fetchImpl,
             signal,
             waitPids,
+            allowUnsigned: true, // só chega aqui com o "Sincronizar tudo" ligado pela pessoa: commits do main não têm assinatura
             applyOptions: MAIN_SYNC_APPLY,
             prepareStage: (stageRoot) => {
                 const pkg = readJson(join(stageRoot, 'package.json'));

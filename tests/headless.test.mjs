@@ -1,7 +1,7 @@
 // Testes unitarios do motor headless (extrator LevelDB/Snappy, engine de protocolo e parser CLI).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
 import { createServer as createHttpServer } from 'node:http';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -15,6 +15,7 @@ import {
     buildWindowsApplyScript,
     downloadAndStageUpdate,
 } from '../src/desktop/updater.mjs';
+import { signUpdate } from '../src/desktop/update-signature.mjs';
 
 import {
     snappyDecompress,
@@ -2852,6 +2853,7 @@ test('updater: semver, selecao de ZIP, checkForUpdate, script seguro e staging d
                     html_url: 'https://github.com/felipegakkeku/nexo-pokebot/releases/tag/v1.1.0',
                     assets: [
                         { name: 'Nexo-PokeBot-v1.1.zip', size: 1234, browser_download_url: 'https://github.com/felipegakkeku/nexo-pokebot/releases/download/v1.1.0/Nexo-PokeBot-v1.1.zip' },
+                        { name: 'Nexo-PokeBot-v1.1.zip.sig', size: 90, browser_download_url: 'https://github.com/felipegakkeku/nexo-pokebot/releases/download/v1.1.0/Nexo-PokeBot-v1.1.zip.sig' },
                     ],
                 }),
             }),
@@ -2870,18 +2872,29 @@ test('updater: semver, selecao de ZIP, checkForUpdate, script seguro e staging d
         execFileSync('tar.exe', ['-a', '-c', '-f', zipFile, '-C', join(dir, 'pkg-src'), 'Nexo-PokeBot-v1.1'], { stdio: 'pipe' });
         const zipBuf = readFileSync(zipFile);
 
+        // O pacote só é instalado se o dono assinou: aqui o "dono" é um par de chaves de teste.
+        const { publicKey, privateKey } = generateKeyPairSync('ed25519');
+        const signature = signUpdate({
+            tag: info.tagName,
+            sha256: createHash('sha256').update(zipBuf).digest('hex'),
+            privateKeyPem: privateKey.export({ type: 'pkcs8', format: 'pem' }),
+        });
+
         const progressEvents = [];
         const staged = await downloadAndStageUpdate({
             rootDir: fakeApp,
             releaseInfo: info,
             waitPids: [999999],
             onProgress: (p) => progressEvents.push(p.phase),
-            fetchImpl: async () => ({
-                ok: true,
-                status: 200,
-                headers: new Headers({ 'content-length': String(zipBuf.length) }),
-                arrayBuffer: async () => zipBuf.buffer.slice(zipBuf.byteOffset, zipBuf.byteOffset + zipBuf.byteLength),
-            }),
+            publicKey: publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
+            fetchImpl: async (url) => (String(url).endsWith('.sig')
+                ? { ok: true, status: 200, text: async () => `${signature}\n` }
+                : {
+                    ok: true,
+                    status: 200,
+                    headers: new Headers({ 'content-length': String(zipBuf.length) }),
+                    arrayBuffer: async () => zipBuf.buffer.slice(zipBuf.byteOffset, zipBuf.byteOffset + zipBuf.byteLength),
+                }),
         });
         try {
             assert.equal(staged.ok, true);

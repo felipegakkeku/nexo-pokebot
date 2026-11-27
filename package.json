@@ -41,7 +41,8 @@
     "eco": "node src/headless/multi-daemon.mjs",
     "brand:runtime": "node src/desktop/brand-runtime.mjs",
     "build:exe": "node src/desktop/build-exe.mjs",
-    "package:friend": "node src/desktop/build-friend-zip.mjs"
+    "package:friend": "node src/desktop/build-friend-zip.mjs",
+    "sign-release": "node src/desktop/sign-release.mjs"
   },
   "devDependencies": {
     "electron": "^43.8.12",

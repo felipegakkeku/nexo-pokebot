@@ -5459,6 +5459,8 @@ function renderUpdateBanner(st) {
     setText(btnLater, mode === 'done' ? 'Fechar' : 'Depois');
 }
 
+const busy_ = (st) => ['checking', 'downloading', 'extracting', 'applying'].includes(st?.status);
+
 function renderUpdateUi(st) {
     if (!st) return;
     currentUpdateState = st;
@@ -5481,6 +5483,11 @@ function renderUpdateUi(st) {
     const btnInstall = $('btnUpdateInstall');
     const btnCheck = $('btnUpdateCheck');
     const brandVer = document.querySelector('.brand-ver');
+    const chkMainSync = $('chkMainSync');
+    if (chkMainSync) {
+        chkMainSync.checked = Boolean(st.mainSyncEnabled);
+        chkMainSync.disabled = busy_(st) || Boolean(st.isGitRepo);
+    }
 
     const curVer = st.currentVersion || '1.0.17';
     const shortCur = curVer.replace(/\.0$/, '');
@@ -5757,6 +5764,9 @@ function wireEvents() {
             setUpdateOpen(next);
         });
         updPop.addEventListener('click', (ev) => ev.stopPropagation());
+        $('chkMainSync')?.addEventListener('change', (ev) => {
+            void window.pokeHub.setMainSync(ev.target.checked).then(renderUpdateUi).catch(() => {});
+        });
         $('btnUpdateCheck')?.addEventListener('click', () => {
             void window.pokeHub.checkUpdate().then(renderUpdateUi);
         });

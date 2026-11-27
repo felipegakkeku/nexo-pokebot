@@ -11,7 +11,7 @@ import { ensureHuntExtension } from '../headless/hunt-ext-install.mjs';
 import { createHeadlessHuntGuideEvaluator, findHuntExtensionDir } from '../headless/hunt-guide.mjs';
 import { loadAppIconBuffer } from '../desktop/build-exe.mjs';
 import { pickNewAvisos, readSeenAvisos, runAvisosStream, saveSeenAvisos } from '../desktop/avisos.mjs';
-import { checkMainAhead,discardStagedMain, markMainApplyAttempt, readMainSyncState, stageMainCommit, stagedMainReady } from '../desktop/main-sync.mjs';
+import { checkMainAhead,discardStagedMain, isMainSyncEnabled, markMainApplyAttempt, readMainSyncState, setMainSyncEnabled, stageMainCommit, stagedMainReady } from '../desktop/main-sync.mjs';
 import {
     checkForUpdate,
     compareSemver,
@@ -71,6 +71,7 @@ let updateState = {
     error: null,
     justUpdatedFrom: '', // preenchido no boot quando a atualizacao anterior foi aplicada
     justUpdatedChannel: '', // 'main' quando o boot aplicou commits do main
+    mainSyncEnabled: isMainSyncEnabled(ROOT), // "Sincronizar tudo": a pessoa liga no painel; padrão desligado (main não tem assinatura)
     mainReady: null, // commit do main baixado e pronto: { sha, aheadBy, lastMessage, version }
     mainBlocked: '', // motivo de o main esperar a Release (ex.: dependência nova)
     failedTarget: '', // versao que o ultimo update tentou aplicar e nao conseguiu
@@ -2398,6 +2399,12 @@ function registerIpcHandlers() {
     ipcMain.handle('hub:update-get-state', () => updateState);
     ipcMain.handle('hub:update-check', () => runManualUpdateCheck());
     ipcMain.handle('hub:update-install', () => runUpdateInstall());
+    ipcMain.handle('hub:mainsync-set', async (_ev, enabled) => {
+        const on = setMainSyncEnabled(ROOT, enabled === true);
+        patchUpdateState({ mainSyncEnabled: on, mainReady: on ? mainReadyFromState() : null, mainBlocked: '' });
+        if (on) void runMainSync();
+        return updateState;
+    });
 
     ipcMain.handle('hub:open-external', async (_ev, url, account = 1) => {
         try {

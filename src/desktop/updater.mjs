@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
+import { sha256File, verifyUpdateSignature } from './update-signature.mjs';
 
 const execFileAsync = promisify(execFile);
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -113,7 +114,7 @@ export function sameCommit(a, b) {
 /**
  * Escolhe o asset ZIP principal do Windows em uma Release do GitHub.
  * @param {object} release JSON da GitHub Releases API.
- * @returns {{ name: string, size: number, downloadUrl: string } | null}
+ * @returns {{ name: string, size: number, downloadUrl: string, sigUrl: string } | null} sigUrl vazio = Release ainda sem assinatura.
  */
 export function selectReleaseZipAsset(release) {
     const assets = Array.isArray(release?.assets) ? release.assets : [];
@@ -126,10 +127,12 @@ export function selectReleaseZipAsset(release) {
     const preferred = valid.find((a) => /^Nexo-PokeBot-.*\.zip$/i.test(a.name))
         || valid.find((a) => /\.zip$/i.test(a.name));
     if (!preferred) return null;
+    const sig = valid.find((a) => a.name === `${preferred.name}.sig`);
     return {
         name: preferred.name,
         size: Number(preferred.size || 0),
         downloadUrl: preferred.browser_download_url,
+        sigUrl: sig ? sig.browser_download_url : '',
     };
 }
 
@@ -186,7 +189,9 @@ export async function checkForUpdate(options = {}) {
             const rel = await compareCommits({ repo, base: installedCommit, head: latestCommit, fetchImpl, signal: ac.signal, version: currentVersion });
             if (rel && rel.status !== 'ahead' && rel.status !== 'diverged') rebuild = false;
         }
-        const hasUpdate = cmp > 0 || rebuild;
+        // Release com pacote mas sem assinatura do dono ainda não é oferecida: o app não instalaria mesmo.
+        const awaitingSignature = Boolean(asset) && !asset.sigUrl;
+        const hasUpdate = (cmp > 0 || rebuild) && !awaitingSignature;
         const releaseUrl = typeof release?.html_url === 'string' && /^https:\/\//i.test(release.html_url)
             ? release.html_url
             : `https://github.com/${repo}/releases/latest`;
@@ -200,6 +205,7 @@ export async function checkForUpdate(options = {}) {
             releaseUrl,
             publishedAt: release?.published_at || null,
             hasUpdate,
+            awaitingSignature,
             rebuild,
             installedCommit,
             latestCommit,
@@ -491,6 +497,32 @@ export async function downloadFileWithProgress(url, destPath, options = {}) {
         }
     }
 }
+/** Baixa a assinatura (texto pequeno em base64). Recusa resposta grande para não encher a memória. */
+async function fetchSignatureText(url, fetchImpl, signal) {
+    if (!/^https:\/\//i.test(String(url || ''))) throw new Error('Assinatura da atualização sem endereço https.');
+    const res = await fetchImpl(url, { redirect: 'follow', headers: { 'User-Agent': 'Nexo-PokeBot-Updater' }, signal });
+    if (!res?.ok) throw new Error(`Falha ao baixar a assinatura da atualização (HTTP ${res?.status}).`);
+    const text = String(await res.text());
+    if (text.length > 1024) throw new Error('Assinatura da atualização inválida (grande demais).');
+    return text.trim();
+}
+
+/**
+ * Confere se o ZIP baixado foi assinado pelo dono para esta tag. Lança erro se não foi.
+ * @param {{ zipPath: string, releaseInfo: object, fetchImpl?: typeof fetch, signal?: AbortSignal, publicKey?: string }} params
+ */
+export async function verifyDownloadedUpdate({ zipPath, releaseInfo, fetchImpl = fetch, signal, publicKey }) {
+    const tag = String(releaseInfo?.tagName || '').trim();
+    const sigUrl = releaseInfo?.asset?.sigUrl;
+    if (!tag || !sigUrl) {
+        throw new Error('Esta Release ainda não foi assinada pelo dono. A atualização não foi instalada.');
+    }
+    const [sha256, signature] = await Promise.all([sha256File(zipPath), fetchSignatureText(sigUrl, fetchImpl, signal)]);
+    if (!verifyUpdateSignature({ tag, sha256, signature, ...(publicKey ? { publicKey } : {}) })) {
+        throw new Error('Assinatura da atualização inválida: o pacote não foi instalado.');
+    }
+}
+
 async function extractZipWindows(zipPath, extractDir, execFileImpl = execFileAsync) {
     mkdirSync(extractDir, { recursive: true });
     try {
@@ -528,6 +560,16 @@ export async function downloadAndStageUpdate(options = {}) {
             signal: options.signal,
             onProgress,
         });
+        // Só extrai e aplica o que o dono assinou. allowUnsigned existe apenas para o main-sync (opt-in, veja main-sync.mjs).
+        if (options.allowUnsigned !== true) {
+            await verifyDownloadedUpdate({
+                zipPath,
+                releaseInfo,
+                fetchImpl: options.fetchImpl || fetch,
+                signal: options.signal,
+                publicKey: options.publicKey,
+            });
+        }
         onProgress({ phase: 'extracting', percent: 100 });
         await extractZipWindows(zipPath, extractDir, options.execFileImpl);
         const stageRoot = findExtractedAppRoot(extractDir);

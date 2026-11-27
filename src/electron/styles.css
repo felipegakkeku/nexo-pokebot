@@ -1164,6 +1164,16 @@ select:focus, input:focus, textarea:focus {
   white-space: pre-wrap;
 }
 .update-pop-notes.hidden { display: none; }
+.update-sync-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  padding: 5px 2px;
+}
+.update-sync-row input { margin-top: 2px; flex: none; }
+.update-sync-hint { display: block; opacity: 0.7; font-weight: normal; }
 .update-safe-note {
   font-size: var(--fs-sm);
   color: var(--ok-text);
