@@ -53,7 +53,7 @@ import { parseCliArgs } from '../src/headless/cli-runner.mjs';
 import {
     createHeadlessController,
     detectProfileBrowserKind,
-    startGuiServer,
+    startGuiServer as startGuiServerRaw,
     openInteractiveLogin,
     trySilentProfileCookieSync,
     createCdpBrowserBridge,
@@ -64,6 +64,21 @@ import {
 } from '../src/headless/gui-server.mjs';
 import { buildDesktopExecutable, buildPokeballIconBuffer } from '../src/desktop/build-exe.mjs';
 import { startMultiAccountDaemon } from '../src/headless/multi-daemon.mjs';
+
+// A API local exige token: os testes sobem o servidor por este wrapper e o fetch daqui anexa o token
+// às chamadas feitas para servidores que eles mesmos subiram (o resto passa direto).
+const apiTokensByOrigin = new Map();
+const startGuiServer = async (options) => {
+    const srv = await startGuiServerRaw(options);
+    apiTokensByOrigin.set(srv.url, srv.token);
+    return srv;
+};
+const fetch = (input, init = {}) => {
+    const url = typeof input === 'string' ? input : input?.url || String(input);
+    const token = apiTokensByOrigin.get(new URL(url).origin);
+    if (!token || (init.headers && 'X-Nexo-Token' in init.headers)) return globalThis.fetch(input, init);
+    return globalThis.fetch(input, { ...init, headers: { 'X-Nexo-Token': token, ...(init.headers || {}) } });
+};
 
 test('coleção: Pokédex e Top Catch usam conjuntos diferentes e o Top Catch troca de mapa após captura', () => {
     const hunts = [

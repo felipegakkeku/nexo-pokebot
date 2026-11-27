@@ -62,7 +62,7 @@ export async function startMultiAccountDaemon(options = {}) {
         accounts.set(acc, { account: acc, instance, port: instance.port, hasSession, nick: rawSess?.nick || null });
         logger(
             `[Nexo PokeBot Eco] Conta ${acc} (${rawSess?.nick || 'sem sessao'}): ` +
-            `${hasSession && autoStart ? 'FARMANDO' : 'STANDBY'} · http://127.0.0.1:${instance.port}`
+            `${hasSession && autoStart ? 'FARMANDO' : 'STANDBY'} · ${instance.panelUrl}`
         );
     }
 

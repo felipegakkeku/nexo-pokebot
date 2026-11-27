@@ -2148,7 +2148,7 @@ function registerIpcHandlers() {
         const acc = Number(account);
         const entry = servers.get(acc);
         if (!entry) return { ok: false, error: `Conta ${acc} nao inicializada.` };
-        const { controller, port } = entry.instance;
+        const { controller, port, token: apiToken } = entry.instance;
         const act = String(action || '');
         let ok = true;
 
@@ -2214,7 +2214,7 @@ function registerIpcHandlers() {
         } else if (act === 'open-extensions') {
             ok = await controller.openPanel(port, { extensions: true });
         } else if (act === 'open-panel') {
-            ok = await controller.openPanel(port);
+            ok = await controller.openPanel(port, { token: apiToken });
         } else if (act === 'open-game') {
             ok = await controller.openGame();
         } else if (act === 'import-session') {

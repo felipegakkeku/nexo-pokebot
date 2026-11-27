@@ -820,6 +820,17 @@ namespace PokeBotDesktop
         private int ServerPort { get { return 17889 + _account; } }
         private string BaseUrl { get { return "http://127.0.0.1:" + ServerPort; } }
 
+        // Token desta execução: vai para o Node por variável de ambiente e volta em cada chamada à API local.
+        private readonly string _apiToken = NewApiToken();
+        private static string NewApiToken()
+        {
+            byte[] bytes = new byte[32];
+            using (var rng = new System.Security.Cryptography.RNGCryptoServiceProvider()) { rng.GetBytes(bytes); }
+            var sb = new StringBuilder(64);
+            foreach (byte b in bytes) sb.Append(b.ToString("x2"));
+            return sb.ToString();
+        }
+
         private readonly JavaScriptSerializer _json = new JavaScriptSerializer();
         private readonly object _pollLock = new object();
         private readonly Dictionary<string, Image> _spriteCache = new Dictionary<string, Image>();
@@ -1776,9 +1787,21 @@ namespace PokeBotDesktop
                 }
                 using (var wc = new WebClient { Proxy = null, Encoding = Encoding.UTF8 })
                 {
+                    wc.Headers["X-Nexo-Token"] = _apiToken;
                     string json = wc.DownloadString(BaseUrl + "/api/status");
                     return !string.IsNullOrEmpty(json);
                 }
+            }
+            catch (WebException wex)
+            {
+                // 401: já existe um painel nessa porta, mas iniciado por outro processo (outro token).
+                var resp = wex.Response as HttpWebResponse;
+                if (resp != null && resp.StatusCode == HttpStatusCode.Unauthorized)
+                {
+                    _backendError = "Já existe um Nexo PokeBot rodando na porta " + ServerPort + " (iniciado por outro processo). Feche-o e abra de novo.";
+                    return true;
+                }
+                return false;
             }
             catch { return false; }
         }
@@ -1804,6 +1827,7 @@ namespace PokeBotDesktop
                 RedirectStandardError = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
             };
+            psi.EnvironmentVariables["NEXO_API_TOKEN"] = _apiToken;
             try
             {
                 _nodeProcess = Process.Start(psi);
@@ -1830,6 +1854,7 @@ namespace PokeBotDesktop
             {
                 using (var wc = new WebClient { Proxy = null, Encoding = Encoding.UTF8 })
                 {
+                    wc.Headers["X-Nexo-Token"] = _apiToken;
                     string raw = wc.DownloadString(BaseUrl + "/api/status");
                     var data = _json.Deserialize<Dictionary<string, object>>(raw);
                     if (!_isClosing && IsHandleCreated && data != null)
@@ -1869,6 +1894,7 @@ namespace PokeBotDesktop
                     using (var wc = new WebClient { Proxy = null, Encoding = Encoding.UTF8 })
                     {
                         wc.Headers[HttpRequestHeader.ContentType] = "application/json";
+                        wc.Headers["X-Nexo-Token"] = _apiToken;
                         wc.UploadString(BaseUrl + "/api/action", "POST", _json.Serialize(body));
                     }
                     if (onComplete != null && !_isClosing && IsHandleCreated)
@@ -2508,6 +2534,7 @@ namespace PokeBotDesktop
                     req.Timeout = 1500;
                     req.ReadWriteTimeout = 1500;
                     req.ContentType = "application/json";
+                    req.Headers["X-Nexo-Token"] = _apiToken;
                     byte[] bytes = Encoding.UTF8.GetBytes("{\"action\":\"shutdown\"}");
                     req.ContentLength = bytes.Length;
                     using (Stream s = req.GetRequestStream())

@@ -1,5 +1,15 @@
 // Controlador stateful de farm headless e servidor HTTP/API para Dashboard Web e App Desktop.
 import { createServer } from 'node:http';
+import {
+    TOKEN_QUERY_PARAM,
+    UNAUTHORIZED_PAGE,
+    generateApiToken,
+    isAuthorized,
+    normalizeProvidedToken,
+    panelUrl as buildPanelUrl,
+    sessionCookie,
+    tokensMatch,
+} from './api-auth.mjs';
 import { fetchSpeciesCatalog, getSharedMarketBase, SPECIES_CACHE_VERSION } from './market-base.mjs';
 import { adviseItems, advisePokemons, buildSpeciesIndex, estimatePokemonPrice, isLegendary, notaOf } from './economy-advisor.mjs';
 import { findPokedexEvolutions, planFinalEvolution } from './evolution-plan.mjs';
@@ -6142,11 +6152,11 @@ export function createHeadlessController(options = {}) {
         }
     };
 
-    const openPanel = async (port, { extensions = false } = {}) => {
+    const openPanel = async (port, { extensions = false, token = '' } = {}) => {
         const { exe, profileDir, existingProfile } = resolveBrowserLaunchTarget({ forLives: false });
         if (disposed || !exe || (!options.browserLauncher && !existsSync(exe))) return false;
         try {
-            const url = extensions ? (/msedge\.exe$/i.test(exe) ? 'edge://extensions/' : 'chrome://extensions/') : `http://localhost:${port}/`;
+            const url = extensions ? (/msedge\.exe$/i.test(exe) ? 'edge://extensions/' : 'chrome://extensions/') : buildPanelUrl(`http://localhost:${port}/`, token);
             await browserLauncher(exe, profileDir, [url], existingProfile, {
                 enableRemoteDebugging: false,
             });
@@ -7994,6 +8004,9 @@ export async function startGuiServer(options = {}) {
     const autoStart = options.autoStart !== false;
     const dashboardPath = options.dashboardPath || DEFAULT_DASHBOARD_PATH;
 
+    // Token desta execução: o launcher pode fornecer um (NEXO_API_TOKEN) para falar com o processo filho.
+    const apiToken = normalizeProvidedToken(options.apiToken ?? process.env.NEXO_API_TOKEN) || generateApiToken();
+
     const controller = options.controller || createHeadlessController(options);
     const cachedHtml = existsSync(dashboardPath)
         ? readFileSync(dashboardPath, 'utf8')
@@ -8038,6 +8051,28 @@ export async function startGuiServer(options = {}) {
         }
 
         if (req.method === 'GET' && urlPath === '/') {
+            // Link do painel (?nexo_token=...): troca o token por cookie HttpOnly e limpa a URL.
+            const offered = new URL(req.url || '/', 'http://localhost').searchParams.get(TOKEN_QUERY_PARAM);
+            if (offered !== null) {
+                if (tokensMatch(apiToken, offered)) {
+                    res.writeHead(302, {
+                        Location: '/',
+                        'Set-Cookie': sessionCookie(apiToken, boundPort),
+                        'Cache-Control': 'no-store',
+                        'Referrer-Policy': 'no-referrer',
+                    });
+                    res.end();
+                    return;
+                }
+                res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+                res.end(UNAUTHORIZED_PAGE);
+                return;
+            }
+            if (!isAuthorized(req, { token: apiToken, port: boundPort })) {
+                res.writeHead(401, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+                res.end(UNAUTHORIZED_PAGE);
+                return;
+            }
             const html = existsSync(dashboardPath) ? readFileSync(dashboardPath, 'utf8') : cachedHtml;
             res.writeHead(200, {
                 'Content-Type': 'text/html; charset=utf-8',
@@ -8056,6 +8091,11 @@ export async function startGuiServer(options = {}) {
         if (req.method === 'GET' && urlPath === '/favicon.ico' && existsSync(DEFAULT_ICON_ICO_PATH)) {
             res.writeHead(200, { 'Content-Type': 'image/x-icon', 'Cache-Control': 'public, max-age=3600' });
             res.end(readFileSync(DEFAULT_ICON_ICO_PATH));
+            return;
+        }
+
+        if (urlPath.startsWith('/api/') && !isAuthorized(req, { token: apiToken, port: boundPort })) {
+            sendJson(res, 401, { ok: false, error: 'Não autorizado: abra o painel pelo link do Nexo PokeBot.' });
             return;
         }
 
@@ -8095,7 +8135,7 @@ export async function startGuiServer(options = {}) {
             } else if (action === 'open-live-chat') {
                 ok = typeof body.url === 'string' && await controller.openLives(body.url, { chatOnly: true });
             } else if (action === 'open-panel') {
-                ok = await controller.openPanel(boundPort);
+                ok = await controller.openPanel(boundPort, { token: apiToken });
             } else if (action === 'set-hunt') {
                 ok = controller.setHunt(body.slug);
             } else if (action === 'go-center') {
@@ -8184,7 +8224,7 @@ export async function startGuiServer(options = {}) {
         controller.start();
     }
 
-    return { server, controller, port: actualPort, host, url, close };
+    return { server, controller, port: actualPort, host, url, token: apiToken, panelUrl: buildPanelUrl(url, apiToken), close };
 }
 
 function openBrowserAppWindow(url, controller = null) {
@@ -8269,9 +8309,9 @@ if (isEntrypoint) {
         parentWatchTimer.unref?.();
     }
 
-    console.log(`[Nexo PokeBot] Painel ativo em ${instance.url}`);
+    console.log(`[Nexo PokeBot] Painel ativo em ${instance.panelUrl} (o link muda a cada execução)`);
     if (openApp) {
-        openBrowserAppWindow(instance.url, instance.controller);
+        openBrowserAppWindow(instance.panelUrl, instance.controller);
     }
 
     process.on('SIGINT', stopAllAndExit);
