@@ -4334,6 +4334,30 @@ button.btn.claim-btn.claim-ready {
   .wv-slot[data-summary-dock="bottom"] .wv-sum-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
+/* Lateral nunca passa de 45% da tela da conta, nem quando a pessoa arrastou a divisória. */
+.wv-slot:is([data-summary-dock="right"], [data-summary-dock="left"]) .wv-summary { max-width: 45%; }
+
+/* Tela estreita (colunas com 4 contas, janela pequena): o resumo lateral deixava o jogo com
+   ~120px. Abaixo de 600px ele desce para baixo do jogo sozinho; a escolha da pessoa continua
+   salva e volta quando a tela alarga. */
+@container wvslot (max-width: 600px) {
+  .wv-slot:is([data-summary-dock="right"], [data-summary-dock="left"]) .wv-main { flex-direction: column; }
+  .wv-slot:is([data-summary-dock="right"], [data-summary-dock="left"]) .wv-summary {
+    width: auto !important; max-width: none; height: auto; max-height: 40%;
+    border-left: 0; border-right: 0; border-top: 1px solid var(--border);
+  }
+  .wv-slot:is([data-summary-dock="right"], [data-summary-dock="left"]) .wv-sum-resizer { display: none; }
+  .wv-slot:is([data-summary-dock="right"], [data-summary-dock="left"]) .wv-sum-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  /* a escolha salva fica tracejada e uma linha explica por que o resumo está embaixo */
+  .wv-slot:is([data-summary-dock="right"], [data-summary-dock="left"]) .wv-sum-btn.active:is([data-sum-pos="right"], [data-sum-pos="left"]) {
+    background: transparent; border-style: dashed; color: var(--accent-text);
+  }
+  .wv-slot:is([data-summary-dock="right"], [data-summary-dock="left"]) .wv-sum-head::after {
+    content: 'Tela estreita: resumo embaixo até ela alargar'; flex-basis: 100%;
+    font-size: var(--fs-xs); color: var(--dim);
+  }
+}
+
 /* Barras de rolagem discretas e sem rolagem horizontal desnecessaria */
 .account-tabs { scrollbar-width: none; }
 .account-tabs::-webkit-scrollbar { display: none; }
