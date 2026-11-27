@@ -249,7 +249,7 @@
     ];
     const STAGE_HTML = `
       <div class="sl-custom-bar">
-        <span class="sl-cb-lbl">Lado direito:</span>
+        <span class="sl-cb-lbl">Exibir:</span>
         ${STAGE_SEC_LABELS.map(([id, lbl]) => `<button type="button" class="sl-cb-btn" data-sl-vis="${id}" aria-pressed="true">${lbl}</button>`).join('')}
         <button type="button" class="sl-cb-btn" data-sl-opt="swap" aria-pressed="false" title="Inverte Eventos e Buffs/Drops de lado">Inverter</button>
         <button type="button" class="sl-cb-btn" data-sl-opt="stack" aria-pressed="false" title="Alterna entre 2 colunas ou 1 coluna">1 coluna</button>
@@ -266,9 +266,11 @@
           <div class="sl-kpis">
             <div class="sl-kpi xp"><span>${IC('zap')}XP/h</span><b data-k="xp"></b><i data-k="xpSpark"></i></div>
             <div class="sl-kpi gold"><span>${IC('coins')}Lucro/h</span><b data-k="gold"></b><i data-k="goldSpark"></i></div>
+            <div class="sl-kpi catch"><span>${IC('pokeball')}Capturas</span><b data-k="captures"></b><small data-k="capturesSub"></small><i data-k="capSpark"></i></div>
             <div class="sl-kpi kills"><span>${IC('swords')}Abates</span><b data-k="kills"></b><small data-k="killsSub"></small></div>
             <div class="sl-kpi shiny"><span>${IC('sparkles')}Shinies</span><b data-k="shiny"></b><small data-k="shinySub"></small></div>
           </div>
+          <div class="sl-meta-strip" data-k="metaStrip"></div>
         </div>
       </div>
       <div class="sl-bottom">
@@ -408,18 +410,37 @@
         q('.sl-poke-name').textContent = poke ? `${poke.name}${poke.shiny ? ' ★' : ''} · Nv ${poke.level}` : 'Aguardando Pokémon';
         q('.sl-poke-hp').textContent = poke ? `${fmtNum(poke.hp)} / ${fmtNum(poke.maxHp)} HP` : '';
         const set = (k, v) => { const el = host.querySelector(`[data-k="${k}"]`); if (el && el.innerHTML !== v) el.innerHTML = v; };
+        const fmtSlUptime = (sec) => {
+            const sn = Math.max(0, Math.floor(Number(sec) || 0));
+            const h = Math.floor(sn / 3600);
+            const m = Math.floor((sn % 3600) / 60);
+            const sc = sn % 60;
+            return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sc).padStart(2, '0')}`;
+        };
         set('xp', fmtCompact(st.xpPerHour));
         set('gold', signed(st.netGoldPerHour));
         host.querySelector('.sl-kpi.gold').classList.toggle('neg', Number(st.netGoldPerHour || 0) < 0);
         set('xpSpark', sparkSvg(hist[acc].map((p) => p.xpRate), 'xp'));
         set('goldSpark', sparkSvg(hist[acc].map((p) => p.goldRate), 'gold'));
+        const slCapPctVal = Number(st.kills || 0) > 0 ? `${String(st.capturePerKillPct || 0).replace('.', ',')}%` : '-';
+        const capPerHour = Number(st.uptimeSec || 0) > 0 ? Math.round((Number(st.captures || 0)) / (Number(st.uptimeSec) / 3600)) : 0;
+        set('captures', fmtCompact(st.captures));
+        set('capturesSub', `${slCapPctVal}/abate${capPerHour > 0 ? ` · ${fmtCompact(capPerHour)}/h` : ''}`);
+        set('capSpark', sparkSvg(hist[acc].map((p) => p.capPerKill), 'catch'));
         set('kills', fmtCompact(st.kills));
         set('killsSub', `${String(st.killsPerMin || 0).replace('.', ',')}/min · ${st.avgKillSec ? `${String(st.avgKillSec).replace('.', ',')}s cada` : '-'}`);
         set('shiny', `${Number(st.shiniesCaptured || 0)}<small> / ${Number(st.shiniesSeen || 0)}</small>`);
-        const slCapPct = Number(st.kills || 0) > 0 ? `${String(st.capturePerKillPct || 0).replace('.', ',')}%/abate` : '';
         set('shinySub', Number(st.shiniesMissed || 0)
             ? `${st.shiniesMissed} escaparam`
-            : `${fmtCompact(st.captures)} cap${slCapPct ? ` · ${slCapPct}` : ''}`);
+            : `${fmtNum(st.ballsThrown || 0)} bolas`);
+        const avgKillTxt = st.avgKillSec > 0 ? `${String(st.avgKillSec).replace('.', ',')}s` : '-';
+        const ballPerCapTxt = Number(st.ballsPerCapture || 0) > 0 ? `${String(st.ballsPerCapture).replace('.', ',')}` : '-';
+        set('metaStrip',
+            `<span>Tempo/abate: <b>${avgKillTxt}</b></span>` +
+            `<span>Cap./abate: <b>${slCapPctVal}</b></span>` +
+            `<span>Bolas/cap.: <b>${ballPerCapTxt}</b></span>` +
+            `<span>Ativo: <b>${fmtSlUptime(st.uptimeSec)}</b></span>`
+        );
         host.querySelectorAll('button[data-ev-size]:empty').forEach((b) => { b.textContent = EV_SIZES.find((x) => x[0] === evSize)[1]; });
         syncBuffViewButtons(host);
         const bbox = q('.sl-buffs');

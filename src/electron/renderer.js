@@ -288,6 +288,7 @@ async function openEmbeddedForAccount(acc) {
         wvZoomObservers.set(acc, ro);
     }
     updateAudioIndicators(acc);
+    applySummaryLayout();
     await pollSnapshots();
 }
 
@@ -302,6 +303,7 @@ async function closeEmbeddedForAccount(acc, { startHeadless = false } = {}) {
     }
     audioState.delete(acc);
     updateAudioIndicators(acc);
+    applySummaryLayout();
     const ph = $(`wv-ph-${acc}`);
     if (ph) ph.hidden = false;
     const res = await window.pokeHub.detachWebview(acc, { startHeadless });
@@ -467,7 +469,8 @@ function applySummaryLayout() {
     }
     for (const acc of ACCOUNTS) {
         const cfg = getSlotSidebarCfg(acc);
-        const show = viewMode !== 'panel-only' && viewMode !== 'panels-grid' && cfg.dock !== 'off';
+        const embedded = webviews.has(acc);
+        const show = embedded && viewMode !== 'panel-only' && viewMode !== 'panels-grid' && cfg.dock !== 'off';
         const slot = $(`wv-slot-${acc}`);
         if (slot) slot.dataset.summaryDock = show ? cfg.dock : 'off';
         const resizer = slot?.querySelector('.wv-sum-resizer');
@@ -489,7 +492,10 @@ function applySummaryLayout() {
             }
         }
         const btn = document.querySelector(`[data-slot-act="summary"][data-slot="${acc}"]`);
-        if (btn) btn.classList.toggle('active-toggle', show);
+        if (btn) {
+            btn.hidden = !embedded;
+            btn.classList.toggle('active-toggle', show);
+        }
         applyWebviewZoom(acc);
     }
     requestAnimationFrame(() => {

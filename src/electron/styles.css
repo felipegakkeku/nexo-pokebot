@@ -2577,7 +2577,7 @@ kbd {
 .sl-pill.error { color: var(--err-text); background: color-mix(in srgb, var(--red) 16%, transparent); }
 .sl-pill.connecting { color: var(--accent-text); background: color-mix(in srgb, var(--accent) 16%, transparent); }
 .sl-hunt { font-size: var(--fs-sm); color: var(--muted); }
-.sl-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 4px; }
+.sl-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(126px, 1fr)); gap: 8px; margin-top: 4px; }
 .sl-kpi { display: flex; flex-direction: column; gap: 1px; padding: 8px 10px; border-radius: var(--r-md); background: var(--tile); border: 1px solid var(--border); min-width: 0; }
 .sl-kpi > span { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-xs); font-weight: 700; color: var(--dim); }
 .sl-kpi > span .ico { width: 12px; height: 12px; }
@@ -2588,6 +2588,21 @@ kbd {
 .sl-kpi .spark { height: 22px; margin-top: 2px; }
 .sl-kpi.gold.neg b { color: var(--err-text); }
 .sl-kpi.shiny b { color: var(--shiny-text); }
+.sl-meta-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 6px;
+  padding: 5px 8px;
+  border-radius: var(--r-md);
+  background: var(--tile);
+  border: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.sl-meta-strip b { color: var(--text-strong); }
+.stage-live.sl-hide-kpis .sl-meta-strip { display: none; }
 .sl-bottom { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(260px, 1fr); gap: 10px; flex: 1 1 auto; min-height: 0; align-items: stretch; }
 .sl-bottom .sl-col { overflow-y: auto; flex: 1 1 auto; }
 .sl-col { padding: 10px 12px; border-radius: var(--r-lg); background: color-mix(in srgb, var(--card) 70%, transparent); border: 1px solid var(--border); min-width: 0; }
@@ -3462,7 +3477,7 @@ body:has(.dock-col[data-panel="activity"]) #activityDock { display: none; }
 @container (max-width: 520px) {
   .sl-kpis { gap: 6px; }
   .sl-kpi { padding: 6px 8px; }
-  .sl-kpi .spark { display: none; }
+  .sl-kpi .spark { height: 18px; }
 }
 @media (max-width: 1100px) {
   .hero-kpis { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
