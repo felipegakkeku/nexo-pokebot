@@ -88,7 +88,8 @@ const hubHook = (name, ...args) => {
 };
 
 function fmtNum(n) {
-    return Number(n || 0).toLocaleString('pt-BR');
+    const v = Number(n);
+    return Number.isFinite(v) ? v.toLocaleString('pt-BR') : '0';
 }
 
 function fmtUptime(sec) {
@@ -348,13 +349,186 @@ function selectAccount(acc) {
 
 // ===== Grade livre, som por conta e Paineis 2x2 =====
 const GRID_STATE_KEY = 'nexo.gridLayout';
+const ACC_SORT_KEY = 'nexo.accSort';
+const SPLIT_DOCK_KEY = 'nexo.splitDock';
+const SLOT_SIDEBAR_KEY = 'nexo.slotSidebar.v1';
+const DISMISSED_BF_KEY = 'nexo.dismissedBf';
+const DISMISSED_ALERTS_KEY = 'nexo.dismissedAlerts';
 const GRID_LAYOUTS = ['2x2', 'focus', 'cols', 'rows'];
+const ACC_SORT_MODES = ['manual', 'level', 'pokeLevel', 'xp', 'profit', 'name'];
+const SPLIT_DOCK_MODES = ['left', 'right', 'hidden'];
+const SUMMARY_DOCK_MODES = ['right', 'left', 'bottom', 'off'];
+const SUMMARY_DENSITY_MODES = ['compact', 'full'];
 const RUNNING_STATUSES = ['connected', 'bridge', 'connecting'];
 const ICON_SOUND_ON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16 8.5a5 5 0 0 1 0 7M18.5 6a8.5 8.5 0 0 1 0 12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 const ICON_SOUND_OFF = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z" fill="currentColor"/><path d="M16.5 9.5l5 5M21.5 9.5l-5 5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 const audioState = new Map(); // conta -> { muted, playing } enquanto o jogo esta embutido
 let gridState = loadGridState();
 let gridGutters = { v: false, h: false };
+let accSortMode = loadAccSortMode();
+let splitDockMode = loadSplitDockMode();
+let slotSidebarState = loadSlotSidebarState();
+const dismissedModeWarns = new Set();
+let dismissedAlerts = loadDismissedAlerts();
+
+function loadAccSortMode() {
+    try {
+        const v = localStorage.getItem(ACC_SORT_KEY);
+        return ACC_SORT_MODES.includes(v) ? v : 'manual';
+    } catch {
+        return 'manual';
+    }
+}
+function saveAccSortMode() {
+    try { localStorage.setItem(ACC_SORT_KEY, accSortMode); } catch { /* ignore */ }
+}
+
+function loadSplitDockMode() {
+    try {
+        const v = localStorage.getItem(SPLIT_DOCK_KEY);
+        return SPLIT_DOCK_MODES.includes(v) ? v : 'left';
+    } catch {
+        return 'left';
+    }
+}
+function saveSplitDockMode() {
+    try { localStorage.setItem(SPLIT_DOCK_KEY, splitDockMode); } catch { /* ignore */ }
+}
+
+function makeDefaultSlotSidebars() {
+    const mk = (defDock, defDensity) => Object.fromEntries(ACCOUNTS.map((a) => [a, { dock: defDock, density: defDensity }]));
+    return {
+        grid: mk('right', 'compact'),
+        split: mk('off', 'compact'),
+    };
+}
+
+function loadSlotSidebarState() {
+    const def = makeDefaultSlotSidebars();
+    try {
+        const raw = JSON.parse(localStorage.getItem(SLOT_SIDEBAR_KEY) || 'null');
+        if (!raw || typeof raw !== 'object') return def;
+        for (const viewKey of ['grid', 'split']) {
+            const src = raw[viewKey];
+            if (!src || typeof src !== 'object') continue;
+            for (const acc of ACCOUNTS) {
+                const item = src[acc] || src[String(acc)];
+                if (!item || typeof item !== 'object') continue;
+                if (SUMMARY_DOCK_MODES.includes(item.dock)) def[viewKey][acc].dock = item.dock;
+                if (SUMMARY_DENSITY_MODES.includes(item.density)) def[viewKey][acc].density = item.density;
+            }
+        }
+        return def;
+    } catch {
+        return def;
+    }
+}
+function saveSlotSidebarState() {
+    try { localStorage.setItem(SLOT_SIDEBAR_KEY, JSON.stringify(slotSidebarState)); } catch { /* ignore */ }
+}
+
+function loadDismissedAlerts() {
+    try {
+        const raw = JSON.parse(localStorage.getItem(DISMISSED_ALERTS_KEY) || '[]');
+        return new Set(Array.isArray(raw) ? raw.map(String) : []);
+    } catch {
+        return new Set();
+    }
+}
+function saveDismissedAlerts() {
+    try { localStorage.setItem(DISMISSED_ALERTS_KEY, JSON.stringify([...dismissedAlerts])); } catch { /* ignore */ }
+}
+
+function getSlotSidebarBucket() {
+    return viewMode === 'grid' ? 'grid' : 'split';
+}
+
+function getSlotSidebarCfg(acc) {
+    const bucket = getSlotSidebarBucket();
+    return slotSidebarState[bucket]?.[acc] || { dock: bucket === 'grid' ? 'right' : 'off', density: 'compact' };
+}
+
+function applySummaryLayout() {
+    const bucket = getSlotSidebarBucket();
+    const map = slotSidebarState[bucket] || {};
+    const docks = ACCOUNTS.map((a) => map[a]?.dock || (bucket === 'grid' ? 'right' : 'off'));
+    const allSameDock = docks.every((d) => d === docks[0]) ? docks[0] : '';
+    document.querySelectorAll('[data-grid-summary]').forEach((b) => {
+        b.classList.toggle('active', b.dataset.gridSummary === allSameDock);
+    });
+    const densities = ACCOUNTS.map((a) => map[a]?.density || 'compact');
+    const allCompact = densities.every((d) => d === 'compact');
+    const densBtn = $('btnGridSummaryDensity');
+    if (densBtn) {
+        densBtn.textContent = allCompact ? 'Modo: Resumido' : 'Modo: Completo';
+        densBtn.classList.toggle('active', !allCompact);
+    }
+    for (const acc of ACCOUNTS) {
+        const cfg = getSlotSidebarCfg(acc);
+        const show = viewMode !== 'panel-only' && viewMode !== 'panels-grid' && cfg.dock !== 'off';
+        const slot = $(`wv-slot-${acc}`);
+        if (slot) slot.dataset.summaryDock = show ? cfg.dock : 'off';
+        const sumEl = $(`wv-summary-${acc}`);
+        if (sumEl) {
+            sumEl.hidden = !show;
+            sumEl.dataset.sumDensity = cfg.density;
+        }
+        const btn = document.querySelector(`[data-slot-act="summary"][data-slot="${acc}"]`);
+        if (btn) btn.classList.toggle('active-toggle', show);
+        applyWebviewZoom(acc);
+    }
+    window.hubUi?.renderWvSummaries?.();
+}
+
+function getEffectiveAccountOrder() {
+    const base = [...gridState.order];
+    if (accSortMode === 'manual') return base;
+    const rankIndex = new Map(base.map((acc, idx) => [acc, idx]));
+    const metricVal = (acc) => {
+        const s = snapshots[acc] || {};
+        if (accSortMode === 'level') return Number(s.trainer?.level || 0);
+        if (accSortMode === 'pokeLevel') return Number(s.activePokemon?.level || 0);
+        if (accSortMode === 'xp') return Number(s.stats?.xpPerHour || 0);
+        if (accSortMode === 'profit') return Number(s.stats?.netGoldPerHour ?? s.stats?.goldPerHour ?? 0);
+        return 0;
+    };
+    return [...ACCOUNTS].sort((a, b) => {
+        if (accSortMode === 'name') {
+            const cmp = accountNick(a).localeCompare(accountNick(b), 'pt-BR', { sensitivity: 'base' });
+            if (cmp !== 0) return cmp;
+        } else {
+            const diff = metricVal(b) - metricVal(a);
+            if (diff !== 0) return diff;
+        }
+        return (rankIndex.get(a) ?? a) - (rankIndex.get(b) ?? b);
+    });
+}
+
+function applyAccountTabOrder() {
+    const order = getEffectiveAccountOrder();
+    order.forEach((acc, idx) => {
+        const tab = document.querySelector(`.acc-tab[data-acc="${acc}"]`);
+        if (tab) tab.style.order = String(idx);
+    });
+    const selTop = $('accSortSelect');
+    if (selTop && selTop.value !== accSortMode) selTop.value = accSortMode;
+    const selGrid = $('gridSortSelect');
+    if (selGrid && selGrid.value !== accSortMode) selGrid.value = accSortMode;
+}
+
+function applySplitDock() {
+    const ws = $('workspace');
+    if (!ws) return;
+    ws.classList.toggle('split-dock-right', splitDockMode === 'right');
+    ws.classList.toggle('split-dock-hidden', splitDockMode === 'hidden');
+    const reopen = $('btnReopenControlPane');
+    if (reopen) reopen.classList.toggle('hidden', !(viewMode === 'split' && splitDockMode === 'hidden'));
+    document.querySelectorAll('[data-split-dock]').forEach((b) => {
+        const on = b.dataset.splitDock === splitDockMode;
+        b.classList.toggle('active-toggle', on);
+        if (b.getAttribute('role') === 'radio') b.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+}
 
 function clampSplit(v) {
     const n = Number(v);
@@ -452,7 +626,8 @@ function applyGridLayout() {
         return;
     }
 
-    let visible = gridState.order.filter((acc) => !gridState.hidden.includes(acc));
+    const order = getEffectiveAccountOrder();
+    let visible = order.filter((acc) => !gridState.hidden.includes(acc));
     if (gridState.max && visible.includes(gridState.max)) {
         visible = [gridState.max];
     } else {
@@ -526,7 +701,7 @@ function positionGridGutters(gutters) {
     const sr = stage.getBoundingClientRect();
     const tb = $('gridToolbar')?.getBoundingClientRect();
     const top = (tb ? tb.bottom : sr.top) - sr.top + 4;
-    const visible = gridState.order.filter((acc) => !gridState.hidden.includes(acc));
+    const visible = getEffectiveAccountOrder().filter((acc) => !gridState.hidden.includes(acc));
     const rect = (acc) => $(`wv-slot-${acc}`)?.getBoundingClientRect();
     if (gutters.v && visible.length >= 2) {
         const a = rect(visible[0]);
@@ -629,16 +804,72 @@ function wireGridDrag() {
             dragAcc = 0;
             clearMarks();
             if (!from || from === acc) return;
-            const order = [...gridState.order];
+            const order = getEffectiveAccountOrder();
             const i = order.indexOf(from);
             const j = order.indexOf(acc);
             if (i < 0 || j < 0) return;
             [order[i], order[j]] = [order[j], order[i]];
             gridState.order = order;
+            accSortMode = 'manual';
+            saveAccSortMode();
             saveGridState();
+            applyAccountTabOrder();
             applyGridLayout();
+            renderPanelsGrid();
         });
     }
+}
+
+function wireAccountTabDrag() {
+    const nav = $('accountTabs');
+    if (!nav) return;
+    let dragAcc = 0;
+    const clearTabMarks = () => {
+        nav.querySelectorAll('.acc-tab.tab-drag-src, .acc-tab.tab-drag-over').forEach((el) => {
+            el.classList.remove('tab-drag-src', 'tab-drag-over');
+        });
+    };
+    nav.querySelectorAll('.acc-tab[data-acc]').forEach((tab) => {
+        const acc = Number(tab.dataset.acc);
+        tab.addEventListener('dragstart', (ev) => {
+            dragAcc = acc;
+            ev.dataTransfer.effectAllowed = 'move';
+            try { ev.dataTransfer.setData('text/plain', String(acc)); } catch { /* ignore */ }
+            tab.classList.add('tab-drag-src');
+        });
+        tab.addEventListener('dragend', () => {
+            dragAcc = 0;
+            clearTabMarks();
+        });
+        tab.addEventListener('dragover', (ev) => {
+            if (!dragAcc || dragAcc === acc) return;
+            ev.preventDefault();
+            ev.dataTransfer.dropEffect = 'move';
+            tab.classList.add('tab-drag-over');
+        });
+        tab.addEventListener('dragleave', (ev) => {
+            if (!tab.contains(ev.relatedTarget)) tab.classList.remove('tab-drag-over');
+        });
+        tab.addEventListener('drop', (ev) => {
+            ev.preventDefault();
+            const from = dragAcc;
+            dragAcc = 0;
+            clearTabMarks();
+            if (!from || from === acc) return;
+            const order = getEffectiveAccountOrder();
+            const i = order.indexOf(from);
+            const j = order.indexOf(acc);
+            if (i < 0 || j < 0) return;
+            [order[i], order[j]] = [order[j], order[i]];
+            gridState.order = order;
+            accSortMode = 'manual';
+            saveAccSortMode();
+            saveGridState();
+            applyAccountTabOrder();
+            if (viewMode === 'grid') applyGridLayout();
+            renderPanelsGrid();
+        });
+    });
 }
 
 function renderGridToolbar() {
@@ -749,10 +980,11 @@ const PANEL_CARD_HTML = `
 function renderPanelsGrid() {
     const box = $('panelsGrid');
     if (!box || viewMode !== 'panels-grid') return;
-    const want = gridState.order.join(',');
+    const order = getEffectiveAccountOrder();
+    const want = order.join(',');
     if (box.dataset.order !== want) {
         box.dataset.order = want;
-        box.replaceChildren(...gridState.order.map((acc) => {
+        box.replaceChildren(...order.map((acc) => {
             const card = document.createElement('article');
             setClass(card, 'pcard');
             card.dataset.acc = String(acc);
@@ -836,7 +1068,8 @@ function renderPanelsGrid() {
 }
 
 function fmtShortNum(n) {
-    const v = Number(n || 0);
+    const v = Number(n);
+    if (!Number.isFinite(v)) return '0';
     const a = Math.abs(v);
     const one = (x) => String(Math.round(x * 10) / 10).replace('.', ',');
     if (a >= 1e9) return `${one(v / 1e9)} bi`;
@@ -1191,10 +1424,24 @@ async function initSoundControls() {
 function initGridControls() {
     $('gridToolbar')?.addEventListener('click', (ev) => {
         const layoutBtn = ev.target.closest('[data-grid-layout]');
+        const sumBtn = ev.target.closest('[data-grid-summary]');
         const showBtn = ev.target.closest('[data-grid-show]');
         if (layoutBtn) {
             gridState.layout = layoutBtn.dataset.gridLayout;
             gridState.max = 0;
+        } else if (sumBtn) {
+            const nextDock = sumBtn.dataset.gridSummary;
+            for (const acc of ACCOUNTS) slotSidebarState.grid[acc].dock = nextDock;
+            saveSlotSidebarState();
+            applySummaryLayout();
+            return;
+        } else if (ev.target.closest('#btnGridSummaryDensity')) {
+            const allCompact = ACCOUNTS.every((a) => slotSidebarState.grid[a]?.density === 'compact');
+            const nextDensity = allCompact ? 'full' : 'compact';
+            for (const acc of ACCOUNTS) slotSidebarState.grid[acc].density = nextDensity;
+            saveSlotSidebarState();
+            applySummaryLayout();
+            return;
         } else if (showBtn) {
             const acc = Number(showBtn.dataset.gridShow);
             gridState.hidden = gridState.hidden.filter((a) => a !== acc);
@@ -1205,16 +1452,88 @@ function initGridControls() {
             return;
         } else if (ev.target.closest('#btnGridReset')) {
             gridState = { layout: '2x2', order: [...ACCOUNTS], hidden: [], max: 0, colSplit: 0.5, rowSplit: 0.5 };
+            accSortMode = 'manual';
+            saveAccSortMode();
+            slotSidebarState = makeDefaultSlotSidebars();
+            saveSlotSidebarState();
         } else {
             return;
         }
         saveGridState();
+        applyAccountTabOrder();
         applyGridLayout();
+        applySummaryLayout();
         renderGridToolbar();
+    });
+    const onSortChange = (nextMode) => {
+        if (!ACC_SORT_MODES.includes(nextMode)) return;
+        accSortMode = nextMode;
+        saveAccSortMode();
+        applyAccountTabOrder();
+        if (viewMode === 'grid') applyGridLayout();
+        renderPanelsGrid();
+    };
+    $('accSortSelect')?.addEventListener('change', (ev) => onSortChange(ev.target.value));
+    $('gridSortSelect')?.addEventListener('change', (ev) => onSortChange(ev.target.value));
+    document.querySelectorAll('[data-split-dock]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const m = btn.dataset.splitDock;
+            if (!SPLIT_DOCK_MODES.includes(m)) return;
+            splitDockMode = m;
+            saveSplitDockMode();
+            applySplitDock();
+        });
+    });
+    $('btnReopenControlPane')?.addEventListener('click', () => {
+        splitDockMode = 'left';
+        saveSplitDockMode();
+        applySplitDock();
+    });
+    $('btnCloseBfBanner')?.addEventListener('click', () => {
+        const endsAt = snapshots[activeAccount]?.gameIntel?.blackFriday?.endsAt || 'active';
+        try { localStorage.setItem(DISMISSED_BF_KEY, String(endsAt)); } catch { /* ignore */ }
+        $('blackFridayBanner')?.classList.add('hidden');
+    });
+    $('probAlertsHost')?.addEventListener('click', (ev) => {
+        const xBtn = ev.target.closest('[data-dismiss-alert]');
+        if (!xBtn) return;
+        const alertId = xBtn.dataset.dismissAlert;
+        if (!alertId) return;
+        dismissedAlerts.add(`${activeAccount}:${alertId}`);
+        saveDismissedAlerts();
+        renderTopIntelBar(snapshots[activeAccount]);
+    });
+    $('browserStage')?.addEventListener('click', (ev) => {
+        const densBtn = ev.target.closest('[data-sum-density]');
+        if (densBtn) {
+            const acc = Number(densBtn.dataset.slot || densBtn.closest('.wv-summary')?.dataset?.slot || 0);
+            const nextDensity = densBtn.dataset.sumDensity;
+            if (ACCOUNTS.includes(acc) && SUMMARY_DENSITY_MODES.includes(nextDensity)) {
+                const bucket = getSlotSidebarBucket();
+                slotSidebarState[bucket][acc].density = nextDensity;
+                saveSlotSidebarState();
+                applySummaryLayout();
+            }
+            return;
+        }
+        const posBtn = ev.target.closest('[data-sum-pos]');
+        if (!posBtn) return;
+        const acc = Number(posBtn.dataset.slot || posBtn.closest('.wv-summary')?.dataset?.slot || 0);
+        const pos = posBtn.dataset.sumPos;
+        if (!ACCOUNTS.includes(acc)) return;
+        const bucket = getSlotSidebarBucket();
+        if (pos === 'close') {
+            slotSidebarState[bucket][acc].dock = 'off';
+        } else if (SUMMARY_DOCK_MODES.includes(pos)) {
+            slotSidebarState[bucket][acc].dock = pos;
+        }
+        saveSlotSidebarState();
+        applySummaryLayout();
     });
     wireGridGutter($('gridGutterV'), 'v');
     wireGridGutter($('gridGutterH'), 'h');
     wireGridDrag();
+    wireAccountTabDrag();
     for (const acc of ACCOUNTS) {
         const icon = $(`tabAudio-${acc}`);
         icon?.addEventListener('click', (ev) => {
@@ -1235,7 +1554,10 @@ function initGridControls() {
             if (viewMode === 'grid') positionGridGutters(gridGutters);
         }).observe(stage);
     }
+    applyAccountTabOrder();
+    applySplitDock();
     applyGridLayout();
+    applySummaryLayout();
     renderGridToolbar();
 }
 
@@ -1251,7 +1573,9 @@ function setViewMode(mode, { skipAutoClose = false } = {}) {
     if ((mode === 'panel-only' || mode === 'panels-grid') && !skipAutoClose && webviews.size > 0) {
         void closeAllEmbeddedToHeadless(mode);
     }
+    applySplitDock();
     applyGridLayout();
+    applySummaryLayout();
     renderGridToolbar();
     renderPanelsGrid();
     hubHook('afterViewMode', mode);
@@ -1415,6 +1739,14 @@ function readConfigForm() {
         liveMaxKickSlots: Number($('cLiveMaxKk').value) || 2,
         liveCustomTwitch: $('cLiveCustomTw').value.trim(),
         liveCustomKick: $('cLiveCustomKk').value.trim(),
+        autoCraftShinyEgg: Boolean($('cAutoCraftShinyEgg')?.checked ?? true),
+        autoSacrificeRedeem: Boolean($('cAutoSacrificeRedeem')?.checked),
+        autoOferendaOnFull: Boolean($('cAutoOferendaOnFull')?.checked),
+        autoRaidEnroll: Boolean($('cAutoRaidEnroll')?.checked),
+        autoShowdownEnroll: Boolean($('cAutoShowdownEnroll')?.checked),
+        autoMisticoEnter: Boolean($('cAutoMisticoEnter')?.checked),
+        autoExtendListings: Boolean($('cAutoExtendListings')?.checked),
+        autoOptimizeGear: Boolean($('cAutoOptimizeGear')?.checked),
     };
     return config;
 }
@@ -1444,7 +1776,14 @@ let lastModeWarnSig = '';
 function renderModeWarningsBanner(data) {
     const host = $('modeWarnBanner');
     if (!host) return;
-    const list = Array.isArray(data?.modeWarnings) ? data.modeWarnings : [];
+    const rawList = Array.isArray(data?.modeWarnings) ? data.modeWarnings : [];
+    const rawCodes = new Set(rawList.map((w) => String(w.code)));
+    for (const key of [...dismissedModeWarns]) {
+        if (key.startsWith(`${activeAccount}:`) && !rawCodes.has(key.slice(`${activeAccount}:`.length))) {
+            dismissedModeWarns.delete(key);
+        }
+    }
+    const list = rawList.filter((w) => !dismissedModeWarns.has(`${activeAccount}:${w.code}`));
     const sig = `${activeAccount}|${list.map((w) => `${w.code}:${w.severity}`).join(',')}`;
     if (sig === lastModeWarnSig) return;
     lastModeWarnSig = sig;
@@ -1457,13 +1796,27 @@ function renderModeWarningsBanner(data) {
     for (const w of list) {
         const card = document.createElement('div');
         setClass(card, `mode-warn-item ${w.severity === 'danger' ? 'danger' : 'warn'}`);
+        const head = document.createElement('div');
+        setClass(head, 'mode-warn-head');
         const title = document.createElement('div');
         setClass(title, 'mode-warn-title');
         setText(title, w.title);
+        const closeBtn = document.createElement('button');
+        closeBtn.type = 'button';
+        setClass(closeBtn, 'mode-warn-close');
+        closeBtn.title = 'Fechar aviso';
+        closeBtn.setAttribute('aria-label', 'Fechar aviso');
+        closeBtn.textContent = '×';
+        closeBtn.addEventListener('click', () => {
+            dismissedModeWarns.add(`${activeAccount}:${w.code}`);
+            lastModeWarnSig = '';
+            renderModeWarningsBanner(snapshots[activeAccount]);
+        });
+        head.append(title, closeBtn);
         const detail = document.createElement('div');
         setClass(detail, 'mode-warn-detail');
         setText(detail, w.detail);
-        card.append(title, detail);
+        card.append(head, detail);
         if (w.fixConfig) {
             const actRow = document.createElement('div');
             setClass(actRow, 'mode-warn-actions');
@@ -1512,7 +1865,9 @@ function renderConfigModePreview() {
         });
     } else {
         if (!caidosOn) {
-            const objLabel = objMode === 'pokedex' ? 'Completar Pokédex' : (objMode === 'topcatch' ? 'Modo Top Catch' : '');
+            const objLabel = objMode === 'pokedex'
+                ? 'Completar Pokédex'
+                : (objMode === 'topcatch' ? 'Modo Top Catch' : (objMode === 'bestiary' ? 'Bestiário' : (objMode === 'team-pvp' ? 'Montar Time PvP' : '')));
             items.push({
                 cls: objLabel ? 'danger' : 'warn',
                 title: objLabel ? `Limitação ativa: ${objLabel} exige captura automática` : 'Limitação ativa: Captura automática desligada',
@@ -1555,6 +1910,10 @@ function renderConfigModePreview() {
 }
 
 function renderTopTabsAndSlots() {
+    applyAccountTabOrder();
+    if (viewMode === 'grid' && accSortMode !== 'manual') {
+        applyGridLayout();
+    }
     for (const acc of ACCOUNTS) {
         const s = snapshots[acc];
         const status = s?.status || 'disconnected';
@@ -1791,8 +2150,9 @@ function renderActiveAccountPanel() {
                 const bagTxt = typeof d.bagQty === 'number' ? `bolsa: ${fmtNum(d.bagQty)}` : '';
                 const rateTxt = d.qty > 0 && d.perHour > 0 ? `${fmtDec(d.perHour)}/h` : (d.lastTime || '');
                 const meta = [rateTxt, bagTxt].filter(Boolean).join(' · ') || 'sem drop ainda';
-                return `<div class="drop-chip${d.qty > 0 ? ' hit' : ''}">` +
-                    `<div class="drop-chip-left"><span class="drop-chip-name" title="${escapeHtml(d.name)}">${escapeHtml(d.name)}</span>` +
+                const insight = buildDropInsightTitle(d, data);
+                return `<div class="drop-chip${d.qty > 0 ? ' hit' : ''}" title="${escapeHtml(insight)}">` +
+                    `<div class="drop-chip-left"><span class="drop-chip-name">${escapeHtml(d.name)}</span>` +
                     `<span class="drop-chip-meta">${escapeHtml(meta)}</span></div>` +
                     `<div class="drop-chip-right"><span class="drop-chip-qty">x${fmtNum(d.qty)}</span>` +
                     `<button type="button" class="drop-hide-btn" data-hide-drop="${escapeHtml(d.key)}" title="Ocultar este item">×</button></div></div>`;
@@ -1884,6 +2244,14 @@ function renderActiveAccountPanel() {
         $('cLiveMaxKk').value = cfg.liveMaxKickSlots ?? 2;
         $('cLiveCustomTw').value = cfg.liveCustomTwitch || '';
         $('cLiveCustomKk').value = cfg.liveCustomKick || '';
+        if ($('cAutoCraftShinyEgg')) $('cAutoCraftShinyEgg').checked = cfg.autoCraftShinyEgg !== false;
+        if ($('cAutoSacrificeRedeem')) $('cAutoSacrificeRedeem').checked = Boolean(cfg.autoSacrificeRedeem);
+        if ($('cAutoOferendaOnFull')) $('cAutoOferendaOnFull').checked = Boolean(cfg.autoOferendaOnFull);
+        if ($('cAutoRaidEnroll')) $('cAutoRaidEnroll').checked = Boolean(cfg.autoRaidEnroll);
+        if ($('cAutoShowdownEnroll')) $('cAutoShowdownEnroll').checked = Boolean(cfg.autoShowdownEnroll);
+        if ($('cAutoMisticoEnter')) $('cAutoMisticoEnter').checked = Boolean(cfg.autoMisticoEnter);
+        if ($('cAutoExtendListings')) $('cAutoExtendListings').checked = Boolean(cfg.autoExtendListings);
+        if ($('cAutoOptimizeGear')) $('cAutoOptimizeGear').checked = Boolean(cfg.autoOptimizeGear);
 
         const prefPots = new Set(Array.isArray(cfg.preferredPotionIds) ? cfg.preferredPotionIds.map(Number) : []);
         document.querySelectorAll('#cfgChips input[data-potion]').forEach((el) => {
@@ -1915,6 +2283,7 @@ function renderActiveAccountPanel() {
     renderTrainerCard(data);
     renderSniperCard(data);
     renderAdvisorCard(data);
+    renderGameIntel(data);
 
     // Connections
     const profSel = $('cBrowserProfile');
@@ -3534,6 +3903,697 @@ function renderCollectionCard(data = snapshots[activeAccount]) {
     }
 }
 
+const KNOWN_DROP_INSIGHTS = {
+    'ovo shiny': { origin: 'Unova+ (Nv >= 5.000)', chance: '0,05% a 0,20% (ou 10 fragmentos)', avg: '~1,5M a 4M gold' },
+    'fragmento de ovo shiny': { origin: 'Unova+ (Nv >= 5.000)', chance: '0,5% a 1,5% (10 = 1 Ovo)', avg: 'Crafta Ovo Shiny' },
+    'fragmento': { origin: 'Unova+ (Nv >= 5.000)', chance: '10 fragmentos = 1 Ovo Shiny', avg: 'Crafta Ovo Shiny' },
+    'lucky egg': { origin: 'Outland / Boss', chance: 'Raro', avg: '~800k+ gold' },
+    'shiny stone': { origin: 'Craft / Evento / Boss', chance: 'Raro', avg: '~500k+ gold' },
+    'master ball': { origin: 'Boss / Evento / Caixa', chance: 'Muito raro', avg: 'Captura garantida' },
+    'beast ball': { origin: 'Outland / Mercado', chance: 'Incomum', avg: '~25k gold' },
+    'mega stone': { origin: 'Boss / Craft Mega', chance: 'Rotação 3 dias', avg: 'Uso competitivo' },
+    'tm': { origin: 'Boss Lendário', chance: 'Rotação 3 dias', avg: 'Uso equipe PvP' },
+};
+
+function buildDropInsightTitle(d, data = snapshots[activeAccount]) {
+    if (!d) return '';
+    const nameLow = String(d.name || '').toLowerCase();
+    const cat = String(d.category || '').toLowerCase();
+    const known = KNOWN_DROP_INSIGHTS[nameLow]
+        || Object.entries(KNOWN_DROP_INSIGHTS).find(([k]) => nameLow.includes(k))?.[1]
+        || null;
+    const origin = d.origin || known?.origin || (
+        cat === 'outland' ? 'Outland'
+            : cat === 'boss' ? 'Boss Lendário'
+                : cat === 'unova' ? 'Unova+ (Nv >= 5.000)'
+                    : cat === 'stone' ? 'Drop de mapa (Stones)' : 'Drop de mapa'
+    );
+    const chance = d.chance || known?.chance || (d.rare ? 'Drop raro' : 'Drop comum');
+    let avgTxt = d.avgPrice ? `${fmtNum(d.avgPrice)} gold` : '';
+    if (!avgTxt) {
+        const advItems = (advisorLists.account === activeAccount ? advisorLists.data?.items : null) || data?.advisor?.items || [];
+        const match = advItems.find((it) => String(it.name || '').toLowerCase() === nameLow);
+        if (match?.gold?.avg > 0) avgTxt = `~${fmtNum(Math.round(match.gold.avg))} gold`;
+        else if (match?.orb?.avg > 0) avgTxt = `~${fmtNum(Math.round(match.orb.avg))} gemas`;
+        else if (known?.avg) avgTxt = known.avg;
+    }
+    const parts = [`${d.name}: ${fmtNum(d.qty || 0)} na sessão (${String(d.perHour || 0).replace('.', ',')}/h)`];
+    parts.push(`Origem: ${origin}`);
+    parts.push(`Chance: ${chance}`);
+    if (avgTxt) parts.push(`Preço médio: ${avgTxt}`);
+    return parts.join('\n');
+}
+window.nexoDropInsight = buildDropInsightTitle;
+window.nexoToast = showToast;
+
+const PREY_REGIONS_LIST = ['kanto', 'johto', 'hoenn', 'sinnoh', 'unova', 'kalos', 'alola', 'galar', 'paldea'];
+let preyCartelaActive = 1;
+const preySelectedByCartela = { 1: new Set(), 2: new Set() };
+
+function parseTargetTs(val) {
+    if (val == null || val === '') return 0;
+    if (typeof val === 'number') {
+        if (!Number.isFinite(val) || val <= 0) return 0;
+        return val < 1e12 ? val * 1000 : val;
+    }
+    const parsed = Date.parse(String(val));
+    return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function fmtCountdownShort(target) {
+    const ts = parseTargetTs(target);
+    if (!ts) return '';
+    const ms = Math.max(0, ts - Date.now());
+    if (ms <= 0) return 'agora';
+    return fmtEventCountdown(ms);
+}
+
+function calcCubicRefineCost(level) {
+    const n = Math.max(1, Math.floor(Number(level || 0)) + 1);
+    return 500 * n * n * n;
+}
+
+function getTeamChoices(data) {
+    const giTeam = Array.isArray(data?.gameIntel?.pvpMeta?.team) ? data.gameIntel.pvpMeta.team : [];
+    if (giTeam.length > 0) {
+        return giTeam.map((p) => ({
+            id: p.id,
+            name: p.name || `#${p.id}`,
+            level: p.level || 0,
+            refino: p.refino || {},
+        }));
+    }
+    const avail = Array.isArray(data?.xpTrainer?.availablePokemons) ? data.xpTrainer.availablePokemons : [];
+    return avail
+        .filter((p) => p.location === 'equipe')
+        .map((p) => ({ id: p.id, name: p.name || `#${p.id}`, level: p.level || 0, refino: {} }));
+}
+
+async function runGameAction(action, payload = {}, label = '') {
+    const res = await sendAction(action, payload);
+    if (res?.ok === false) {
+        showToast({
+            kind: 'error',
+            title: label || 'Ação falhou',
+            text: res.error || 'Não foi possível executar agora.',
+            account: activeAccount,
+        });
+    } else if (label) {
+        showToast({
+            kind: 'ok',
+            title: label,
+            text: res?.message || 'Comando enviado com sucesso.',
+            account: activeAccount,
+        });
+    }
+    return res;
+}
+
+function renderTopIntelBar(data) {
+    const gi = data?.gameIntel || {};
+    const bf = gi.blackFriday;
+    const bfBanner = $('blackFridayBanner');
+    if (bfBanner) {
+        let bfDismissedVal = '';
+        try { bfDismissedVal = localStorage.getItem(DISMISSED_BF_KEY) || ''; } catch { bfDismissedVal = ''; }
+        const bfKey = String(bf?.endsAt || 'active');
+        const active = Boolean(bf?.active) && bfDismissedVal !== bfKey;
+        bfBanner.classList.toggle('hidden', !active);
+        if (active) {
+            setText($('blackFridayPct'), `${bf.pct || 50}% OFF`);
+            setText($('blackFridayText'), 'Black Friday ativa no servidor');
+            const left = fmtCountdownShort(bf.endsAt);
+            setText($('blackFridayTimer'), left ? `Termina em ${left}` : '');
+        }
+    }
+
+    const seasEl = $('seasonalBadge');
+    const dz = gi.diaSazonal;
+    let shownAny = false;
+    if (seasEl) {
+        const hasDz = Boolean(dz && dz.tipo);
+        seasEl.classList.toggle('hidden', !hasDz);
+        if (hasDz) {
+            shownAny = true;
+            const left = fmtCountdownShort(dz.endsAt);
+            const multTxt = dz.activeMult && Number.isFinite(Number(dz.activeMult)) && Number(dz.activeMult) !== 1
+                ? ` · ${Number(dz.activeMult)}x`
+                : ' · 2x / ÷4';
+            setText(seasEl, `Dia ${dz.tipo}${multTxt}${left ? ` (${left})` : ''}`);
+            seasEl.classList.toggle('is-buff', Boolean(dz.activeHasBuff));
+            seasEl.title = `Dia Sazonal: ${dz.tipo}${dz.activeHasBuff ? ' (buff ativo para sua hunt)' : ''}${left ? ` | até 18h BRT (${left})` : ''}`;
+        }
+    }
+
+    const capEl = $('capBadge');
+    const cap = gi.cap;
+    if (capEl) {
+        const hasCap = Boolean(cap && (cap.depot != null || cap.colecao != null));
+        capEl.classList.toggle('hidden', !hasCap);
+        if (hasCap) {
+            shownAny = true;
+            const dObj = cap.depot && typeof cap.depot === 'object' ? cap.depot : null;
+            const cObj = cap.colecao && typeof cap.colecao === 'object' ? cap.colecao : null;
+            const dCount = Number(dObj ? dObj.count : cap.depot) || 0;
+            const dMax = Number(dObj ? dObj.max : cap.max) || 3000;
+            const cCount = Number(cObj ? cObj.count : cap.colecao) || 0;
+            const cMax = Number(cObj ? cObj.max : cap.max) || 3000;
+            const dPct = Math.round(Number(dObj?.pct ?? cap.depotPct ?? (dCount / Math.max(1, dMax)) * 100) || 0);
+            const cPct = Math.round(Number(cObj?.pct ?? cap.colecaoPct ?? (cCount / Math.max(1, cMax)) * 100) || 0);
+            const warn = Boolean(cap.anyWarn || dObj?.warn || cObj?.warn || dPct >= 90 || cPct >= 90);
+            const danger = Boolean(cap.anyDanger || dObj?.danger || cObj?.danger || dPct >= 95 || cPct >= 95);
+            setText(capEl, `Depot ${fmtNum(dCount)}/${fmtNum(dMax)} · Col ${fmtNum(cCount)}/${fmtNum(cMax)}`);
+            capEl.classList.toggle('is-warn', warn && !danger);
+            capEl.classList.toggle('is-danger', danger);
+            capEl.title = `Capacidade: Depot ${dPct}% · Coleção ${cPct}%`;
+        }
+    }
+
+    const healthEl = $('serverHealthBadge');
+    const sh = gi.serverHealth;
+    if (healthEl) {
+        const isOff = Boolean(sh && sh.ok === false);
+        healthEl.classList.toggle('hidden', !isOff);
+        if (isOff) {
+            shownAny = true;
+            setText(healthEl, 'Servidor offline');
+            healthEl.title = [sh.note || 'Falha em /saude', sh.checkedAt ? `Checado às ${new Date(sh.checkedAt).toLocaleTimeString('pt-BR')}` : ''].filter(Boolean).join(' · ');
+        }
+    }
+
+    const alertsHost = $('probAlertsHost');
+    const rawAlerts = Array.isArray(gi.probAlerts) ? gi.probAlerts : [];
+    const activeAlertIds = new Set(rawAlerts.map((a) => String(a.id)));
+    let alertsChanged = false;
+    for (const k of [...dismissedAlerts]) {
+        if (k.startsWith(`${activeAccount}:`) && !activeAlertIds.has(k.slice(`${activeAccount}:`.length))) {
+            dismissedAlerts.delete(k);
+            alertsChanged = true;
+        }
+    }
+    if (alertsChanged) saveDismissedAlerts();
+    const probAlerts = rawAlerts.filter((a) => !dismissedAlerts.has(`${activeAccount}:${a.id}`));
+    if (alertsHost) {
+        alertsHost.classList.toggle('hidden', probAlerts.length === 0);
+        if (probAlerts.length > 0) {
+            shownAny = true;
+            const html = probAlerts.map((a) => {
+                const lvl = a.level === 'warn' ? 'warn' : (a.level === 'good' ? 'good' : 'info');
+                return `<span class="intel-pill prob-${lvl}" title="${escapeHtml(a.detail || a.title)}">` +
+                    `<span>${escapeHtml(a.title)}</span>` +
+                    `<button type="button" class="pill-x" data-dismiss-alert="${escapeHtml(a.id)}" aria-label="Fechar aviso" title="Fechar aviso">×</button>` +
+                    `</span>`;
+            }).join('');
+            setHtml(alertsHost, html);
+        } else {
+            setHtml(alertsHost, '');
+        }
+    }
+
+    $('accIntelBar')?.classList.toggle('hidden', !shownAny);
+
+    const claimBtn = $('btnClaimAll');
+    const cp = gi.claimPending;
+    if (claimBtn) {
+        const count = Number(cp?.count || 0);
+        const isOnline = data?.status === 'connected' || data?.status === 'bridge';
+        claimBtn.disabled = !isOnline && count === 0;
+        claimBtn.classList.toggle('claim-ready', count > 0);
+        setText(claimBtn, count > 0 ? `Resgatar tudo (${count})` : 'Resgatar tudo');
+        if (cp) {
+            const items = [];
+            if (cp.pass) items.push(`Passe: ${cp.pass}`);
+            if (cp.sacrifice) items.push(`Sacrifício: ${cp.sacrifice}`);
+            if (cp.affiliate) items.push(`Afiliado: ${cp.affiliate}`);
+            claimBtn.title = items.length ? `Pendente: ${items.join(' · ')}` : 'Resgatar passe, sacrifício e recompensas pendentes';
+        }
+    }
+}
+
+function renderPokeAndHuntIntel(data) {
+    const gi = data?.gameIntel || {};
+    const asm = gi.activeStatsMeta;
+    const statsRow = $('activeStatsRow');
+    if (statsRow) {
+        const team = getTeamChoices(data);
+        const showRow = Boolean(asm || team.length > 0);
+        statsRow.classList.toggle('hidden', !showRow);
+        if (showRow) {
+            const badges = $('activeStatBadges');
+            if (badges) {
+                if (asm) {
+                    const potVal = Number(asm.potencia);
+                    const multNum = Number(asm.potenciaMult);
+                    const potBonusPct = Number.isFinite(multNum) && multNum > 1 ? Math.round((multNum - 1) * 100) : 0;
+                    const potTxt = Number.isFinite(potVal) && potVal > 0 ? `P${potVal}${potBonusPct > 0 ? ` (+${potBonusPct}%)` : ''}` : '';
+                    const cdrTxt = asm.speedCdrPct != null && Number.isFinite(Number(asm.speedCdrPct))
+                        ? `CDR ${asm.speedCdrPct}%/${asm.maxSpeedCdrPct || 7}%`
+                        : '';
+                    const refTxt = asm.refino != null && typeof asm.refino !== 'object' ? `Refino +${asm.refino}` : '';
+                    const tmTxt = [asm.tmElemental ? 'Z-Move' : '', asm.tmFisico ? 'Físico' : ''].filter(Boolean).join(' · ');
+                    const html = [
+                        potTxt ? `<span class="stat-badge pot" title="Potência do Pokémon ativo">${escapeHtml(potTxt)}</span>` : '',
+                        cdrTxt ? `<span class="stat-badge cdr" title="Base Speed ${asm.baseSpeed ?? '?'} + IV ${asm.ivSpeed ?? '?'} (joelho 120)">${escapeHtml(cdrTxt)}</span>` : '',
+                        refTxt ? `<span class="stat-badge">${escapeHtml(refTxt)}</span>` : '',
+                        tmTxt ? `<span class="stat-badge tm" title="TMs equipados">${escapeHtml(tmTxt)}</span>` : '',
+                    ].filter(Boolean).join('');
+                    setHtml(badges, html);
+                } else {
+                    setHtml(badges, '');
+                }
+            }
+            const teamSel = $('quickTeamSelect');
+            if (teamSel && document.activeElement !== teamSel) {
+                const sig = `${activeAccount}|${team.map((p) => `${p.id}:${p.name}:${p.level}`).join(';')}`;
+                if (teamSel.dataset.sig !== sig) {
+                    teamSel.dataset.sig = sig;
+                    teamSel.replaceChildren(
+                        ...(team.length
+                            ? team.map((p) => new Option(`${p.name} (Nv ${p.level})`, String(p.id)))
+                            : [new Option('Sem equipe', '')])
+                    );
+                }
+                const curId = asm?.id ?? data?.activePokemon?.id;
+                if (curId != null && teamSel.value !== String(curId)) teamSel.value = String(curId);
+                teamSel.disabled = team.length === 0;
+            }
+            const zBtn = $('btnQuickZMove');
+            if (zBtn) {
+                const activeId = asm?.id ?? data?.activePokemon?.id ?? '';
+                const isFisico = Boolean(asm?.tmFisico && !asm?.tmElemental);
+                zBtn.disabled = !activeId;
+                zBtn.dataset.pokeId = String(activeId);
+                zBtn.dataset.fisico = isFisico ? '1' : '0';
+                setText(zBtn, isFisico ? 'Z-Move: Físico' : 'Z-Move: Especial');
+            }
+        }
+    }
+
+    const pity = gi.pityShiny;
+    const egg = gi.eggStep;
+    const out = gi.outlandTier;
+    const best = gi.bestiary;
+    const hasIntel = Boolean(pity || egg || out || (best?.species?.length > 0));
+    $('huntIntelBox')?.classList.toggle('hidden', !hasIntel);
+
+    const pityBox = $('pityShinyBox');
+    if (pityBox) {
+        pityBox.classList.toggle('hidden', !pity);
+        if (pity) {
+            const pend = Number(pity.pendentes || 0);
+            const hasResumo = pity.bolas != null && pity.maxBolas != null;
+            const left = pity.expiraEm ? fmtCountdownShort(pity.expiraEm) : '';
+            let mainTxt = 'Inativo';
+            let subTxt = '+50 Beast Balls/h comprada sem Shiny';
+            if (pity.garantido) {
+                mainTxt = `Garantia ativa (${pity.bolas}/${pity.maxBolas})`;
+                subTxt = '+50 Beast Balls/h comprada sem Shiny';
+            } else if (pity.ativo || Number(pity.bolas) > 0) {
+                mainTxt = hasResumo
+                    ? `${fmtNum(pity.bolas)} / ${fmtNum(pity.maxBolas)} bolas (${pity.pct ?? 0}%)`
+                    : `${pend}h pendente${pend > 1 ? 's' : ''}`;
+                subTxt = `${left ? `Fecha hora em ${left} · ` : ''}+50 Beast Balls/h comprada sem Shiny`;
+            } else if (pend > 0) {
+                mainTxt = `${pend}h pendente${pend > 1 ? 's' : ''}`;
+                subTxt = '+50 Beast Balls/h comprada sem Shiny';
+            }
+            if (pity.notice?.message) subTxt = `${pity.notice.message} · ${subTxt}`;
+            const html = `<span class="intel-mini-lbl">Garantia Lure (Pity Shiny)</span>` +
+                `<b>${escapeHtml(mainTxt)}</b>` +
+                `<small>${escapeHtml(subTxt)}</small>`;
+            setHtml(pityBox, html);
+        }
+    }
+
+    const eggBox = $('eggStepBox');
+    if (eggBox) {
+        eggBox.classList.toggle('hidden', !egg);
+        if (egg) {
+            const frags = Number(egg.fragments || 0);
+            const delta = Number(egg.deltaLevel || 0);
+            const warnNear = delta > 0 && delta <= 250 ? `<span class="egg-near">Faltam ${fmtNum(delta)} nv p/ Degrau ${egg.nextStep}</span>` : '';
+            const btnHtml = frags >= 10
+                ? `<button type="button" class="btn sm primary" data-intel-act="craft-shiny-egg">Fabricar Ovo Shiny (${frags}/10)</button>`
+                : `<small>Fragmentos: ${frags}/10</small>`;
+            const rawChance = egg.chance;
+            const chanceNum = Number(rawChance);
+            const chanceTxt = typeof rawChance === 'number' && Number.isFinite(chanceNum)
+                ? `${(chanceNum <= 1 ? chanceNum * 100 : chanceNum).toFixed(2).replace('.', ',')}%`
+                : (rawChance ? String(rawChance) : '0%');
+            const html = `<span class="intel-mini-lbl">Degrau Ovo Shiny</span>` +
+                `<b>Degrau ${egg.step || 0}/${egg.maxSteps || 32} (${escapeHtml(chanceTxt)})</b>` +
+                `${warnNear}${btnHtml}`;
+            setHtml(eggBox, html);
+        }
+    }
+
+    const outBox = $('outlandTierBox');
+    if (outBox) {
+        outBox.classList.toggle('hidden', !out);
+        if (out) {
+            const sel = $('outlandTierSel');
+            const tiers = Array.isArray(out.tiers) && out.tiers.length > 0
+                ? out.tiers
+                : Array.from({ length: 40 }, (_, i) => ({ tier: i + 1, label: `Tier ${i + 1}` }));
+            const sig = tiers.map((t) => `${t.tier ?? t}:${t.label || ''}`).join(';');
+            if (sel && sel.dataset.sig !== sig) {
+                sel.dataset.sig = sig;
+                sel.replaceChildren(...tiers.map((t) => {
+                    const val = typeof t === 'object' ? (t.tier ?? t.id ?? t.value) : t;
+                    const lbl = typeof t === 'object' ? (t.label || `Tier ${val}`) : `Tier ${t}`;
+                    return new Option(lbl, String(val));
+                }));
+            }
+            if (sel && document.activeElement !== sel && out.current != null) {
+                sel.value = String(out.current);
+            }
+            const sugObj = out.suggested && typeof out.suggested === 'object' ? out.suggested : null;
+            const sugLabel = sugObj
+                ? (sugObj.label || `Tier ${sugObj.tier}`)
+                : (out.suggested != null ? `Tier ${out.suggested}` : '');
+            const sugMult = sugObj?.mult ?? out.mult;
+            const hint = sugLabel
+                ? `Ideal: ${sugLabel}${sugMult ? ` (${sugMult}x)` : ''}`
+                : (out.label || '');
+            setText($('outlandTierHint'), hint);
+        }
+    }
+
+    const bestBox = $('bestiaryBox');
+    if (bestBox) {
+        const list = Array.isArray(best?.species) ? best.species : [];
+        bestBox.classList.toggle('hidden', list.length === 0);
+        if (list.length > 0) {
+            const rows = list.slice(0, 6).map((sp) => {
+                const kills = Number(sp.kills || 0);
+                const nextTarget = Number(sp.next?.abates ?? sp.nextTarget ?? 0);
+                const tierVal = sp.tier ?? sp.step ?? 0;
+                const nextPctVal = sp.next?.bp != null
+                    ? (Number(sp.next.bp) / 100)
+                    : Number(sp.nextPct ?? sp.bonusPct ?? 0);
+                const pct = Number.isFinite(Number(sp.pct))
+                    ? Math.min(100, Math.max(0, Math.round(Number(sp.pct))))
+                    : (nextTarget > 0 ? Math.min(100, Math.round((kills / nextTarget) * 100)) : 100);
+                const etaMinNum = sp.etaMin != null && Number.isFinite(Number(sp.etaMin)) ? Math.round(Number(sp.etaMin)) : null;
+                const etaTxt = etaMinNum != null && etaMinNum > 0 ? ` · ~${fmtNum(etaMinNum)}m` : '';
+                const spLabel = sp.name || sp.key || (sp.speciesId ? `#${sp.speciesId}` : '?');
+                return `<div class="bestiary-row">` +
+                    `<div class="bestiary-head"><span><b>${escapeHtml(spLabel)}</b> (degrau ${tierVal})</span>` +
+                    `<small>${fmtNum(kills)}${nextTarget > 0 ? ` / ${fmtNum(nextTarget)}` : ''} · +${nextPctVal}%${etaTxt}</small></div>` +
+                    `<div class="bestiary-bar"><span style="width:${pct}%"></span></div></div>`;
+            }).join('');
+            const totalBadge = best.nextPctTotal != null && Number.isFinite(Number(best.nextPctTotal))
+                ? `<span class="hint-text">Próximo ganho total: +${best.nextPctTotal}%</span>`
+                : '';
+            setHtml(bestBox, `<div class="bestiary-title"><b>Bestiário da Hunt</b>${totalBadge}</div>${rows}`);
+        }
+    }
+}
+
+function renderEvolutionDexReady(data) {
+    const box = $('evolutionDexBox');
+    if (!box) return;
+    const list = Array.isArray(data?.gameIntel?.evolutionDexReady) ? data.gameIntel.evolutionDexReady : [];
+    box.classList.toggle('hidden', list.length === 0);
+    if (!list.length) {
+        setHtml(box, '');
+        return;
+    }
+    const html = `<div class="evo-dex-head"><b>Pokédex por Evolução (${list.length} pronta${list.length > 1 ? 's' : ''})</b></div>` +
+        list.slice(0, 8).map((ev) => (
+            `<div class="evo-dex-row">` +
+            `<span><b>${escapeHtml(ev.fromName)}</b> -> <b>${escapeHtml(ev.toName)}</b>` +
+            `<small>Nv ${fmtNum(ev.currentLevel)}/${fmtNum(ev.requiredLevel)}${ev.stoneNeeded ? ` · ${escapeHtml(ev.stoneNeeded)}` : ''}</small></span>` +
+            `<button type="button" class="btn sm primary" data-evo-poke="${escapeHtml(ev.pokemonId)}" data-evo-alvo="${escapeHtml(ev.alvoId)}" ${ev.ready === false ? 'disabled' : ''}>Evoluir</button>` +
+            `</div>`
+        )).join('');
+    setHtml(box, html);
+}
+
+function renderEventsMetaCard(data) {
+    const gi = data?.gameIntel || {};
+    const events = gi.upcomingEvents || {};
+    const bossRot = gi.bossRotation || {};
+    const safari = gi.safari || {};
+    const gyms = gi.gyms || {};
+    const pvp = gi.pvpMeta || {};
+
+    // Agenda
+    const agPane = $('intelAgendaPane');
+    if (agPane) {
+        const r = events.raid || {};
+        const sw = events.showdown || {};
+        const cp = events.camp || {};
+        const agHtml = `
+          <div class="intel-event-list">
+            <div class="intel-event-row">
+              <div>
+                <b>Raid (${escapeHtml(r.dayLabel || 'Segunda 16h')})</b>
+                <small>${r.enrolled ? 'Inscrito ✓' : 'Não inscrito'}${r.hasToken ? ' · Token OK' : ''}${r.closesAt ? ` · fecha em ${fmtCountdownShort(r.closesAt)}` : ''}</small>
+              </div>
+              <button type="button" class="btn sm ${r.enrolled ? '' : 'primary'}" data-intel-act="raid-enroll" ${r.enrolled ? 'disabled' : ''}>${r.enrolled ? 'Inscrito' : 'Inscrever'}</button>
+            </div>
+            <div class="intel-event-row">
+              <div>
+                <b>Showdown (${escapeHtml(sw.dayLabel || 'Quarta 20h')})</b>
+                <small>${sw.enrolled ? 'Inscrito ✓' : (sw.unlocked === false ? 'Bloqueado' : 'Disponível')}${sw.closesAt ? ` · fecha em ${fmtCountdownShort(sw.closesAt)}` : ''}</small>
+              </div>
+              <button type="button" class="btn sm ${sw.enrolled ? '' : 'primary'}" data-intel-act="showdown-enroll" ${sw.enrolled || sw.unlocked === false ? 'disabled' : ''}>${sw.enrolled ? 'Inscrito' : 'Inscrever'}</button>
+            </div>
+            <div class="intel-event-row">
+              <div>
+                <b>Campeonatos</b>
+                <small>${escapeHtml(cp.nextLabel || 'Sem data informada')}${cp.enrolled ? ' · Inscrito ✓' : ''}</small>
+              </div>
+              <button type="button" class="btn sm ${cp.enrolled ? '' : 'primary'}" data-intel-act="camp-enroll" ${cp.enrolled ? 'disabled' : ''}>${cp.enrolled ? 'Inscrito' : 'Inscrever'}</button>
+            </div>
+          </div>`;
+        setHtml(agPane, agHtml);
+    }
+
+    // Bosses Lendários (rotação 3 dias)
+    const bsPane = $('intelBossesPane');
+    if (bsPane) {
+        const regions = Array.isArray(bossRot.regions) ? bossRot.regions : [];
+        const headTxt = `Rotação: ${escapeHtml(bossRot.dayKey || '-')}${bossRot.nextAt ? ` · próxima em ${fmtCountdownShort(bossRot.nextAt)}` : ''}`;
+        const regHtml = regions.length
+            ? regions.map((reg) => {
+                const bosses = Array.isArray(reg.bosses) ? reg.bosses : [];
+                if (bosses.length === 0) {
+                    const regName = reg.region || reg.nome || reg.regiao || '?';
+                    const prize = reg.prize?.label || reg.prize?.tipo || (typeof reg.prize === 'string' ? reg.prize : '-');
+                    const ch = Number(reg.chances || 1);
+                    return `<div class="boss-reg-card">` +
+                        `<div class="boss-reg-head"><b>${escapeHtml(String(regName).toUpperCase())}</b>` +
+                        `<small>${escapeHtml(String(prize))} · ${ch}x</small></div></div>`;
+                }
+                const bRows = bosses.map((b) => (
+                    `<div class="boss-row">` +
+                    `<div class="boss-info"><b>${escapeHtml(b.key || `#${b.pokeId}`)}</b><span class="boss-prize">${escapeHtml(b.premio || '-')}</span></div>` +
+                    `<div class="boss-acts">` +
+                    `<button type="button" class="btn sm primary" data-boss-enter="${escapeHtml(b.key)}" ${reg.unlocked === false ? 'disabled' : ''}>Entrar</button>` +
+                    `<button type="button" class="btn sm" data-boss-leave="1">Sair</button>` +
+                    `<label class="pill-chk"><input type="checkbox" data-boss-auto="${escapeHtml(b.key)}" ${b.auto ? 'checked' : ''} /> Auto</label>` +
+                    `</div></div>`
+                )).join('');
+                return `<div class="boss-reg-card${reg.unlocked === false ? ' locked' : ''}">` +
+                    `<div class="boss-reg-head"><b>${escapeHtml(reg.nome || reg.regiao || reg.region)}</b>` +
+                    `<small>Nv ${fmtNum(reg.nivelMin || 0)} · Par ${escapeHtml(reg.par || '-')} · ${reg.chances || 1}x</small></div>` +
+                    `${bRows}</div>`;
+            }).join('')
+            : '<div class="hint-text">Conecte a conta para carregar os bosses de hoje.</div>';
+        setHtml(bsPane, `<div class="intel-pane-sub">${headTxt}</div>${regHtml}`);
+    }
+
+    // Safari & Místico
+    const sfPane = $('intelSafariPane');
+    if (sfPane) {
+        const batchObj = safari.optimalBatch && typeof safari.optimalBatch === 'object' ? safari.optimalBatch : null;
+        const batch = Number(batchObj ? batchObj.ticketsToUse : safari.optimalBatch) || 6;
+        const tickets = Number(safari.tickets || 0);
+        const sfActive = fmtCountdownShort(safari.activeUntil);
+        const multVal = Number(safari.multShiny || 3.04);
+        const multTxt = (Number.isFinite(multVal) ? multVal : 3.04).toFixed(2).replace('.', ',');
+        const sfHtml = `
+          <div class="safari-grid">
+            <div class="safari-card">
+              <b>Safari</b>
+              <div class="hint-text">Tickets: <b>${fmtNum(tickets)}</b> · Lote ótimo: <b>${fmtNum(batch)}</b> (múltiplo de 6)</div>
+              <div class="hint-text">Bônus: <b>+${fmtNum(safari.bonusMin || 30)}m</b> · Shiny: <b>${multTxt}x</b>${sfActive ? ` · ativo (${sfActive})` : ''}</div>
+              <div class="util-btn-row" style="margin-top:6px;">
+                <button type="button" class="btn sm primary" data-safari-enter="${batch}" ${tickets < 6 ? 'disabled' : ''}>Entrar Safari (${batch})</button>
+              </div>
+            </div>
+            <div class="safari-card">
+              <b>Místico</b>
+              <div class="hint-text">Entrada rápida para farm especial e eventos do Místico.</div>
+              <div class="util-btn-row" style="margin-top:6px;">
+                <button type="button" class="btn sm teal" data-intel-act="mistico-enter">Entrar no Místico</button>
+              </div>
+            </div>
+          </div>`;
+        setHtml(sfPane, sfHtml);
+    }
+
+    // Ginásios
+    const gyPane = $('intelGymsPane');
+    if (gyPane) {
+        const podiums = Array.isArray(gyms.podiums) ? gyms.podiums : [];
+        const cdLeft = fmtCountdownShort(gyms.nextCooldownAt);
+        const podHtml = podiums.length
+            ? podiums.map((p) => (
+                `<div class="gym-row">` +
+                `<span><b>${escapeHtml(p.tipo || '?')}</b> · ${fmtNum(p.lugar ?? p.pos ?? 1)}º lugar${p.pct != null ? ` (+${fmtNum(p.pct)}%)` : ''}</span>` +
+                `<button type="button" class="btn sm" data-gym-challenge="${escapeHtml(p.tipo || '')}">Desafiar</button>` +
+                `</div>`
+            )).join('')
+            : '<div class="hint-text">Nenhum pódio ativo no momento.</div>';
+        const gyHtml = `
+          <div class="intel-pane-sub">
+            <span>Buff ativo: <b>+${fmtNum(gyms.activeBuffPct || 0)}%</b>${cdLeft ? ` · Cooldown 24h: ${cdLeft}` : ''}</span>
+            <button type="button" class="btn sm" data-intel-act="gym-info">Atualizar</button>
+          </div>
+          ${podHtml}
+          <div class="util-act-row" style="margin-top:6px;">
+            <select id="gymChallengeTypeSel" aria-label="Tipo do ginásio para desafiar">
+              ${['normal', 'fire', 'water', 'grass', 'electric', 'ice', 'fighting', 'poison', 'ground', 'flying', 'psychic', 'bug', 'rock', 'ghost', 'dragon', 'dark', 'steel', 'fairy']
+                .map((t) => `<option value="${t}">Ginásio: ${t}</option>`).join('')}
+            </select>
+            <button type="button" class="btn sm primary" id="btnGymChallengeSel">Desafiar</button>
+          </div>`;
+        setHtml(gyPane, gyHtml);
+    }
+
+    // PvP Meta (29/11/2026) + Montar Time PvP
+    const pvpPane = $('intelPvpPane');
+    if (pvpPane) {
+        const team = Array.isArray(pvp.team) ? pvp.team : [];
+        const gBoostLeft = fmtCountdownShort(pvp.guildBoostUntil);
+        const sinceDate = pvp.passivesSince
+            ? (typeof pvp.passivesSince === 'number'
+                ? new Date(pvp.passivesSince).toLocaleDateString('pt-BR')
+                : String(pvp.passivesSince))
+            : '';
+        const head = `<div class="intel-pane-sub">
+          <span>Passivas: <b>${pvp.passivesActive ? 'Ativas' : 'Inativas'}</b>${sinceDate ? ` (${escapeHtml(sinceDate)})` : ''} · Guilda: <b>+${fmtNum(pvp.guildBoostPct || 0)}%</b>${gBoostLeft ? ` (${gBoostLeft})` : ''}</span>
+          <button type="button" class="btn sm primary" data-intel-act="pvp-save-formation" ${team.length === 0 ? 'disabled' : ''}>Salvar formação</button>
+        </div>`;
+        const rows = team.length
+            ? team.map((m) => {
+                const passiveName = typeof m.passive === 'object' ? m.passive?.nome : m.passive;
+                const passiveOn = Number(m.bst || 999) <= 500 || Boolean(passiveName);
+                const gymStat = m.powerGym != null ? `Ginásio: <b>${fmtNum(m.powerGym)}</b>` : `Nv Ginásio: <b>${fmtNum(m.arenaLevel ?? m.level ?? 0)}</b>`;
+                const warStat = m.powerWar != null ? `Guerra: <b>${fmtNum(m.powerWar)}</b>` : `Nv Guerra: <b>${fmtNum(m.warLevel ?? m.level ?? 0)}</b>`;
+                return `<div class="pvp-row">` +
+                    `<div class="pvp-row-top"><b>${escapeHtml(m.name)}</b> <small>Nv ${fmtNum(m.level)}${m.bst ? ` · BST ${fmtNum(m.bst)}` : ''}</small>` +
+                    `${passiveOn ? `<span class="pvp-passive-badge">${escapeHtml(passiveName || 'Passiva <=500')}</span>` : ''}</div>` +
+                    `<div class="pvp-row-sub">${gymStat} · ${warStat}` +
+                    `${m.tmElemental ? ' · Z-Move' : ''}${m.tmFisico ? ' · Físico' : ''}</div>` +
+                    `</div>`;
+            }).join('')
+            : '<div class="hint-text">Conecte a conta para analisar a equipe no meta PvP.</div>';
+
+        const tb = gi.teamBuilder || null;
+        const curObj = data?.config?.farmObjective || 'off';
+        let tbHtml = '';
+        if (tb) {
+            const canApply = Array.isArray(tb.suggestedFormation?.pokemonIds) && tb.suggestedFormation.pokemonIds.length > 0;
+            const slotsHtml = (tb.slots || []).map((s) => {
+                const statusBadge = s.ready
+                    ? '<span class="pvp-tb-badge ready">Pronto</span>'
+                    : `<span class="pvp-tb-badge pending">${escapeHtml(s.huntName ? `Caçar: ${s.huntName}` : 'Pendente')}</span>`;
+                const typesTxt = Array.isArray(s.types) && s.types.length ? s.types.join('/') : '';
+                const pasTxt = s.passive?.nome ? `<span class="pvp-passive-badge">${escapeHtml(s.passive.nome)}</span>` : '';
+                return `<div class="pvp-tb-slot">` +
+                    `<div class="pvp-row-top"><b>#${s.slot} ${escapeHtml(s.name)}</b>${typesTxt ? ` <small>${escapeHtml(typesTxt)}</small>` : ''}${pasTxt}${statusBadge}</div>` +
+                    `<div class="pvp-row-sub">${escapeHtml(s.reason || '')}</div>` +
+                    `</div>`;
+            }).join('');
+            tbHtml = `<div class="pvp-tb-box">` +
+                `<div class="intel-pane-sub">` +
+                `<span><b>Montar Time PvP (${tb.readyCount || 0}/5)</b></span>` +
+                `<div style="display:flex;gap:5px;flex-wrap:wrap;">` +
+                (curObj !== 'team-pvp'
+                    ? '<button type="button" class="btn sm teal" data-intel-act="start-team-pvp">Farmar pendentes</button>'
+                    : '<span class="pvp-tb-badge ready">Modo ativo</span>') +
+                `<button type="button" class="btn sm primary" data-intel-act="apply-pvp-team" ${canApply ? '' : 'disabled'}>Aplicar time no PvP</button>` +
+                `</div></div>` +
+                `<div class="hint-text" style="margin-bottom:5px;">${escapeHtml(tb.summaryText || '')}</div>` +
+                slotsHtml +
+                `</div>`;
+        }
+        setHtml(pvpPane, head + rows + tbHtml);
+    }
+}
+
+function renderAutomationExtras(data) {
+    const gi = data?.gameIntel || {};
+    // Prey regions grid
+    const pGrid = $('preyRegionsGrid');
+    if (pGrid) {
+        const activeSet = preySelectedByCartela[preyCartelaActive];
+        const html = PREY_REGIONS_LIST.map((r) => {
+            const on = activeSet.has(r);
+            return `<button type="button" class="filter-pill${on ? ' active' : ''}" data-prey-reg="${r}">${r.charAt(0).toUpperCase() + r.slice(1)}</button>`;
+        }).join('');
+        setHtml(pGrid, html);
+        const count = activeSet.size;
+        setText($('preyRegionCount'), `${count}/9 selecionadas (mín. 2)`);
+        const applyBtn = $('btnApplyPreyRegions');
+        if (applyBtn) applyBtn.disabled = count < 2;
+    }
+
+    // Bikes & Houses
+    const bh = gi.bikesAndHouses;
+    const bhEl = $('bikeHouseSummary');
+    if (bhEl) {
+        if (bh) {
+            const bestTxt = typeof bh.bestBikeUpgrade === 'object' ? (bh.bestBikeUpgrade?.name || `#${bh.bestBikeUpgrade?.id}`) : (bh.bestBikeUpgrade || 'nenhum upgrade');
+            setText(bhEl, `Bike equipada: ${bh.equippedBikeId || '-'} · Melhor upgrade: ${bestTxt} · Bikes: ${bh.bikesCount || 0} (craft: ${bh.craftableBikes || 0}) · Casas: ${bh.housesUsed || 0}/${bh.maxHouses || 5} (total ${bh.housesTotal || 0}, craft: ${bh.craftableHouses || 0})`);
+        } else {
+            setText(bhEl, 'Conecte a conta para ver bicicletas e casas.');
+        }
+    }
+
+    // Refino Cúbico
+    const team = getTeamChoices(data);
+    const refSel = $('refinePokeSel');
+    if (refSel && document.activeElement !== refSel) {
+        const sig = `${activeAccount}|${team.map((p) => `${p.id}:${p.name}`).join(';')}`;
+        if (refSel.dataset.sig !== sig) {
+            refSel.dataset.sig = sig;
+            refSel.replaceChildren(
+                ...(team.length
+                    ? team.map((p) => new Option(`${p.name} (Nv ${p.level})`, String(p.id)))
+                    : [new Option('Sem Pokémon', '')])
+            );
+        }
+    }
+    const statSel = $('refineStatSel');
+    const chosenId = refSel?.value;
+    const chosenPoke = team.find((p) => String(p.id) === String(chosenId)) || team[0];
+    const asm = gi.activeStatsMeta;
+    const chosenStat = statSel?.value || 'hp';
+    const curRefMap = (asm && String(asm.id) === String(chosenPoke?.id) && typeof asm.refino === 'object')
+        ? asm.refino
+        : (chosenPoke?.refino || {});
+    const curLvl = Number(curRefMap?.[chosenStat] ?? (typeof asm?.refino === 'number' ? asm.refino : 0)) || 0;
+    const nextCost = calcCubicRefineCost(curLvl);
+    const sugTxt = asm?.nextRefine ? ` · Sugestão ótima: ${typeof asm.nextRefine === 'object' ? `${asm.nextRefine.stat} (${fmtNum(asm.nextRefine.cost || calcCubicRefineCost(asm.nextRefine.level || 0))} gold)` : asm.nextRefine}` : '';
+    setText($('refinePreview'), chosenPoke
+        ? `${chosenPoke.name} · ${chosenStat} Nv ${curLvl} -> ${curLvl + 1}: ${fmtNum(nextCost)} gold${sugTxt}`
+        : 'Conecte a conta para calcular o próximo refino ótimo.');
+}
+
+function renderGameIntel(data) {
+    if (!data) return;
+    renderTopIntelBar(data);
+    renderPokeAndHuntIntel(data);
+    renderEvolutionDexReady(data);
+    renderEventsMetaCard(data);
+    renderAutomationExtras(data);
+}
+
 function formatBytesMb(bytes) {
     const n = Number(bytes || 0);
     if (n <= 0) return '';
@@ -4389,6 +5449,12 @@ function wireEvents() {
             const act = btn.dataset.slotAct;
             if (act === 'mute') {
                 setAccountMuted(acc, !isAccountMuted(acc));
+            } else if (act === 'summary') {
+                const bucket = getSlotSidebarBucket();
+                const cur = getSlotSidebarCfg(acc);
+                slotSidebarState[bucket][acc].dock = cur.dock === 'off' ? 'right' : 'off';
+                saveSlotSidebarState();
+                applySummaryLayout();
             } else if (act === 'max') {
                 gridState.max = gridState.max === acc ? 0 : acc;
                 gridState.hidden = gridState.hidden.filter((a) => a !== acc);
@@ -4424,6 +5490,244 @@ function wireEvents() {
 
     initGridControls();
     void initSoundControls();
+
+    // Game Intel, Quick Actions, Prey, Auto-Colecao, Eventos, Bosses, Safari, Ginasios, PvP e Utilidades
+    $('btnClaimAll')?.addEventListener('click', () => {
+        void runGameAction('claim-all', {}, 'Resgatar tudo');
+    });
+    $('quickTeamSelect')?.addEventListener('change', (ev) => {
+        const val = ev.target.value;
+        if (!val) return;
+        const pokemonId = Number.isFinite(Number(val)) ? Number(val) : val;
+        void runGameAction('team-active', { pokemonId }, 'Troca de Pokémon ativo');
+    });
+    $('btnQuickZMove')?.addEventListener('click', () => {
+        const btn = $('btnQuickZMove');
+        const idRaw = btn?.dataset?.pokeId;
+        if (!idRaw) return;
+        const pokemonId = Number.isFinite(Number(idRaw)) ? Number(idRaw) : idRaw;
+        const fisico = btn.dataset.fisico !== '1';
+        void runGameAction('zmove-toggle', { pokemonId, fisico }, 'Z-Move');
+    });
+    $('outlandTierSel')?.addEventListener('change', (ev) => {
+        const tier = Number(ev.target.value);
+        if (Number.isFinite(tier) && tier >= 1) {
+            void runGameAction('outland-tier', { tier }, `Outland Tier ${tier}`);
+        }
+    });
+    $('eggStepBox')?.addEventListener('click', (ev) => {
+        if (ev.target.closest('button[data-intel-act="craft-shiny-egg"]')) {
+            void runGameAction('craft-shiny-egg', {}, 'Fabricar Ovo Shiny');
+        }
+    });
+    $('evolutionDexBox')?.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('button[data-evo-poke]');
+        if (!btn) return;
+        const pRaw = btn.dataset.evoPoke;
+        const aRaw = btn.dataset.evoAlvo;
+        const pokemonId = Number.isFinite(Number(pRaw)) ? Number(pRaw) : pRaw;
+        const alvoId = Number.isFinite(Number(aRaw)) ? Number(aRaw) : aRaw;
+        void runGameAction('evolve-pokemon', { pokemonId, alvoId }, 'Evolução Pokédex');
+    });
+
+    $('eventsTabs')?.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('button[data-intel-tab]');
+        if (!btn) return;
+        const nextTab = btn.dataset.intelTab;
+        if (!nextTab) return;
+        document.querySelectorAll('#eventsTabs button[data-intel-tab]').forEach((b) => {
+            const on = b.dataset.intelTab === nextTab;
+            b.classList.toggle('active', on);
+            b.setAttribute('aria-selected', String(on));
+        });
+        document.querySelectorAll('#eventsMetaCard .intel-pane').forEach((p) => {
+            p.classList.toggle('hidden', p.dataset.intelPane !== nextTab);
+        });
+    });
+    $('eventsMetaCard')?.addEventListener('click', (ev) => {
+        const actBtn = ev.target.closest('button[data-intel-act]');
+        if (actBtn) {
+            const act = actBtn.dataset.intelAct;
+            if (act === 'raid-enroll') void runGameAction('raid-enroll', {}, 'Inscrição Raid');
+            else if (act === 'showdown-enroll') void runGameAction('showdown-enroll', {}, 'Inscrição Showdown');
+            else if (act === 'camp-enroll') void runGameAction('camp-enroll', {}, 'Inscrição Campeonato');
+            else if (act === 'mistico-enter') void runGameAction('mistico-enter', {}, 'Místico');
+            else if (act === 'gym-info') void runGameAction('gym-info', {}, 'Ginásios');
+            else if (act === 'apply-pvp-team') {
+                void runGameAction('apply-pvp-team', {}, 'Time PvP recomendado');
+            } else if (act === 'start-team-pvp') {
+                if ($('cFarmObjective')) $('cFarmObjective').value = 'team-pvp';
+                void sendAction('set-config', { config: { farmObjective: 'team-pvp' } });
+            } else if (act === 'pvp-save-formation') {
+                const pvp = snapshots[activeAccount]?.gameIntel?.pvpMeta || {};
+                const pokemonIds = (pvp.team || []).map((m) => m.id).filter(Boolean);
+                const casas = Array.isArray(pvp.casas) ? pvp.casas : [];
+                void runGameAction('pvp-save-formation', { pokemonIds, casas }, 'Formação PvP');
+            }
+            return;
+        }
+        const bossEnter = ev.target.closest('button[data-boss-enter]');
+        if (bossEnter) {
+            void runGameAction('boss-enter', { key: bossEnter.dataset.bossEnter }, 'Entrar no Boss');
+            return;
+        }
+        if (ev.target.closest('button[data-boss-leave]')) {
+            void runGameAction('boss-leave', {}, 'Sair do Boss');
+            return;
+        }
+        const safariBtn = ev.target.closest('button[data-safari-enter]');
+        if (safariBtn) {
+            const tickets = Math.max(6, Number(safariBtn.dataset.safariEnter) || 6);
+            void runGameAction('safari-enter', { tickets }, `Safari (${tickets} tickets)`);
+            return;
+        }
+        const gymBtn = ev.target.closest('button[data-gym-challenge]');
+        if (gymBtn) {
+            void runGameAction('gym-challenge', { tipo: gymBtn.dataset.gymChallenge }, `Desafiar Ginásio ${gymBtn.dataset.gymChallenge}`);
+            return;
+        }
+        if (ev.target.closest('#btnGymChallengeSel')) {
+            const tipo = $('gymChallengeTypeSel')?.value;
+            if (tipo) void runGameAction('gym-challenge', { tipo }, `Desafiar Ginásio ${tipo}`);
+        }
+    });
+    $('eventsMetaCard')?.addEventListener('change', (ev) => {
+        const chk = ev.target.closest('input[data-boss-auto]');
+        if (!chk) return;
+        void runGameAction('boss-auto', { ativo: chk.checked, key: chk.dataset.bossAuto }, 'Boss Auto');
+    });
+
+    $('preyCartelaSeg')?.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('button[data-prey-cartela]');
+        if (!btn) return;
+        preyCartelaActive = Number(btn.dataset.preyCartela) === 2 ? 2 : 1;
+        document.querySelectorAll('#preyCartelaSeg button[data-prey-cartela]').forEach((b) => {
+            b.classList.toggle('active', Number(b.dataset.preyCartela) === preyCartelaActive);
+        });
+        if (snapshots[activeAccount]) renderAutomationExtras(snapshots[activeAccount]);
+    });
+    $('preyRegionsGrid')?.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('button[data-prey-reg]');
+        if (!btn) return;
+        const reg = btn.dataset.preyReg;
+        const set = preySelectedByCartela[preyCartelaActive];
+        if (set.has(reg)) set.delete(reg);
+        else set.add(reg);
+        if (snapshots[activeAccount]) renderAutomationExtras(snapshots[activeAccount]);
+    });
+    $('btnApplyPreyRegions')?.addEventListener('click', () => {
+        const regioes = [...preySelectedByCartela[preyCartelaActive]];
+        if (regioes.length < 2) {
+            showToast({ kind: 'warn', title: 'Prey por Região', text: 'Escolha pelo menos 2 regiões.' });
+            return;
+        }
+        void runGameAction('prey-regions', { cartela: preyCartelaActive, regioes }, `Prey Cartela ${preyCartelaActive}`);
+    });
+
+    const readAutoColRule = () => ({
+        lendario: Boolean($('acLendario')?.checked),
+        shiny: Boolean($('acShiny')?.checked),
+        potenciaMin: Number($('acPotencia')?.value || 0),
+        qualidadeMin: Number($('acQualidade')?.value || 0),
+        ivMin: Math.max(0, Number($('acIvMin')?.value || 0)),
+        notaMin: Math.max(0, Number($('acNotaMin')?.value || 0)),
+    });
+    $('btnApplyAutoCol')?.addEventListener('click', async () => {
+        const regra = readAutoColRule();
+        const ativo = Boolean($('acAutoVendaDepot')?.checked);
+        await runGameAction('auto-colecao', { regra }, 'Auto-Coleção');
+        await sendAction('auto-venda-depot', { ativo });
+    });
+    $('btnApplyAutoColAll')?.addEventListener('click', async () => {
+        const regra = readAutoColRule();
+        const ativo = Boolean($('acAutoVendaDepot')?.checked);
+        const results = await Promise.all(ACCOUNTS.map(async (acc) => {
+            const r1 = await sendAction('auto-colecao', { regra }, acc).catch(() => null);
+            await sendAction('auto-venda-depot', { ativo }, acc).catch(() => null);
+            return r1;
+        }));
+        const okCount = results.filter((r) => r?.ok !== false).length;
+        showToast({ kind: 'ok', title: 'Auto-Coleção & Depot', text: `Regra aplicada em ${okCount} de ${ACCOUNTS.length} contas.` });
+    });
+
+    $('btnSacrificeRun')?.addEventListener('click', () => void runGameAction('sacrifice-run', {}, 'Sacrifício'));
+    $('btnSacrificeBone')?.addEventListener('click', () => {
+        const qtd = Math.max(1, Math.floor(Number($('boneQty')?.value || 1) || 1));
+        void runGameAction('sacrifice-bone', { qtd }, `Osso (+20% XP) x${qtd}`);
+    });
+    $('btnOferendaRun')?.addEventListener('click', () => {
+        const monoTypeOnly = Boolean($('chkOferendaMono')?.checked);
+        void runGameAction('oferenda-run', { monoTypeOnly }, 'Oferenda 5/5');
+    });
+    $('btnBikeEquipBest')?.addEventListener('click', () => {
+        const bh = snapshots[activeAccount]?.gameIntel?.bikesAndHouses;
+        const bicicletaId = typeof bh?.bestBikeUpgrade === 'object'
+            ? (bh.bestBikeUpgrade?.id ?? bh.bestBikeUpgrade?.bicicletaId)
+            : (bh?.bestBikeUpgrade ?? bh?.equippedBikeId);
+        if (!bicicletaId) {
+            showToast({ kind: 'warn', title: 'Bicicletas', text: 'Nenhuma bicicleta melhor disponível para equipar.' });
+            return;
+        }
+        void runGameAction('bike-equip', { bicicletaId }, 'Equipar Bicicleta');
+    });
+    $('btnBikeCraft')?.addEventListener('click', () => void runGameAction('bike-craft', {}, 'Craftar Bicicletas'));
+    $('btnBikeFabricar')?.addEventListener('click', () => void runGameAction('bike-fabricar', {}, 'Fabricar Bicicleta'));
+    $('btnHouseFill')?.addEventListener('click', () => {
+        const bh = snapshots[activeAccount]?.gameIntel?.bikesAndHouses;
+        const casaId = bh?.bestHouseId ?? bh?.nextHouseId ?? null;
+        void runGameAction('house-use', { ...(casaId != null ? { casaId } : {}), usar: true }, 'Preencher Casas');
+    });
+    $('btnHouseCraft')?.addEventListener('click', () => void runGameAction('house-craft', {}, 'Craftar Casa'));
+
+    $('refinePokeSel')?.addEventListener('change', () => {
+        if (snapshots[activeAccount]) renderAutomationExtras(snapshots[activeAccount]);
+    });
+    $('refineStatSel')?.addEventListener('change', () => {
+        if (snapshots[activeAccount]) renderAutomationExtras(snapshots[activeAccount]);
+    });
+    $('btnRefineNow')?.addEventListener('click', () => {
+        const pRaw = $('refinePokeSel')?.value;
+        const stat = $('refineStatSel')?.value || 'hp';
+        if (!pRaw) return;
+        const pokemonId = Number.isFinite(Number(pRaw)) ? Number(pRaw) : pRaw;
+        void runGameAction('refine-pokemon', { pokemonId, stat }, `Refino (${stat})`);
+    });
+    $('btnReduceLevel')?.addEventListener('click', () => {
+        const pRaw = $('refinePokeSel')?.value;
+        const nivelAlvo = Math.floor(Number($('reduceLvlInput')?.value || 0));
+        if (!pRaw || !Number.isFinite(nivelAlvo) || nivelAlvo < 1) {
+            showToast({ kind: 'warn', title: 'Reduzir nível', text: 'Informe um Pokémon e um nível alvo válido.' });
+            return;
+        }
+        const pokemonId = Number.isFinite(Number(pRaw)) ? Number(pRaw) : pRaw;
+        void runGameAction('reduce-level', { pokemonId, nivelAlvo }, `Reduzir nível para ${nivelAlvo}`);
+    });
+    $('btnCsvExport')?.addEventListener('click', () => {
+        const tipo = $('csvExportType')?.value || 'drops';
+        void runGameAction('csv-export', { tipo }, `Exportar CSV (${tipo})`);
+    });
+    $('btnOpenBox')?.addEventListener('click', () => {
+        const id = Math.floor(Number($('openBoxId')?.value || 0));
+        if (!id || id < 1) {
+            showToast({ kind: 'warn', title: 'Abrir caixa', text: 'Informe o ID da caixa.' });
+            return;
+        }
+        void runGameAction('open-box', { id }, `Abrir caixa #${id}`);
+    });
+    $('btnCraftShinyStone')?.addEventListener('click', () => {
+        const tipo = $('craftStoneType')?.value || 'fire';
+        void runGameAction('craft-shiny-stone', { tipo }, `Fabricar Shiny Stone (${tipo})`);
+    });
+    $('btnCraftMega')?.addEventListener('click', () => {
+        const dex = Math.floor(Number($('megaDexInput')?.value || 0));
+        if (!dex || dex < 1) {
+            showToast({ kind: 'warn', title: 'Craft Mega', text: 'Informe o número da Pokédex.' });
+            return;
+        }
+        const shiny = Boolean($('megaShinyChk')?.checked);
+        const segunda = Boolean($('megaSegundaChk')?.checked);
+        void runGameAction('craft-mega', { dex, shiny, segunda }, `Craft Mega #${dex}`);
+    });
 
     // IPC callbacks from main process
     window.pokeHub.onWebviewSend(({ account, rawJson }) => {

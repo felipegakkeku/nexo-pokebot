@@ -5,8 +5,24 @@ import vm from 'node:vm';
 import { Worker } from 'node:worker_threads';
 
 const WORKER_URL = new URL('./hunt-guide-worker.mjs', import.meta.url);
+const NATIVE_ANALYSER_URL = new URL('./native-hunt-analyser.mjs', import.meta.url);
 const EVAL_CACHE_TTL_MS = 5 * 60_000;
 const MAX_EVAL_CACHE = 64;
+
+let cachedNativeAnalyser = null;
+async function getNativeHuntAnalyser() {
+    if (cachedNativeAnalyser) return cachedNativeAnalyser;
+    try {
+        const mod = await import('./native-hunt-analyser.mjs');
+        if (typeof mod?.analyzeNativeHunts === 'function') {
+            cachedNativeAnalyser = mod.analyzeNativeHunts;
+            return cachedNativeAnalyser;
+        }
+    } catch {
+        // Modulo nativo indisponivel neste ambiente.
+    }
+    return null;
+}
 
 export const HUNT_EXTENSION_ID = 'mhnplloljgchpfpcpbhmcokmnefodjnh';
 
@@ -383,12 +399,117 @@ export function createHeadlessHuntGuideEvaluator(options = {}) {
         };
     };
 
+    const normalizeNativeResult = (raw, { activePk, metric, region, huntsBySlug }) => {
+        if (!raw || typeof raw !== 'object') return null;
+        const rawList = Array.isArray(raw)
+            ? raw
+            : (Array.isArray(raw.byMetric?.[metric])
+                ? raw.byMetric[metric]
+                : (Array.isArray(raw.ranked) ? raw.ranked : (Array.isArray(raw.linhas) ? raw.linhas : [])));
+        const metricKey = metric === 'ouro' ? 'goldH' : (metric === 'shiny' ? 'shinyH' : 'xpH');
+        const allMapped = rawList
+            .filter((row) => row && row.slug)
+            .map((row) => {
+                const huntMeta = huntsBySlug?.get(String(row.slug)) || null;
+                const xpH = Number(row.xpH ?? row.xpPokemonH ?? 0);
+                const goldH = Number(row.goldH ?? row.ouroH ?? 0);
+                const shinyH = Number(row.shinyH ?? 0);
+                const val = Number(row.value ?? ({ xp: xpH, ouro: goldH, shiny: shinyH }[metric]) ?? 0);
+                return {
+                    slug: String(row.slug),
+                    name: String(row.name || row.nome || huntMeta?.nome || row.slug),
+                    level: Number(row.level ?? row.nivel ?? huntMeta?.nivel ?? 0),
+                    region: String(row.region ?? row.regiao ?? huntMeta?.regiao ?? ''),
+                    value: val,
+                    xpH,
+                    goldH,
+                    shinyH,
+                    unsafe: Boolean(row.unsafe || row.umHit || Number(row.mortesH || 0) >= 0.5),
+                };
+            });
+        const regional = region ? allMapped.filter((r) => r.region === region) : null;
+        const ranked = regional?.length ? regional : allMapped;
+        const bestRaw = (!Array.isArray(raw) && !region && raw.best)
+            ? raw.best
+            : (ranked.find((r) => !r.unsafe) || ranked[0] || null);
+        if (!bestRaw?.slug) return null;
+        const bestXpH = Number(bestRaw.xpH ?? bestRaw.xpPokemonH ?? 0);
+        const bestGoldH = Number(bestRaw.goldH ?? bestRaw.ouroH ?? 0);
+        const bestShinyH = Number(bestRaw.shinyH ?? 0);
+        const bestValue = Number(bestRaw.value ?? bestRaw[metricKey] ?? ({ xp: bestXpH, ouro: bestGoldH, shiny: bestShinyH }[metric]) ?? 0);
+        if (!Number.isFinite(bestValue) || bestValue <= 0) return null;
+        const best = {
+            slug: String(bestRaw.slug),
+            name: String(bestRaw.name || bestRaw.nome || bestRaw.slug),
+            level: Number(bestRaw.level ?? bestRaw.nivel ?? 0),
+            region: String(bestRaw.region ?? bestRaw.regiao ?? ''),
+            value: bestValue,
+            xpH: bestXpH,
+            goldH: bestGoldH,
+            shinyH: bestShinyH,
+            unsafe: Boolean(bestRaw.unsafe || bestRaw.umHit || Number(bestRaw.mortesH || 0) >= 0.5),
+        };
+        return {
+            slug: best.slug,
+            name: best.name,
+            pokemonId: raw.pokemonId ?? activePk.id,
+            pokemonLevel: raw.pokemonLevel ?? activePk.level,
+            level: best.level,
+            region: best.region,
+            value: best.value,
+            unsafe: best.unsafe,
+            metric,
+            best,
+            ranked,
+            source: 'native',
+        };
+    };
+
+    const evaluateNative = async ({ welcome, state, activePk, metric, region }) => {
+        const analyser = typeof options.analyzeNativeHunts === 'function'
+            ? options.analyzeNativeHunts
+            : await getNativeHuntAnalyser();
+        if (!analyser) return null;
+
+        const allHunts = Array.isArray(welcome.hunts) ? welcome.hunts : [];
+        const huntsBySlug = new Map(allHunts.filter((h) => h?.slug).map((h) => [String(h.slug), h]));
+        const trainerLvl = Number(state.level || 0);
+        const unlockedSet = Array.isArray(state.huntsLiberadas) ? new Set(state.huntsLiberadas.map(String)) : null;
+        const eligibleHunts = allHunts.filter((h) => {
+            if (!h?.slug) return false;
+            if (trainerLvl > 0 && Number(h.nivel || 0) > trainerLvl) return false;
+            if (h.requer && unlockedSet && !unlockedSet.has(String(h.slug))) return false;
+            return true;
+        });
+
+        const bikeList = Array.isArray(state.bicicletas?.lista)
+            ? state.bicicletas.lista
+            : (Array.isArray(state.bicicletas) ? state.bicicletas : []);
+        const equippedBikeId = state.bicicletas?.equipadaId ?? state.bicicleta?.id ?? state.bicicletaId ?? null;
+        const equippedBike = state.bicicleta
+            || (equippedBikeId != null ? bikeList.find((b) => b && String(b.id) === String(equippedBikeId)) : null)
+            || bikeList.find((b) => b?.equipada)
+            || null;
+        const bikeRarity = equippedBike?.rar ?? equippedBike?.raridade ?? equippedBike?.rarity ?? null;
+
+        const raw = analyser({
+            hunts: eligibleHunts,
+            activePokemon: activePk,
+            trainer: state,
+            speciesById: options.speciesById ?? welcome.especies ?? welcome.speciesById ?? null,
+            typeChart: welcome.tabelaTipos ?? null,
+            diaSazonal: state.diaSazonal ?? null,
+            bikeRarity,
+        });
+        return normalizeNativeResult(raw, { activePk, metric, region, huntsBySlug });
+    };
+
     const evaluate = async ({ welcome, state, metric = 'xp', region = '' } = {}) => {
         if (!welcome || !state) return null;
         const activePk = (state.pokemons || []).find((pk) => pk && String(pk.id) === String(state.activeId));
-        if (!activePk?.id || !activePk.stats) return null;
+        if (!activePk?.id) return null;
         const extDir = getExtensionDir();
-        if (!extDir) return null;
+        const canRunExtension = Boolean(extDir && activePk.stats);
 
         const cacheKey = buildEvalCacheKey(welcome, state, activePk, metric, region);
         const now = Date.now();
@@ -401,15 +522,20 @@ export function createHeadlessHuntGuideEvaluator(options = {}) {
         }
 
         const run = (async () => {
-            let res;
-            if (useWorker) {
-                try {
-                    res = await evaluateInWorker(extDir, { welcome, state, activePk, metric, region });
-                } catch {
+            let res = null;
+            if (canRunExtension) {
+                if (useWorker) {
+                    try {
+                        res = await evaluateInWorker(extDir, { welcome, state, activePk, metric, region });
+                    } catch {
+                        res = await evaluateInline({ welcome, state, activePk, metric, region });
+                    }
+                } else {
                     res = await evaluateInline({ welcome, state, activePk, metric, region });
                 }
-            } else {
-                res = await evaluateInline({ welcome, state, activePk, metric, region });
+            }
+            if (!res) {
+                res = await evaluateNative({ welcome, state, activePk, metric, region });
             }
             if (evalCache.size >= MAX_EVAL_CACHE) {
                 const oldest = evalCache.keys().next().value;
@@ -437,7 +563,7 @@ export function createHeadlessHuntGuideEvaluator(options = {}) {
     };
 
     return {
-        isAvailable: () => Boolean(getExtensionDir()),
+        isAvailable: () => Boolean(getExtensionDir() || cachedNativeAnalyser || typeof options.analyzeNativeHunts === 'function' || existsSync(NATIVE_ANALYSER_URL)),
         getExtensionDir,
         evaluate,
         dispose,

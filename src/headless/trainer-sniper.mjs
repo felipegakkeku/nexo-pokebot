@@ -1,8 +1,39 @@
 // Motor puro para Treinador Automático (Exp. Share 70050 e Casas) e Sniper do Mercado da Comunidade (Gold/Gemas).
+import { taxaOrbDaVenda, findBestBikeUpgrade, CASA_XP_SHARE } from './pvp-meta.mjs';
 
 export const XP_SHARE_HELD_ID = 70050;
 export const XP_SHARE_HELD_COOLDOWN_MS = 60_000;
 export const HOUSE_SWAP_COOLDOWN_MS = 5_000;
+export const TAXA_GOLD_MERCADO = 0.15;
+export const MAX_CASAS_ATIVAS = 5;
+const SIX_HOURS_MS = 6 * 3600_000;
+
+/**
+ * Calcula a taxa efetiva de venda no mercado: progressiva em Orbs para Pokemon (13% / 10% / 7.5%),
+ * 15% em Orbs para itens e 15% em gold.
+ * @param {number} price Preco unitario/total da venda.
+ * @param {'gold'|'orb'} [moeda='gold'] Moeda do anuncio.
+ * @param {'pokemon'|'item'} [tipo='pokemon'] Tipo do anuncio.
+ * @returns {number} Aliquota decimal (ex.: 0.15, 0.13, 0.10, 0.075).
+ */
+export function getMarketFeeRate(price, moeda = 'gold', tipo = 'pokemon') {
+    const p = Number(price) || 0;
+    if (moeda === 'orb' && p > 0) {
+        if (typeof taxaOrbDaVenda === 'function') {
+            const feeOrbs = Number(taxaOrbDaVenda(p, tipo));
+            if (Number.isFinite(feeOrbs) && feeOrbs >= 0) {
+                return feeOrbs / p;
+            }
+        }
+        if (tipo === 'pokemon') {
+            if (p <= 500) return 0.13;
+            if (p <= 5000) return 0.10;
+            return 0.075;
+        }
+        return 0.15;
+    }
+    return TAXA_GOLD_MERCADO;
+}
 
 /**
  * Resolve o local atual de um Pokémon no formato oficial do PokeIdle.
@@ -395,8 +426,95 @@ export function evaluateSniperItemListings({
 
     const simulatedBought = new Map(activeRules.map((r) => [r.id, Math.max(0, Math.floor(Number(r.boughtQty || 0) || 0))]));
 
+    // Compra em lote (market.comprarLote) quando uma regra com autoBuy precisa de qty > 1
+    // e existem multiplos anuncios elegiveis disponiveis para compra imediata.
+    const batchSkipIds = new Set();
+    for (const rule of activeRules) {
+        if (!rule.autoBuy) continue;
+        const maxQty = Math.max(0, Math.floor(Number(rule.maxQty ?? rule.qty ?? 0) || 0));
+        const curBought = simulatedBought.get(rule.id) || 0;
+        const wanted = maxQty > 0 ? Math.max(0, maxQty - curBought) : Infinity;
+        if (wanted <= 1) continue;
+
+        const eligibleForRule = [];
+        for (const listing of sortedListings) {
+            if (!listing || listing.id == null || batchSkipIds.has(listing.id)) continue;
+            const price = Number(listing.preco || 0);
+            const qtyAvail = Math.max(0, Math.floor(Number(listing.qtd || 0) || 0));
+            if (price <= 0 || qtyAvail <= 0) continue;
+            if (listing.vendedorId != null && state?.id != null && Number(listing.vendedorId) === Number(state.id)) continue;
+            if (price > Number(rule.maxPrice || 0)) continue;
+            if (Number(listing.compravelEm || 0) > syncedNowMs) continue;
+            if (tracker.pendingListings?.has(String(listing.id))) continue;
+            const prevAttempt = tracker.attemptedListings.get(listing.id) || 0;
+            if (syncedNowMs - prevAttempt < 30_000) continue;
+            eligibleForRule.push({ listing, price, qtyAvail });
+        }
+
+        if (eligibleForRule.length <= 1) continue;
+
+        let tempBalance = availableBalance;
+        let remNeed = wanted;
+        let totalQtd = 0;
+        let totalCost = 0;
+        let maxPriceSeen = 0;
+        const used = [];
+        for (const entry of eligibleForRule) {
+            if (remNeed <= 0) break;
+            const maxAfford = Math.floor(tempBalance / entry.price);
+            const take = Math.min(entry.qtyAvail, remNeed, maxAfford);
+            if (take < 1) break;
+            totalQtd += take;
+            totalCost += take * entry.price;
+            tempBalance -= take * entry.price;
+            remNeed -= take;
+            if (entry.price > maxPriceSeen) maxPriceSeen = entry.price;
+            used.push({ ...entry, take });
+        }
+
+        if (used.length > 1 && totalQtd > 1) {
+            availableBalance -= totalCost;
+            simulatedBought.set(rule.id, curBought + totalQtd);
+            for (const u of used) {
+                batchSkipIds.add(u.listing.id);
+                tracker.attemptedListings.set(u.listing.id, syncedNowMs);
+            }
+            const itemLabel = rule.itemName || `Item #${cleanId}`;
+            const avgPrice = Math.round(totalCost / totalQtd);
+            actions.push({
+                t: 'market.comprarLote',
+                tipo: 'item',
+                itemId: cleanId,
+                moeda: currency,
+                qtd: totalQtd,
+                precoMax: Number(rule.maxPrice || maxPriceSeen),
+                totalMax: totalCost,
+            });
+            const purchase = {
+                ts: syncedNowMs,
+                ruleId: rule.id,
+                listingId: used[0].listing.id,
+                itemId: cleanId,
+                itemName: itemLabel,
+                qty: totalQtd,
+                price: avgPrice,
+                currency,
+                seller: `${used.length} vendedores`,
+                bought: false,
+                pending: true,
+                status: 'pendente',
+            };
+            purchases.push(purchase);
+            hits.push(purchase);
+            logs.push({
+                kind: 'info',
+                text: `Sniper pediu compra em lote: ${itemLabel} x${totalQtd} até ${Number(rule.maxPrice || maxPriceSeen).toLocaleString('pt-BR')} ${currencyLabel} (total ${totalCost.toLocaleString('pt-BR')}).`,
+            });
+        }
+    }
+
     for (const listing of sortedListings) {
-        if (!listing || listing.id == null) continue;
+        if (!listing || listing.id == null || batchSkipIds.has(listing.id)) continue;
         const price = Number(listing.preco || 0);
         const qtyAvail = Math.max(0, Math.floor(Number(listing.qtd || 0) || 0));
         if (price <= 0 || qtyAvail <= 0) continue;
@@ -802,4 +920,106 @@ export function evaluateSniperPokemonListings({
     }
 
     return { actions, logs, hits, purchases, recheckAtMs, recheckRule, matchedRuleStats };
+}
+
+/**
+ * Avalia os proprios anuncios no mercado e retorna comandos `market.estender` (1 dia)
+ * para anuncios com menos de 6 horas restantes quando `autoExtend` estiver ativo.
+ * @param {Array<object>} [listings=[]] Anuncios proprios no mercado.
+ * @param {number} [nowMs=Date.now()] Timestamp atual em ms.
+ * @param {{ autoExtend?: boolean }} [opts={}] Opcoes de controle.
+ * @returns {Array<{ t: 'market.estender', id: number|string, dias: number }>}
+ */
+export function evaluateOwnListingsExtension(listings = [], nowMs = Date.now(), { autoExtend = false } = {}) {
+    if (!autoExtend || !Array.isArray(listings) || listings.length === 0) return [];
+    const actions = [];
+    for (const listing of listings) {
+        if (!listing || listing.id == null) continue;
+        if (listing.vendido || listing.encerrado || listing.ativo === false) continue;
+
+        let remainingMs = null;
+        const expiresAt = listing.expiraEm ?? listing.terminaEm ?? listing.fimEm ?? listing.vencimento;
+        if (expiresAt != null && Number.isFinite(Number(expiresAt))) {
+            remainingMs = Number(expiresAt) - Number(nowMs);
+        } else if (listing.restaMs != null && Number.isFinite(Number(listing.restaMs))) {
+            remainingMs = Number(listing.restaMs);
+        } else if (listing.restanteMs != null && Number.isFinite(Number(listing.restanteMs))) {
+            remainingMs = Number(listing.restanteMs);
+        } else if (listing.horasRestantes != null && Number.isFinite(Number(listing.horasRestantes))) {
+            remainingMs = Number(listing.horasRestantes) * 3600_000;
+        }
+
+        if (remainingMs != null && remainingMs > 0 && remainingMs < SIX_HOURS_MS) {
+            actions.push({ t: 'market.estender', id: listing.id, dias: 1 });
+        }
+    }
+    return actions;
+}
+
+function getHouseRankScore(casa) {
+    const rar = String(casa?.rar || '').toLowerCase();
+    const meta = CASA_XP_SHARE?.[rar];
+    if (typeof meta === 'number') return meta;
+    if (meta && typeof meta === 'object') {
+        return Number(meta.xp ?? meta.bonus ?? meta.slots ?? meta.postos ?? 0) || 0;
+    }
+    const order = { mitica: 5, lendaria: 4, epica: 3, rara: 2, incomum: 1, comum: 0 };
+    return (order[rar] ?? 0) * 100 + Number(casa?.slots ?? casa?.postosQtd ?? casa?.postos?.length ?? 0);
+}
+
+/**
+ * Avalia melhoria automatica de equipamentos: equipa bicicleta superior (`bicicleta.equipar`)
+ * e ativa casas vagas ate o limite de 5 casas (`casa.usar`) quando `autoOptimizeGear` estiver ativo.
+ * @param {object|null} state Estado atual do jogador.
+ * @param {number} [nowMs=Date.now()] Timestamp atual em ms.
+ * @param {object} [tracker={}] Rastreador de cooldowns.
+ * @param {{ autoOptimizeGear?: boolean }} [options={}] Configuracao opcional.
+ * @returns {Array<object>} Acoes a enviar.
+ */
+export function evaluateGearOptimization(state, nowMs = Date.now(), tracker = {}, options = {}) {
+    if (!state || typeof state !== 'object') return [];
+    const autoFlag = options?.autoOptimizeGear ?? tracker?.autoOptimizeGear ?? state?.autoOptimizeGear;
+    if (autoFlag === false) return [];
+
+    const actions = [];
+
+    // 1) Bicicleta melhor disponivel
+    const bikeList = Array.isArray(state?.bicicletas?.lista)
+        ? state.bicicletas.lista
+        : (Array.isArray(state?.bicicletas) ? state.bicicletas : (Array.isArray(state?.bikes) ? state.bikes : []));
+    const equippedBikeId = state?.bicicletas?.equipadaId
+        ?? state?.bicicleta?.id
+        ?? state?.bicicletaId
+        ?? bikeList.find((b) => b?.equipada)?.id
+        ?? null;
+
+    if (typeof findBestBikeUpgrade === 'function' && bikeList.length > 0 && nowMs - (tracker.lastBikeOptimizeAt || 0) >= 30_000) {
+        const bestBike = findBestBikeUpgrade(bikeList, equippedBikeId);
+        const nextBikeId = bestBike?.upgrade?.id ?? bestBike?.bicicletaId ?? bestBike?.id ?? bestBike?.bikeId ?? null;
+        if (nextBikeId != null && String(nextBikeId) !== String(equippedBikeId)) {
+            tracker.lastBikeOptimizeAt = nowMs;
+            actions.push({ t: 'bicicleta.equipar', bicicletaId: nextBikeId });
+        }
+    }
+
+    // 2) Casas vagas (ate 5 casas ativas)
+    const casas = Array.isArray(state?.casa?.lista) ? state.casa.lista : [];
+    if (casas.length > 0 && nowMs - (tracker.lastHouseOptimizeAt || 0) >= 30_000) {
+        const activeHouses = casas.filter((c) => c && !c.anunciada && c.emUso !== false);
+        const freeSlots = Math.max(0, MAX_CASAS_ATIVAS - activeHouses.length);
+        if (freeSlots > 0) {
+            const inactive = casas
+                .filter((c) => c && !c.anunciada && c.emUso === false && c.id != null)
+                .sort((a, b) => getHouseRankScore(b) - getHouseRankScore(a));
+            const toActivate = inactive.slice(0, freeSlots);
+            if (toActivate.length > 0) {
+                tracker.lastHouseOptimizeAt = nowMs;
+                for (const casa of toActivate) {
+                    actions.push({ t: 'casa.usar', casaId: casa.id, usar: true });
+                }
+            }
+        }
+    }
+
+    return actions;
 }

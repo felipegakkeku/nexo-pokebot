@@ -21,7 +21,8 @@
 
     // ===== utilitários =====
     function fmtCompact(n) {
-        const v = Number(n || 0);
+        const v = Number(n);
+        if (!Number.isFinite(v)) return '0';
         const a = Math.abs(v);
         if (a >= 1e9) return `${(v / 1e9).toFixed(1).replace('.', ',')} bi`;
         if (a >= 1e6) return `${(v / 1e6).toFixed(a >= 1e7 ? 1 : 2).replace('.', ',')} mi`;
@@ -386,7 +387,10 @@
         if (dbox.dataset.sig !== dropSig) {
             dbox.dataset.sig = dropSig;
             dbox.innerHTML = drops.length
-                ? drops.map((d) => `<span class="sl-drop${d.rare ? ' rare' : ''}" title="${esc(d.name)}: ${d.qty} na sessão (${String(d.perHour).replace('.', ',')}/h)">${IC(d.rare ? 'gift' : 'package')}<span>${escapeHtml(d.name)}</span><b>${fmtNum(d.qty)}</b></span>`).join('')
+                ? drops.map((d) => {
+                    const tip = window.nexoDropInsight ? window.nexoDropInsight(d, s) : `${d.name}: ${d.qty} na sessão (${String(d.perHour).replace('.', ',')}/h)`;
+                    return `<span class="sl-drop${d.rare ? ' rare' : ''}" title="${esc(tip)}">${IC(d.rare ? 'gift' : 'package')}<span>${escapeHtml(d.name)}</span><b>${fmtNum(d.qty)}</b></span>`;
+                }).join('')
                 : '<span class="hint-text">Nenhum drop ainda nesta sessão.</span>';
         }
         const evs = recentEvents(acc, 40);
@@ -1265,8 +1269,16 @@
         cTargetRevives: 'Quantos revives manter. 0 desliga a compra.',
         cGuideMode: 'Acompanha a recomendação do /hunt: só avisa ou troca de hunt sozinho, sempre no tempo exato de saída de combate.',
         cGuideMetric: 'O que o /hunt deve priorizar ao recomendar hunt.',
-        cFarmObjective: 'Alterna entre farm normal, Completar Pokédex (captura espécies ainda não registradas) e Modo Top Catch (captura espécies ainda não pegas nesta semana do evento, mesmo já tendo na Pokédex, e troca para o próximo mapa).',
+        cFarmObjective: 'Alterna entre farm normal, Completar Pokédex, Modo Top Catch e Bestiário (degraus 25k/50k/100k).',
         cFarmObjectiveFocus: 'Define qual trajeto do /hunt priorizar ao escolher o próximo mapa da Pokédex ou Top Catch (XP/h, Ouro/h, Shiny/h ou menor nível).',
+        cAutoCraftShinyEgg: 'Fabrica automaticamente um Ovo Shiny sempre que juntar 10 fragmentos.',
+        cAutoSacrificeRedeem: 'Resgata automaticamente a barra de Sacrifício ao completar 1.000 pontos.',
+        cAutoOferendaOnFull: 'Gira automaticamente a Oferenda quando completar 5/5.',
+        cAutoOptimizeGear: 'Equipa automaticamente a melhor Bicicleta e otimiza o uso das Casas.',
+        cAutoExtendListings: 'Renova anúncios do mercado antes que expirem.',
+        cAutoRaidEnroll: 'Inscreve automaticamente a conta na Raid semanal (segunda 16h).',
+        cAutoShowdownEnroll: 'Inscreve automaticamente a conta no Showdown semanal (quarta 20h).',
+        cAutoMisticoEnter: 'Entra automaticamente no Místico quando estiver disponível.',
         cLiveTargetHours: 'Quantas horas guardar de cada buff das lives.',
         cLiveTier: 'Qual pacote de recompensa comprar com os pontos das lives.',
     };
@@ -1598,6 +1610,124 @@
         }
     }
 
+    function renderWvSummaries() {
+        for (const acc of ACCOUNTS) {
+            const box = $(`wv-summary-${acc}`);
+            if (!box || box.hidden) continue;
+            const s = snapshots[acc] || {};
+            const st = s.stats || {};
+            const pk = s.activePokemon;
+            const dr = s.drops || {};
+            const hitDrops = (dr.featured || []).filter((d) => d.qty > 0).slice(0, 3);
+            const list = hist[acc] || [];
+            const evs = recentEvents(acc, 4);
+            const buffs = flatBuffsHtml(acc);
+            const profitH = Number(st.netGoldPerHour ?? st.goldPerHour ?? 0) || 0;
+            const pct = pk ? Math.max(0, Math.min(100, Number(pk.hpPercent) || 0)) : 0;
+            const hpColor = pct > 55 ? '#10b981' : pct > 25 ? '#f59e0b' : '#ef4444';
+            const pkDex = pk ? resolvePokemonSpriteDex(pk.speciesId, pk.name, pk.spriteDex) : 0;
+            const url = pkDex > 0 ? pokemonSpriteUrl(pk.speciesId, Boolean(pk.shiny), pkDex, pk.name) : '';
+            const curDock = box.closest('.wv-slot')?.dataset?.summaryDock || 'right';
+            const density = box.dataset.sumDensity === 'full' ? 'full' : 'compact';
+
+            const sig = [
+                acc, curDock, density,
+                pk?.speciesId, pk?.shiny, pk?.name, pk?.level, pk?.hp, pk?.maxHp, pct,
+                st.xpPerHour, profitH, st.kills, st.captures, st.shiniesCaptured,
+                st.avgKillSec, st.capturePerKillPct, st.uptimeSec,
+                density === 'full' ? hitDrops.map((d) => `${d.key}:${d.qty}`).join(',') : '',
+                list.length, list[list.length - 1]?.t || 0,
+                density === 'full' ? evs.map((e) => e.id).join(',') : '',
+                density === 'full' ? Math.floor(Date.now() / 30_000) : 0,
+                density === 'full' ? buffs.length : 0,
+            ].join('|');
+            if (box.dataset.sig === sig) continue;
+            box.dataset.sig = sig;
+
+            const fmtSumUptime = (sec) => {
+                const sNum = Math.max(0, Math.floor(Number(sec) || 0));
+                const h = Math.floor(sNum / 3600);
+                const m = Math.floor((sNum % 3600) / 60);
+                const sc = sNum % 60;
+                return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sc).padStart(2, '0')}`;
+            };
+
+            const capPctStr = st.kills > 0 ? `${String(st.capturePerKillPct || 0).replace('.', ',')}%` : '-';
+            const headHtml = `
+              <div class="wv-sum-head">
+                <span class="wv-sum-title">${density === 'compact' ? 'Resumo' : 'Visão geral'}</span>
+                <div class="wv-sum-pos" role="group" aria-label="Sidebar da conta ${acc}">
+                  <button type="button" class="wv-sum-btn" data-sum-density="${density === 'compact' ? 'full' : 'compact'}" data-slot="${acc}" title="${density === 'compact' ? 'Mostrar detalhes completos nesta conta' : 'Mostrar só o resumo nesta conta'}">${density === 'compact' ? 'Detalhes' : 'Resumir'}</button>
+                  <button type="button" class="wv-sum-btn${curDock === 'left' ? ' active' : ''}" data-sum-pos="left" data-slot="${acc}" title="Sidebar à esquerda nesta conta">Esq</button>
+                  <button type="button" class="wv-sum-btn${curDock === 'right' ? ' active' : ''}" data-sum-pos="right" data-slot="${acc}" title="Sidebar à direita nesta conta">Dir</button>
+                  <button type="button" class="wv-sum-btn${curDock === 'bottom' ? ' active' : ''}" data-sum-pos="bottom" data-slot="${acc}" title="Sidebar embaixo nesta conta">Baixo</button>
+                  <button type="button" class="wv-sum-btn close" data-sum-pos="close" data-slot="${acc}" title="Remover sidebar desta conta">×</button>
+                </div>
+              </div>`;
+
+            const pokeHtml = `
+              <div class="wv-sum-poke">
+                <div class="wv-sum-sprite${pk?.shiny ? ' shiny' : ''}">${url ? `<img src="${esc(url)}" alt="" data-sprite-dex="${pkDex}" data-sprite-shiny="${pk?.shiny ? '1' : '0'}" data-sprite-step="0" data-sprite-fallback-text="?" />` : '?'}</div>
+                <div class="wv-sum-poke-info">
+                  <div class="wv-sum-poke-name">${pk ? `${pk.shiny ? '★ ' : ''}${escapeHtml(pk.name)} Nv ${pk.level}` : 'Aguardando Pokémon'}</div>
+                  <div class="wv-sum-hp"><i style="width:${pct}%;background:${hpColor}"></i></div>
+                  <div class="wv-sum-hp-txt">${pk ? `${fmtNum(pk.hp)} / ${fmtNum(pk.maxHp)} HP (${pct}%)` : ''}</div>
+                </div>
+              </div>`;
+
+            const sparkHtml = `<div class="wv-sum-spark">
+              <span>${IC('zap')}XP/h</span>${sparkSvg(list.map((p) => p.xpRate), 'xp')}
+              <span>${IC('coins')}Lucro/h</span>${sparkSvg(list.map((p) => p.goldRate), 'gold')}
+            </div>`;
+
+            if (density === 'compact') {
+                const compactTiles = [
+                    ['XP/h', fmtCompact(st.xpPerHour), ''],
+                    ['Lucro/h', signed(profitH), profitH < 0 ? 'neg' : ''],
+                    ['Capturas', `${fmtNum(st.captures)}${capPctStr !== '-' ? ` (${capPctStr})` : ''}`, ''],
+                    ['Shinies', fmtNum(st.shiniesCaptured), ''],
+                ];
+                const kpisHtml = `<dl class="wv-sum-kpis">${compactTiles.map(([k, v, cls]) =>
+                    `<div${cls ? ` class="${cls}"` : ''}><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd></div>`
+                ).join('')}</dl>`;
+                const metaHtml = `<div class="wv-sum-compact-meta">Abates: <b>${fmtNum(st.kills)}</b> · Ativo: <b>${fmtSumUptime(st.uptimeSec)}</b></div>`;
+                box.innerHTML = headHtml + pokeHtml + kpisHtml + metaHtml + sparkHtml;
+                continue;
+            }
+
+            const tiles = [
+                ['XP/h', fmtCompact(st.xpPerHour), ''],
+                ['Lucro/h', signed(profitH), profitH < 0 ? 'neg' : ''],
+                ['Abates', fmtNum(st.kills), ''],
+                ['Capturas', fmtNum(st.captures), ''],
+                ['Shinies', fmtNum(st.shiniesCaptured), ''],
+                ['Tempo/abate', st.avgKillSec > 0 ? `${String(st.avgKillSec).replace('.', ',')}s` : '-', ''],
+                ['Cap./abate', capPctStr, ''],
+                ['Ativo', fmtSumUptime(st.uptimeSec), ''],
+            ];
+
+            const kpisHtml = `<dl class="wv-sum-kpis">${tiles.map(([k, v, cls]) =>
+                `<div${cls ? ` class="${cls}"` : ''}><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd></div>`
+            ).join('')}</dl>`;
+
+            const dropsHtml = `<div class="wv-sum-drops">${hitDrops.length
+                ? `Drops: ${hitDrops.map((d) => `${escapeHtml(d.name)} x${d.qty}`).join(' · ')}`
+                : 'Drops da sessão: nenhum ainda'}</div>`;
+
+            const buffsSection = buffs
+                ? `<div class="wv-sum-sec">Buffs das lives</div><div class="pcard-buffs wv-sum-buffs">${buffs}</div>`
+                : '';
+
+            const accColor = window.nexoIcons?.accountAccent?.(acc) || 'azul';
+            const eventsHtml = `<div class="wv-sum-sec">Eventos recentes</div><ul class="wv-sum-events">${evs.map((e) => {
+                const meta = classifyLogEntry(e);
+                return `<li class="ev ${esc(meta.vKind)}" data-acc="${acc}" data-acc-color="${esc(accColor)}">${IC(meta.icon)}<span class="ev-text">${escapeHtml(meta.cleanText)}</span><time>${relTime(e.ts)}</time></li>`;
+            }).join('') || '<li class="ev empty">Sem eventos ainda.</li>'}</ul>`;
+
+            box.innerHTML = headHtml + pokeHtml + kpisHtml + dropsHtml + sparkHtml + buffsSection + eventsHtml;
+        }
+    }
+
     // ===== ganchos chamados pelo renderer =====
     function applyAccountColors() {
         const ni = window.nexoIcons;
@@ -1627,12 +1757,16 @@
         }
         renderTabs();
         renderHero();
+        updateAllRecords();
+        renderRecordsStrip();
+        renderCustomPresets();
         renderOverviewExtras();
         for (const acc of ACCOUNTS) {
             renderStageLive(acc);
             renderHud(acc);
         }
         renderPcardsExtra();
+        renderWvSummaries();
         renderBell();
         renderScope();
         renderActivityBadge();
@@ -1757,7 +1891,7 @@
         ].filter(Boolean).join(' · ');
         return `<div class="lb-grid">${kinds}</div><div class="lb-foot">${escapeHtml(foot)}</div>`;
     }
-    const COL_MODE_LABEL = { off: 'Farm normal', pokedex: 'Completar Pokédex', topcatch: 'Top Catch' };
+    const COL_MODE_LABEL = { off: 'Farm normal', pokedex: 'Completar Pokédex', topcatch: 'Top Catch', bestiary: 'Bestiário', 'team-pvp': 'Montar Time PvP' };
     function renderOverviewExtras() {
         const s = snapshots[activeAccount] || {};
         const box = $('ovBuffs');
@@ -1780,11 +1914,117 @@
         }
     }
 
+    // ===== Recordes Históricos da Conta (nexo.records.v1) & Perfis de Farm (Presets) =====
+    const RECORDS_KEY = 'nexo.records.v1';
+    const streakTracker = {};
+    function readRecordsMap() {
+        const raw = LS.get(RECORDS_KEY, {});
+        return raw && typeof raw === 'object' ? raw : {};
+    }
+    function updateAllRecords() {
+        const map = readRecordsMap();
+        let changed = false;
+        const now = Date.now();
+        for (const acc of ACCOUNTS) {
+            const s = snapshots[acc];
+            const st = s?.stats;
+            if (!st) continue;
+            const key = String(acc);
+            const rec = map[key] || { xpH: 0, profitH: 0, capPct: 0, noDeathStreak: 0 };
+            const kills = Number(st.kills || 0);
+            const deaths = Number(st.playerDeaths || 0);
+            const tr = streakTracker[acc] || { lastKills: kills, lastDeaths: deaths, streak: 0 };
+            if (kills < tr.lastKills || deaths > tr.lastDeaths) {
+                tr.streak = 0;
+            } else {
+                tr.streak += Math.max(0, kills - tr.lastKills);
+            }
+            tr.lastKills = kills;
+            tr.lastDeaths = deaths;
+            streakTracker[acc] = tr;
+
+            const xpH = Number(st.xpPerHour || 0);
+            const profitH = Number(st.netGoldPerHour ?? st.goldPerHour ?? 0);
+            const capPct = kills >= 15 ? Number(st.capturePerKillPct ?? ((Number(st.captures || 0) / kills) * 100)) : 0;
+
+            if (xpH > Number(rec.xpH || 0)) { rec.xpH = Math.round(xpH); rec.xpAt = now; changed = true; }
+            if (profitH > Number(rec.profitH || 0)) { rec.profitH = Math.round(profitH); rec.profitAt = now; changed = true; }
+            if (capPct > Number(rec.capPct || 0)) { rec.capPct = Math.round(capPct * 10) / 10; rec.capAt = now; changed = true; }
+            if (tr.streak > Number(rec.noDeathStreak || 0)) { rec.noDeathStreak = tr.streak; rec.streakAt = now; changed = true; }
+            map[key] = rec;
+        }
+        if (changed) LS.set(RECORDS_KEY, map);
+    }
+    function renderRecordsStrip() {
+        const box = $('recordsStrip');
+        if (!box) return;
+        const rec = readRecordsMap()[String(activeAccount)] || {};
+        const hasAny = rec.xpH > 0 || rec.profitH > 0 || rec.capPct > 0 || rec.noDeathStreak > 0;
+        box.classList.toggle('hidden', !hasAny);
+        if (!hasAny) return;
+        const fmtDate = (ts) => (ts ? new Date(ts).toLocaleDateString('pt-BR') : '');
+        const sig = `${activeAccount}|${rec.xpH}|${rec.profitH}|${rec.capPct}|${rec.noDeathStreak}`;
+        if (box.dataset.sig === sig) return;
+        box.dataset.sig = sig;
+        box.innerHTML = `<div class="records-head"><span>${IC('trophy')}Recordes da Conta ${activeAccount}</span><button type="button" class="link-btn" id="btnResetRecords" title="Zerar recordes históricos desta conta">Limpar</button></div>` +
+            `<div class="records-grid">` +
+            `<span class="rec-pill" title="Maior XP/h (${fmtDate(rec.xpAt)})">XP/h: <b>${fmtCompact(rec.xpH || 0)}</b></span>` +
+            `<span class="rec-pill" title="Maior Lucro/h (${fmtDate(rec.profitAt)})">Lucro/h: <b>${signed(rec.profitH || 0)}</b></span>` +
+            `<span class="rec-pill" title="Melhor Capturas/abate com >=15 abates (${fmtDate(rec.capAt)})">Cap/abate: <b>${String(rec.capPct || 0).replace('.', ',')}%</b></span>` +
+            `<span class="rec-pill" title="Maior sequência sem morte (${fmtDate(rec.streakAt)})">Sem morte: <b>${fmtNum(rec.noDeathStreak || 0)}</b></span>` +
+            `</div>`;
+    }
+
+    const PRESETS_KEY = 'nexo.farmPresets.v1';
+    const BUILTIN_PRESETS = {
+        topcatch: {
+            label: 'Top Catch',
+            config: { farmObjective: 'topcatch', farmObjectiveFocus: 'fast', huntGuideMode: 'auto', caidosEnabled: true, ballEconomy: false, preferredBall: 'auto', restockEnabled: true },
+        },
+        outland: {
+            label: 'Outland Lucro',
+            config: { farmObjective: 'off', huntGuideMetric: 'ouro', huntGuideMode: 'auto', caidosEnabled: true, ballEconomy: true, autoCraftShinyEgg: true, autoExtendListings: true, autoOptimizeGear: true },
+        },
+        shiny: {
+            label: 'Shiny & Safari',
+            config: { farmObjective: 'off', huntGuideMetric: 'shiny', huntGuideMode: 'auto', caidosEnabled: true, ballEconomy: false, preferredBall: 'ultra', autoCraftShinyEgg: true, autoMisticoEnter: true },
+        },
+        afk: {
+            label: 'Madrugada AFK',
+            config: { caidosEnabled: true, ensureNativeAutoHeal: true, restockEnabled: true, minGoldReserve: 250000, targetPotions: 80, targetRevives: 40, ballEconomy: true, standbyOn4001: true, autoCraftShinyEgg: true },
+        },
+    };
+    async function applyFarmPreset(label, config) {
+        if (!config) return;
+        const res = await applyConfigTo(activeAccount, config);
+        dirtyByAcc[activeAccount] = false;
+        renderActiveAccountPanel();
+        if (res?.ok !== false) {
+            setSaveState(`${IC('check')}Perfil "${escapeHtml(label)}" aplicado`, 'ok');
+            window.nexoToast?.({ kind: 'ok', title: `Perfil: ${label}`, text: `Configurações aplicadas na Conta ${activeAccount}.`, account: activeAccount });
+        }
+    }
+    function renderCustomPresets() {
+        const list = $('presetCustomList');
+        if (!list) return;
+        const custom = LS.get(PRESETS_KEY, {});
+        const names = Object.keys(custom).sort();
+        const sig = names.join('|');
+        if (list.dataset.sig === sig) return;
+        list.dataset.sig = sig;
+        list.innerHTML = names.length
+            ? names.map((n) => `<span class="preset-chip"><button type="button" class="preset-chip-apply" data-custom-preset="${esc(n)}">${escapeHtml(n)}</button><button type="button" class="preset-chip-del" data-del-preset="${esc(n)}" aria-label="Excluir perfil ${esc(n)}">×</button></span>`).join('')
+            : '';
+    }
+
     // ===== Cards: fechar, recolher e devolver =====
     const CARD_LABEL = {
         poke: 'Pokémon ativo', buffs: 'Buffs das lives', collection: 'Pokédex e Top Catch', perf: 'Desempenho',
-        drops: 'Drops', inv: 'Mochila', quick: 'Ações rápidas', hunt: 'Hunt e objetivo', routines: 'Rotinas',
-        prefs: 'Preferências', trainer: 'Treinador (Exp. Share e Casas)', sniper: 'Sniper do Mercado',
+        events: 'Eventos, Bosses e PvP',
+        drops: 'Drops', inv: 'Mochila', quick: 'Ações rápidas',
+        presets: 'Perfis de Farm', hunt: 'Hunt e objetivo', routines: 'Rotinas',
+        prefs: 'Preferências', prey: 'Prey e Auto-Coleção', utilities: 'Sacrifício, Refino e Utilidades',
+        trainer: 'Treinador (Exp. Share e Casas)', sniper: 'Sniper do Mercado',
         advisor: 'Consultor de Economia',
         alerts: 'Alertas', conn: 'Contas vinculadas', liveStats: 'Recompensas da conta',
         channels: 'Canais e chat', shinyFeed: 'Shinies do servidor',
@@ -1803,7 +2043,7 @@
     }
     const DEFAULT_ORDER = {};
     // Cards com versão resumida: o CSS esconde o que é detalhe em .card.is-resumo.
-    const RESUMO_CARDS = new Set(['poke', 'collection', 'perf', 'drops', 'inv', 'routines', 'prefs', 'trainer', 'advisor', 'alerts', 'conn', 'liveStats', 'channels', 'shinyFeed']);
+    const RESUMO_CARDS = new Set(['poke', 'collection', 'perf', 'events', 'drops', 'inv', 'routines', 'prefs', 'prey', 'utilities', 'trainer', 'advisor', 'alerts', 'conn', 'liveStats', 'channels', 'shinyFeed']);
     const panelCards = (panel) => [...panel.querySelectorAll(':scope > .card[data-card]')];
     // Reposiciona os cards na ordem salva usando os lugares que eles já ocupam:
     // barras e avisos que não são card ficam onde estão.
@@ -1991,8 +2231,13 @@
             grip.setPointerCapture(ev.pointerId);
             const startX = ev.clientX;
             const startW = pane.getBoundingClientRect().width;
+            const dockRight = $('workspace')?.classList.contains('split-dock-right');
             document.body.classList.add('is-resizing');
-            const move = (e) => { paneW = Math.round(startW + (e.clientX - startX)); applyPaneWidth(); };
+            const move = (e) => {
+                const delta = dockRight ? -(e.clientX - startX) : (e.clientX - startX);
+                paneW = Math.round(startW + delta);
+                applyPaneWidth();
+            };
             const up = () => {
                 grip.removeEventListener('pointermove', move);
                 grip.removeEventListener('pointerup', up);
@@ -2011,7 +2256,8 @@
         afterRender,
         onSubtab,
         onViewMode: () => { setPopover('more', false); },
-        afterViewMode: () => { buildDock(); if (viewMode === 'grid') applyGridLayout(); },
+        afterViewMode: () => { buildDock(); if (viewMode === 'grid') applyGridLayout(); renderWvSummaries(); },
+        renderWvSummaries,
         onConfigDirty,
         routeToast,
         recordEvent,
@@ -2151,6 +2397,48 @@
         setupCards();
         setupCardDrag();
         document.addEventListener('click', onCardClick);
+        $('recordsStrip')?.addEventListener('click', (ev) => {
+            if (!ev.target.closest('#btnResetRecords')) return;
+            const map = readRecordsMap();
+            delete map[String(activeAccount)];
+            LS.set(RECORDS_KEY, map);
+            if ($('recordsStrip')) $('recordsStrip').dataset.sig = '';
+            renderRecordsStrip();
+        });
+        $('presetBar')?.addEventListener('click', (ev) => {
+            const btn = ev.target.closest('button[data-farm-preset]');
+            if (!btn) return;
+            const preset = BUILTIN_PRESETS[btn.dataset.farmPreset];
+            if (preset) void applyFarmPreset(preset.label, preset.config);
+        });
+        $('btnSavePreset')?.addEventListener('click', () => {
+            const inp = $('presetCustomName');
+            const name = String(inp?.value || '').trim().slice(0, 24);
+            if (!name) return;
+            const custom = LS.get(PRESETS_KEY, {});
+            custom[name] = readConfigForm();
+            LS.set(PRESETS_KEY, custom);
+            if (inp) inp.value = '';
+            renderCustomPresets();
+            setSaveState(`${IC('save')}Perfil "${escapeHtml(name)}" salvo`, 'ok');
+        });
+        $('presetCustomList')?.addEventListener('click', (ev) => {
+            const applyBtn = ev.target.closest('button[data-custom-preset]');
+            if (applyBtn) {
+                const name = applyBtn.dataset.customPreset;
+                const custom = LS.get(PRESETS_KEY, {});
+                if (custom[name]) void applyFarmPreset(name, custom[name]);
+                return;
+            }
+            const delBtn = ev.target.closest('button[data-del-preset]');
+            if (delBtn) {
+                const name = delBtn.dataset.delPreset;
+                const custom = LS.get(PRESETS_KEY, {});
+                delete custom[name];
+                LS.set(PRESETS_KEY, custom);
+                renderCustomPresets();
+            }
+        });
         $('btnOvGoLives')?.addEventListener('click', () => goAccount(activeAccount, 'lives'));
         if (!POPOUT) {
             ensureActivityDock();

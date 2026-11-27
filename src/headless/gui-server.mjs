@@ -2,7 +2,7 @@
 import { createServer } from 'node:http';
 import { fetchSpeciesCatalog, getSharedMarketBase, SPECIES_CACHE_VERSION } from './market-base.mjs';
 import { adviseItems, advisePokemons, buildSpeciesIndex, estimatePokemonPrice, isLegendary, notaOf } from './economy-advisor.mjs';
-import { planFinalEvolution } from './evolution-plan.mjs';
+import { findPokedexEvolutions, planFinalEvolution } from './evolution-plan.mjs';
 import { DROP_DEFAULTS, decideDrop, frameForDecision, marketRulesOf, netOfListing, normalizeDropPatch } from './drop-router.mjs';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -24,6 +24,9 @@ import {
     ITEM_IDS,
     BUYABLE_POTION_IDS,
     normalizePotionIds,
+    renovaOVigia,
+    computeReconnectDelay,
+    computePassStatus,
     createStateMerger,
     createFieldTracker,
     isWildCampoMob,
@@ -43,6 +46,43 @@ import {
     selectObjectiveHunt,
 } from './protocol-engine.mjs';
 import {
+    getSeasonalTypeWindow,
+    multDanoSazonal,
+    degrauFragmentoOvoShiny,
+    chanceFragmentoOvoShiny,
+    proximoDegrauOvoShiny,
+    outlandTier,
+    OUTLAND_TIERS,
+    tierOutlandValido,
+    potencialDoSpeed,
+    descontoDoSpeedPct,
+} from './native-hunt-analyser.mjs';
+import {
+    PASSIVAS_DESDE_MS,
+    passivaParaEspecie,
+    effectiveArenaLevel,
+    sugerirProximoRefino,
+    isProtectedSpecial,
+    resumoPityShiny,
+    bestiaryProgress,
+    REGIOES_BOSS,
+    premioDoBossNoInstante,
+    chancesBossPorPar,
+    MULT_SHINY_TUDO_NO_SAFARI,
+    optimalSafariTickets,
+    getUpcomingEvents,
+    findBestBikeUpgrade,
+    findCraftableSets,
+    MAX_CASAS_EM_USO,
+    computeCapStatus,
+    selectOferendaBatches,
+    isBlackFridayActive,
+    BLACK_FRIDAY,
+    BICICLETA_VELOCIDADE,
+    CASA_XP_SHARE,
+} from './pvp-meta.mjs';
+import { buildRecommendedPvpTeam } from './team-builder.mjs';
+import {
     XP_SHARE_HELD_ID,
     getPokemonLocation,
     evaluateTrainerPlan,
@@ -51,6 +91,8 @@ import {
     buildPokemonListingFrame,
     buildSniperPokemonQueries,
     evaluateSniperPokemonListings,
+    evaluateOwnListingsExtension,
+    evaluateGearOptimization,
 } from './trainer-sniper.mjs';
 import {
     liveRewards,
@@ -121,8 +163,6 @@ const PING_INTERVAL_MS = 25_000;
 const WATCHDOG_INTERVAL_MS = 10_000;
 const WATCHDOG_TIMEOUT_MS = 35_000;
 const LIVE_CYCLE_INTERVAL_MS = 55_000;
-const MIN_RECONNECT_MS = 2_000;
-const MAX_RECONNECT_MS = 30_000;
 const MAX_LOGS = 120;
 const BALL_LABELS = Object.freeze({ 1: 'Poke Ball', 2: 'Great Ball', 3: 'Super Ball', 4: 'Ultra Ball', 5: 'Beast Ball' });
 
@@ -153,6 +193,14 @@ const EDITABLE_CONFIG_KEYS = new Set([
     'dailyPassEnabled',
     'preyEnabled',
     'incubatorEnabled',
+    'autoCraftShinyEgg',
+    'autoSacrificeRedeem',
+    'autoOferendaOnFull',
+    'autoRaidEnroll',
+    'autoShowdownEnroll',
+    'autoMisticoEnter',
+    'autoExtendListings',
+    'autoOptimizeGear',
     'ensureNativeAutoHeal',
     'targetHuntSlug',
     'huntGuideMode',
@@ -374,6 +422,14 @@ function buildConfig(prefs = {}, saved = {}, overrides = {}, isolatedAccount = f
         dailyPassEnabled: p.dailyPassEnabled ?? true,
         preyEnabled: p.preyEnabled ?? true,
         incubatorEnabled: p.incubatorEnabled ?? true,
+        autoCraftShinyEgg: p.autoCraftShinyEgg ?? true,
+        autoSacrificeRedeem: Boolean(p.autoSacrificeRedeem ?? false),
+        autoOferendaOnFull: Boolean(p.autoOferendaOnFull ?? false),
+        autoRaidEnroll: Boolean(p.autoRaidEnroll ?? false),
+        autoShowdownEnroll: Boolean(p.autoShowdownEnroll ?? false),
+        autoMisticoEnter: Boolean(p.autoMisticoEnter ?? false),
+        autoExtendListings: Boolean(p.autoExtendListings ?? false),
+        autoOptimizeGear: Boolean(p.autoOptimizeGear ?? false),
         targetHuntSlug: null,
         huntGuideMode: 'off',
         huntGuideMetric: 'xp',
@@ -443,7 +499,7 @@ function normalizeConfigPatch(current, patch = {}) {
     const next = { ...current };
     if (['off', 'notify', 'auto'].includes(patch.huntGuideMode)) next.huntGuideMode = patch.huntGuideMode;
     if (['xp', 'ouro', 'shiny'].includes(patch.huntGuideMetric)) next.huntGuideMetric = patch.huntGuideMetric;
-    if (['off', 'pokedex', 'topcatch'].includes(patch.farmObjective)) next.farmObjective = patch.farmObjective;
+    if (['off', 'pokedex', 'topcatch', 'bestiary', 'team-pvp'].includes(patch.farmObjective)) next.farmObjective = patch.farmObjective;
     if (['xp', 'ouro', 'shiny', 'fast'].includes(patch.farmObjectiveFocus)) next.farmObjectiveFocus = patch.farmObjectiveFocus;
     if (patch.caidosEnabled !== undefined) next.caidosEnabled = Boolean(patch.caidosEnabled);
     if (typeof patch.preferredBall === 'string' && ['auto', 'poke', 'great', 'super', 'ultra', 'beast'].includes(patch.preferredBall)) {
@@ -519,6 +575,14 @@ function normalizeConfigPatch(current, patch = {}) {
     if (patch.dailyPassEnabled !== undefined) next.dailyPassEnabled = Boolean(patch.dailyPassEnabled);
     if (patch.preyEnabled !== undefined) next.preyEnabled = Boolean(patch.preyEnabled);
     if (patch.incubatorEnabled !== undefined) next.incubatorEnabled = Boolean(patch.incubatorEnabled);
+    if (patch.autoCraftShinyEgg !== undefined) next.autoCraftShinyEgg = Boolean(patch.autoCraftShinyEgg);
+    if (patch.autoSacrificeRedeem !== undefined) next.autoSacrificeRedeem = Boolean(patch.autoSacrificeRedeem);
+    if (patch.autoOferendaOnFull !== undefined) next.autoOferendaOnFull = Boolean(patch.autoOferendaOnFull);
+    if (patch.autoRaidEnroll !== undefined) next.autoRaidEnroll = Boolean(patch.autoRaidEnroll);
+    if (patch.autoShowdownEnroll !== undefined) next.autoShowdownEnroll = Boolean(patch.autoShowdownEnroll);
+    if (patch.autoMisticoEnter !== undefined) next.autoMisticoEnter = Boolean(patch.autoMisticoEnter);
+    if (patch.autoExtendListings !== undefined) next.autoExtendListings = Boolean(patch.autoExtendListings);
+    if (patch.autoOptimizeGear !== undefined) next.autoOptimizeGear = Boolean(patch.autoOptimizeGear);
     if (patch.ensureNativeAutoHeal !== undefined) next.ensureNativeAutoHeal = Boolean(patch.ensureNativeAutoHeal);
     if (patch.targetHuntSlug !== undefined) {
         next.targetHuntSlug = typeof patch.targetHuntSlug === 'string' && patch.targetHuntSlug.trim()
@@ -3447,7 +3511,14 @@ export function createHeadlessController(options = {}) {
     let watchdogTimer = null;
     let reconnectTimer = null;
     let lastMsgAt = 0;
-    let backoffMs = MIN_RECONNECT_MS;
+    let lastSimAt = 0;
+    let reconnectAttempt = 0;
+    let serverHealth = { ok: true, checkedAt: 0, note: '' };
+    let seasonalDayState = null;
+    let latestPityNotice = null;
+    let gymState = null;
+    let eventStatus = { raid: null, showdown: null, camp: null };
+    let ownListings = [];
 
     const recentShinies = [];
     const ownShinies = []; // ficha dos shinies capturados por esta conta (para o cartao na HUD)
@@ -3817,10 +3888,36 @@ export function createHeadlessController(options = {}) {
         return false;
     };
 
+    const resolveSpeciesMapForTeamBuilder = () => {
+        if (advisorSpecies?.byId instanceof Map && advisorSpecies.byId.size > 0) {
+            return advisorSpecies.byId;
+        }
+        const names = catalog.pokemonNames || {};
+        const entries = Object.entries(names);
+        if (entries.length === 0) return null;
+        const map = new Map();
+        for (const [k, nm] of entries) {
+            const id = Number(k);
+            if (id > 0 && nm) map.set(id, { pokeId: id, name: String(nm) });
+        }
+        return map;
+    };
+
+    const computeTeamBuilderPlan = (state) => {
+        if (!state) return null;
+        return buildRecommendedPvpTeam({
+            pokemons: Array.isArray(state.pokemons) ? state.pokemons : [],
+            hunts: catalog.huntsList || [],
+            speciesById: resolveSpeciesMapForTeamBuilder(),
+            trainerLevel: Number(state.level || 0),
+            nowMs: getSyncedNowMs(),
+        });
+    };
+
     const evaluateFarmObjective = ({ triggerSwap = true } = {}) => {
         const mode = config.farmObjective;
         const focus = config.farmObjectiveFocus || 'xp';
-        if (mode !== 'pokedex' && mode !== 'topcatch') {
+        if (mode !== 'pokedex' && mode !== 'topcatch' && mode !== 'bestiary' && mode !== 'team-pvp') {
             objectiveTargetSlug = null;
             objectiveLastDecision = null;
             return null;
@@ -3837,9 +3934,48 @@ export function createHeadlessController(options = {}) {
             };
             return objectiveLastDecision;
         }
+        if (mode === 'team-pvp') {
+            const tb = computeTeamBuilderPlan(state);
+            const targetSlug = tb?.nextTargetHuntSlug || null;
+            const targetHunt = targetSlug ? (catalog.huntsBySlug?.[targetSlug] || null) : null;
+            const completed = Boolean(tb && tb.pendingCount === 0);
+            const decision = {
+                active: true,
+                mode: 'team-pvp',
+                focus,
+                completed,
+                targetSlug,
+                targetName: tb?.nextTargetHuntName || targetHunt?.nome || targetSlug || null,
+                targetLevel: Number(targetHunt?.nivel ?? targetHunt?.level ?? 0),
+                remainingCount: Number(tb?.pendingCount || 0),
+                targetSpeciesIds: Array.isArray(tb?.targetSpeciesIds) ? tb.targetSpeciesIds : [],
+                statusText: tb?.summaryText || 'Analisando candidatos para o time PvP...',
+            };
+            objectiveTargetSlug = targetSlug;
+            objectiveLastDecision = decision;
+            if (completed) {
+                const logKey = 'done:team-pvp';
+                if (objectiveLastLogKey !== logKey) {
+                    objectiveLastLogKey = logKey;
+                    pushLog('ok', decision.statusText);
+                }
+            } else if (
+                triggerSwap &&
+                isOnline &&
+                config.caidosEnabled !== false &&
+                !config.economyPingOnly &&
+                targetSlug &&
+                targetSlug !== state.huntSlug &&
+                state.noCentro !== true &&
+                !(Number(state.mistico?.prazo || 0) > nowFn())
+            ) {
+                queueObjectiveHuntSwap(targetSlug, 'Montar Time PvP');
+            }
+            return decision;
+        }
         const capturedSet = mode === 'pokedex'
             ? getPokedexCapturedSet(state.pokedex, optimisticPokedexKeys)
-            : getEffectiveWeeklyCaughtSet();
+            : (mode === 'topcatch' ? getEffectiveWeeklyCaughtSet() : null);
         if (mode === 'topcatch' && !capturedSet) {
             if (isOnline) requestTopCatchSync({ force: false, includeRanking: true });
             objectiveLastDecision = {
@@ -3864,7 +4000,7 @@ export function createHeadlessController(options = {}) {
         for (const [s, until] of objectiveStaleUntilBySlug) {
             if (until <= now) objectiveStaleUntilBySlug.delete(s);
         }
-        if (state.huntSlug && state.huntSlug === objectiveTargetSlug && isOnline && config.caidosEnabled !== false) {
+        if (state.huntSlug && state.huntSlug === objectiveTargetSlug && isOnline && (mode === 'bestiary' || config.caidosEnabled !== false)) {
             if (objectiveStaySlug !== state.huntSlug) {
                 objectiveStaySlug = state.huntSlug;
                 objectiveStaySinceAt = now;
@@ -3889,15 +4025,18 @@ export function createHeadlessController(options = {}) {
             activePokemonLevel: Number(activePk?.level || 0),
             capturedSet,
             huntRanking: matchingRanking,
+            bestiaryMap: mode === 'bestiary' ? (state.bestiario || null) : null,
         });
-        const modeLabel = mode === 'pokedex' ? 'Pokédex' : 'Top Catch';
+        const modeLabel = mode === 'pokedex' ? 'Pokédex' : (mode === 'bestiary' ? 'Bestiário' : 'Top Catch');
         const focusLabel = { xp: 'XP/h', ouro: 'Ouro/h', shiny: 'Shiny/h', fast: 'Mais rápido' }[focus] || 'XP/h';
 
         if (decision.completed) {
             objectiveTargetSlug = null;
             const statusText = mode === 'pokedex'
                 ? 'Pokédex concluída em todas as hunts liberadas!'
-                : 'Top Catch concluído em todas as hunts liberadas desta semana!';
+                : (mode === 'bestiary'
+                    ? 'Bestiário concluído em todas as hunts liberadas!'
+                    : 'Top Catch concluído em todas as hunts liberadas desta semana!');
             decision.statusText = statusText;
             objectiveLastDecision = decision;
             const logKey = `done:${mode}:${topCatchState.week || ''}`;
@@ -3914,8 +4053,15 @@ export function createHeadlessController(options = {}) {
         const rateTxt = decision.usedHuntGuide ? formatObjectiveRate(decision.metricValue, focus) : '';
         decision.targetMetricLabel = rateTxt;
         if (decision.targetSlug === state.huntSlug) {
-            const missNames = (decision.currentMissing || []).slice(0, 3).map((m) => m.name).join(', ');
-            decision.statusText = `${modeLabel} (${focusLabel}): buscando ${missNames || decision.targetName}${rateTxt ? ` · ${rateTxt}` : ''} · faltam ${decision.pendingHuntsCount} hunts`;
+            if (mode === 'bestiary') {
+                const remTxt = Number.isFinite(decision.bestiaryClosestRemaining)
+                    ? `faltam ${Number(decision.bestiaryClosestRemaining).toLocaleString('pt-BR')} abates p/ degrau`
+                    : decision.targetName;
+                decision.statusText = `${modeLabel} (${focusLabel}): ${remTxt}${rateTxt ? ` · ${rateTxt}` : ''} · faltam ${decision.pendingHuntsCount} hunts`;
+            } else {
+                const missNames = (decision.currentMissing || []).slice(0, 3).map((m) => m.name).join(', ');
+                decision.statusText = `${modeLabel} (${focusLabel}): buscando ${missNames || decision.targetName}${rateTxt ? ` · ${rateTxt}` : ''} · faltam ${decision.pendingHuntsCount} hunts`;
+            }
         } else {
             decision.statusText = `${modeLabel} (${focusLabel}) -> ${decision.targetName} (Nv ${decision.targetLevel})${rateTxt ? ` · ${rateTxt}` : ''} · faltam ${decision.pendingHuntsCount} hunts`;
         }
@@ -3924,7 +4070,7 @@ export function createHeadlessController(options = {}) {
         if (
             triggerSwap &&
             isOnline &&
-            config.caidosEnabled !== false &&
+            (mode === 'bestiary' || config.caidosEnabled !== false) &&
             !config.economyPingOnly &&
             decision.targetSlug &&
             decision.targetSlug !== state.huntSlug &&
@@ -3941,8 +4087,8 @@ export function createHeadlessController(options = {}) {
         const mode = config.huntGuideMode;
         const objMode = config.farmObjective;
         const objFocus = config.farmObjectiveFocus || 'xp';
-        const objNeedsGuide = (objMode === 'pokedex' || objMode === 'topcatch') &&
-            !objectiveLastDecision?.completed && objFocus !== 'fast';
+        const isObjActive = objMode === 'pokedex' || objMode === 'topcatch' || objMode === 'bestiary' || objMode === 'team-pvp';
+        const objNeedsGuide = isObjActive && objMode !== 'team-pvp' && !objectiveLastDecision?.completed && objFocus !== 'fast';
         const metric = objNeedsGuide ? objFocus : config.huntGuideMetric;
         const activeStatus = status;
         const isOnline = activeStatus === 'bridge' || activeStatus === 'connected';
@@ -3950,7 +4096,7 @@ export function createHeadlessController(options = {}) {
             requestTopCatchSync({ force: false, includeRanking: true });
         }
         if ((mode === 'off' && !objNeedsGuide) || huntGuideRequest || !isOnline || config.economyPingOnly) {
-            if (objMode === 'pokedex' || objMode === 'topcatch') {
+            if (isObjActive) {
                 evaluateFarmObjective({ triggerSwap: true });
             }
             return;
@@ -3962,7 +4108,7 @@ export function createHeadlessController(options = {}) {
             if (activeStatus === 'connected' && headlessHuntGuide && !headlessHuntGuide.isAvailable?.()) {
                 huntGuideStatus = { note: 'Instale a extensão /hunt for PokeIdle no Chrome para ranking automático.' };
             }
-            if (objMode === 'pokedex' || objMode === 'topcatch') {
+            if (isObjActive) {
                 evaluateFarmObjective({ triggerSwap: true });
             }
             return;
@@ -3995,7 +4141,7 @@ export function createHeadlessController(options = {}) {
                             : 'Aguardando o ranking da extensão /hunt no jogo.',
                     };
                 }
-                if (objMode === 'pokedex' || objMode === 'topcatch') {
+                if (isObjActive) {
                     evaluateFarmObjective({ triggerSwap: true });
                 }
                 return;
@@ -4019,9 +4165,9 @@ export function createHeadlessController(options = {}) {
             const previous = huntGuideStatus;
             huntGuideStatus = { slug: best.slug, metric, note, sameHunt, unsafe: best.unsafe };
 
-            if (objMode === 'pokedex' || objMode === 'topcatch') {
+            if (isObjActive) {
                 const decision = evaluateFarmObjective({ triggerSwap: true });
-                // Enquanto o modo Pokedex / Top Catch tiver hunts pendentes, ele controla a troca de mapa.
+                // Enquanto o modo Pokedex / Top Catch / Bestiario tiver hunts pendentes, ele controla a troca de mapa.
                 if (decision && !decision.completed) return;
             }
 
@@ -4050,7 +4196,7 @@ export function createHeadlessController(options = {}) {
         } catch {
             if (status === activeStatus && config.huntGuideMode === mode) {
                 if (mode !== 'off') huntGuideStatus = { note: 'Ranking /hunt indisponível no momento.' };
-                if (objMode === 'pokedex' || objMode === 'topcatch') {
+                if (isObjActive) {
                     evaluateFarmObjective({ triggerSwap: true });
                 }
             }
@@ -4113,7 +4259,7 @@ export function createHeadlessController(options = {}) {
             ...catalog,
             huntSpeciesId: catalog.huntSpeciesBySlug?.[state?.huntSlug] ?? null,
         };
-        const effectiveTargetSlug = (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch') && objectiveTargetSlug
+        const effectiveTargetSlug = (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch' || config.farmObjective === 'bestiary' || config.farmObjective === 'team-pvp') && objectiveTargetSlug
             ? objectiveTargetSlug
             : (config.huntGuideMode === 'auto' && huntGuideTarget ? huntGuideTarget : config.targetHuntSlug);
         const syncedNow = getSyncedNowMs();
@@ -4152,6 +4298,36 @@ export function createHeadlessController(options = {}) {
             });
             if (trRes.actions.length) sendActions(trRes.actions);
             for (const lg of trRes.logs) pushLog(lg.kind || 'ok', lg.text);
+        }
+        if (!config.economyPingOnly && config.autoExtendListings === true && syncedNow - (tracker.lastExtendListingsAt || 0) >= 60_000) {
+            const listings = ownListings.length > 0
+                ? ownListings
+                : (Array.isArray(state?.meusAnuncios) ? state.meusAnuncios : []);
+            const extActions = evaluateOwnListingsExtension(listings, syncedNow, { autoExtend: true });
+            if (extActions.length) {
+                tracker.lastExtendListingsAt = syncedNow;
+                sendActions(extActions);
+            }
+        }
+        if (!config.economyPingOnly && config.autoOptimizeGear === true) {
+            const gearActions = evaluateGearOptimization(state, syncedNow, trainerTracker, { autoOptimizeGear: true });
+            if (gearActions.length) sendActions(gearActions);
+        }
+        if (!config.economyPingOnly && config.autoOferendaOnFull === true && syncedNow - (tracker.lastAutoOferendaAt || 0) >= 60_000) {
+            const travadosSet = new Set((Array.isArray(state?.automation?.pokemonTravado) ? state.automation.pokemonTravado : []).map(String));
+            const capSt = computeCapStatus(state?.pokemons || [], travadosSet);
+            if (capSt.depot.danger || capSt.depot.full) {
+                const busy = advisorBusyIds(state);
+                const protectedIds = new Set([...travadosSet, ...busy]);
+                const depotPokes = (state?.pokemons || []).filter((pk) => pk && pk.slot == null && !isProtectedSpecial(pk) && !protectedIds.has(String(pk.id)));
+                const batches = selectOferendaBatches(depotPokes, protectedIds, { monoTypeOnly: true });
+                if (batches.length > 0 && batches[0].pokemonIds.length === 5) {
+                    tracker.lastAutoOferendaAt = syncedNow;
+                    if (sendFrame({ t: 'oferenda.girar', pokemonIds: batches[0].pokemonIds })) {
+                        pushLog('info', `Auto-Oferenda: enviado lote de 5 (${batches[0].type}) com deposito em ${capSt.depot.pct}%.`);
+                    }
+                }
+            }
         }
         const choice = tracker.potionChoice;
         if (config.potionOptimize && choice && choice.id !== tracker.lastPotionChoiceId) {
@@ -4295,7 +4471,7 @@ export function createHeadlessController(options = {}) {
                             objectiveRotateFromSlug = merger.getState()?.huntSlug || null;
                         }
                     }
-                    if (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch') {
+                    if (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch' || config.farmObjective === 'team-pvp') {
                         evaluateFarmObjective({ triggerSwap: true });
                     }
                 }
@@ -4378,6 +4554,14 @@ export function createHeadlessController(options = {}) {
                 const qtd = Number(e.qtd || 1);
                 pushLog('reward', `+${qtd} diamante${qtd === 1 ? '' : 's'} creditado${qtd === 1 ? '' : 's'} pelo voto no IdleHub.io!`);
                 void refreshVoteStatus({ force: true });
+            } else if (kind === 'garantiaLure') {
+                latestPityNotice = { ts, message: 'Pity Shiny: garantia de Lure ativada!', data: e };
+                pushLog('shiny', 'Pity Shiny: garantia de Lure ativada!');
+            } else if (kind === 'bestiarioDegrau') {
+                const spId = e.speciesId ?? e.pokeId ?? null;
+                const spName = e.nome || (spId != null ? catalog.pokemonNames?.[spId] : '') || (spId != null ? `#${spId}` : 'Especie');
+                const degrau = e.degrau ?? e.abates ?? e.marco ?? '';
+                pushLog('reward', `Bestiario: ${spName} atingiu degrau${degrau ? ` ${degrau}` : ''}!`);
             }
         }
         scanShinyField(ts);
@@ -4424,9 +4608,46 @@ export function createHeadlessController(options = {}) {
         }
         if (!m || typeof m !== 'object') return;
         lastMsgAt = nowFn();
+        if (renovaOVigia(m.t)) {
+            lastSimAt = lastMsgAt;
+        }
 
         if (m.t === 'pong') {
             stats.pongs += 1;
+            return;
+        }
+
+        if (m.t === 'diaSazonal') {
+            seasonalDayState = {
+                tipo: m.tipo ?? m.diaSazonal?.tipo ?? seasonalDayState?.tipo ?? null,
+                startsAt: m.inicio ?? m.startsAt ?? seasonalDayState?.startsAt ?? null,
+                endsAt: m.fim ?? m.endsAt ?? seasonalDayState?.endsAt ?? null,
+            };
+            return;
+        }
+
+        if (m.t === 'garantiaLure') {
+            latestPityNotice = { ts: lastMsgAt, message: 'Pity Shiny: garantia de Lure ativada!', data: m };
+            pushLog('shiny', 'Pity Shiny: garantia de Lure ativada!');
+            return;
+        }
+
+        if (m.t === 'bestiarioDegrau') {
+            const spId = m.speciesId ?? m.pokeId ?? null;
+            const spName = m.nome || (spId != null ? catalog.pokemonNames?.[spId] : '') || (spId != null ? `#${spId}` : 'Especie');
+            const degrau = m.degrau ?? m.abates ?? m.marco ?? '';
+            pushLog('reward', `Bestiario: ${spName} atingiu degrau${degrau ? ` ${degrau}` : ''}!`);
+            return;
+        }
+
+        if (m.t === 'ginasio') {
+            gymState = { ...m, updatedAt: lastMsgAt };
+            return;
+        }
+
+        if (m.t === 'raid' || m.t === 'showdown' || m.t === 'campeonato') {
+            const evKey = m.t === 'campeonato' ? 'camp' : m.t;
+            eventStatus = { ...eventStatus, [evKey]: { ...m, updatedAt: lastMsgAt } };
             return;
         }
 
@@ -4615,6 +4836,19 @@ export function createHeadlessController(options = {}) {
             ingestWelcomeCatalog(m, catalog);
             if (m.estado) merger.merge(m.estado);
             const state = merger.getState();
+            if (m.diaSazonal || state?.diaSazonal) {
+                const ds = m.diaSazonal ?? state?.diaSazonal;
+                if (ds && typeof ds === 'object') {
+                    seasonalDayState = {
+                        tipo: ds.tipo ?? seasonalDayState?.tipo ?? null,
+                        startsAt: ds.inicio ?? ds.startsAt ?? seasonalDayState?.startsAt ?? null,
+                        endsAt: ds.fim ?? ds.endsAt ?? seasonalDayState?.endsAt ?? null,
+                    };
+                } else if (typeof ds === 'string') {
+                    seasonalDayState = { ...(seasonalDayState || {}), tipo: ds };
+                }
+            }
+            if (Array.isArray(state?.meusAnuncios)) ownListings = state.meusAnuncios;
             if (state?.noCentro === true) field.reset();
             syncCombatTimersFromState(m.estado, state);
             syncTopCatchFromState(state);
@@ -4660,7 +4894,7 @@ export function createHeadlessController(options = {}) {
                 config.farmObjectiveFocus !== 'fast' &&
                 huntGuideRanking?.metric !== config.farmObjectiveFocus
             );
-            if (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch') {
+            if (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch' || config.farmObjective === 'bestiary' || config.farmObjective === 'team-pvp') {
                 evaluateFarmObjective({ triggerSwap: !waitingInitialRank });
             }
             if (pendingHuntSlug) schedulePendingHuntFlush();
@@ -4677,6 +4911,19 @@ export function createHeadlessController(options = {}) {
             liveBridge.ingestWsMessage(m);
             if (m.estado) merger.merge(m.estado);
             const state = merger.getState();
+            if (state?.diaSazonal) {
+                const ds = state.diaSazonal;
+                if (ds && typeof ds === 'object') {
+                    seasonalDayState = {
+                        tipo: ds.tipo ?? seasonalDayState?.tipo ?? null,
+                        startsAt: ds.inicio ?? ds.startsAt ?? seasonalDayState?.startsAt ?? null,
+                        endsAt: ds.fim ?? ds.endsAt ?? seasonalDayState?.endsAt ?? null,
+                    };
+                } else if (typeof ds === 'string') {
+                    seasonalDayState = { ...(seasonalDayState || {}), tipo: ds };
+                }
+            }
+            if (Array.isArray(state?.meusAnuncios)) ownListings = state.meusAnuncios;
             if (state?.noCentro === true) field.reset();
             syncCombatTimersFromState(m.estado, state);
             syncTopCatchFromState(state);
@@ -4691,7 +4938,7 @@ export function createHeadlessController(options = {}) {
                 lastError = null;
                 void checkHuntGuide();
             }
-            if (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch') {
+            if (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch' || config.farmObjective === 'bestiary' || config.farmObjective === 'team-pvp') {
                 const waitingInitialRank = Boolean(
                     huntGuideRequest &&
                     config.farmObjectiveFocus !== 'fast' &&
@@ -4826,6 +5073,12 @@ export function createHeadlessController(options = {}) {
                         rtTimer.unref?.();
                         sniperRetentionTimers.set(pkKey, rtTimer);
                     }
+                }
+            } else if ((m.aba === 'meus' || m.aba === 'meusAnuncios') && Array.isArray(m.linhas)) {
+                ownListings = m.linhas;
+                if (config.autoExtendListings === true && !config.economyPingOnly) {
+                    const extActions = evaluateOwnListingsExtension(ownListings, getSyncedNowMs(), { autoExtend: true });
+                    if (extActions.length) sendActions(extActions);
                 }
             }
             return;
@@ -5165,6 +5418,7 @@ export function createHeadlessController(options = {}) {
         lastError = null;
         if (!stats.startedAt) stats.startedAt = nowFn();
         lastMsgAt = nowFn();
+        lastSimAt = lastMsgAt;
         pushLog('info', `Conectando em ${DEFAULT_WS_URL} como ${session.nick}...`);
 
         const socket = wsFactory(DEFAULT_WS_URL, {
@@ -5178,8 +5432,10 @@ export function createHeadlessController(options = {}) {
         attachWsListeners(socket, {
             onOpen: () => {
                 if (ws !== socket || disposed) return;
-                backoffMs = MIN_RECONNECT_MS;
+                reconnectAttempt = 0;
                 lastMsgAt = nowFn();
+                lastSimAt = lastMsgAt;
+                serverHealth = { ok: true, checkedAt: lastMsgAt, note: '' };
                 sendFrame({
                     t: 'hello',
                     nick: session.nick,
@@ -5191,8 +5447,8 @@ export function createHeadlessController(options = {}) {
                     sendFrame({ t: 'ping' });
                 }, pingIntervalMs);
                 watchdogTimer = setInterval(() => {
-                    if (nowFn() - lastMsgAt > watchdogTimeoutMs) {
-                        pushLog('warn', 'Watchdog sem resposta (>35s). Reiniciando socket...');
+                    if (nowFn() - (lastSimAt || lastMsgAt) > watchdogTimeoutMs) {
+                        pushLog('warn', 'Watchdog do simulador sem resposta (>35s). Reiniciando socket...');
                         try {
                             socket.close(4000, 'watchdog timeout');
                         } catch {
@@ -5230,10 +5486,32 @@ export function createHeadlessController(options = {}) {
                     return;
                 }
 
+                reconnectAttempt += 1;
                 status = 'error';
-                const waitMs = backoffMs;
-                backoffMs = Math.min(MAX_RECONNECT_MS, backoffMs * 2);
+                const waitMs = computeReconnectDelay({ attempt: reconnectAttempt, code });
                 pushLog('warn', `Conexao fechada (code=${code}). Reconectando em ${Math.round(waitMs / 1000)}s...`);
+                if (reconnectAttempt >= 2) {
+                    const fetchImpl = options.fetch || globalThis.fetch;
+                    if (typeof fetchImpl === 'function') {
+                        Promise.resolve(fetchImpl('https://pokeidle.io/saude', { signal: AbortSignal.timeout(4000) }))
+                            .then((res) => {
+                                if (disposed) return;
+                                serverHealth = {
+                                    ok: Boolean(res?.ok),
+                                    checkedAt: nowFn(),
+                                    note: res?.ok ? 'Servidor respondeu /saude' : `HTTP ${res?.status ?? '?'}`,
+                                };
+                            })
+                            .catch((err) => {
+                                if (disposed) return;
+                                serverHealth = {
+                                    ok: false,
+                                    checkedAt: nowFn(),
+                                    note: err?.name === 'TimeoutError' ? 'Timeout em /saude' : (err?.message || 'Falha em /saude'),
+                                };
+                            });
+                    }
+                }
                 scheduleReconnect(waitMs);
             },
         });
@@ -5793,7 +6071,7 @@ export function createHeadlessController(options = {}) {
                     requestTopCatchSync({ force: true, includeRanking: true });
                 }
                 void checkHuntGuide();
-                if (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch') {
+                if (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch' || config.farmObjective === 'bestiary' || config.farmObjective === 'team-pvp') {
                     const waitingInitialRank = Boolean(
                         huntGuideRequest &&
                         config.farmObjectiveFocus !== 'fast' &&
@@ -5871,7 +6149,7 @@ export function createHeadlessController(options = {}) {
         return { ...config };
     };
 
-    const triggerAction = (name) => {
+    const triggerAction = (name, payload = {}) => {
         const state = merger.getState();
         const isOnline = Boolean(
             (ws && ws.readyState === 1) ||
@@ -6004,6 +6282,251 @@ export function createHeadlessController(options = {}) {
             runTickForState(st);
             return true;
         }
+        if (name === 'outland-tier') {
+            const tier = Number(payload?.tier);
+            if (!Number.isFinite(tier) || tier <= 0) return false;
+            return sendFrame({ t: 'outland.tier', tier });
+        }
+        if (name === 'prey-regions') {
+            const regioes = Array.isArray(payload?.regioes) ? payload.regioes.filter(Boolean) : [];
+            if (regioes.length < 2) {
+                pushLog('warn', 'Prey: selecione pelo menos 2 regiões.');
+                return false;
+            }
+            return sendFrame({ t: 'prey.regioes', cartela: Number(payload?.cartela || 0), regioes });
+        }
+        if (name === 'craft-shiny-egg') {
+            return sendFrame({ t: 'ovoShiny.fabricar' });
+        }
+        if (name === 'claim-all') {
+            if (!isOnline) return false;
+            const syncedNow = getSyncedNowMs();
+            const passCanClaim = Boolean(state?.passe && computePassStatus(state.passe, Number(state.level || 0), syncedNow).canClaim);
+            let sentAny = false;
+            if (passCanClaim && sendFrame({ t: 'passe.resgatar' })) sentAny = true;
+            if (sendFrame({ t: 'afiliado.recolher' })) sentAny = true;
+            if (Number(state?.automation?.sacrificio?.pts || 0) >= 50 && sendFrame({ t: 'sacrificio.resgatar' })) sentAny = true;
+            if (sentAny) pushLog('reward', 'Resgate em lote enviado (Passe / Afiliado / Sacrifício).');
+            return sentAny;
+        }
+        if (name === 'sacrifice-run') {
+            if (!isOnline || !state) return false;
+            const pokes = Array.isArray(state.pokemons) ? state.pokemons : [];
+            const pkById = new Map(pokes.filter((p) => p && p.id != null).map((p) => [String(p.id), p]));
+            const busy = advisorBusyIds(state);
+            const travados = new Set((Array.isArray(state.automation?.pokemonTravado) ? state.automation.pokemonTravado : []).map(String));
+            const isEligible = (pk) => Boolean(
+                pk &&
+                pk.id != null &&
+                pk.slot == null &&
+                !pk.starter &&
+                !busy.has(String(pk.id)) &&
+                !travados.has(String(pk.id)) &&
+                !isProtectedSpecial(pk)
+            );
+            let pokemonIds = [];
+            if (Array.isArray(payload?.pokemonIds) && payload.pokemonIds.length > 0) {
+                for (const rawId of payload.pokemonIds) {
+                    const pk = pkById.get(String(rawId));
+                    if (isEligible(pk)) pokemonIds.push(pk.id);
+                }
+            } else {
+                const eligibleDepot = pokes.filter(isEligible);
+                if (advisorSpecies && eligibleDepot.length > 0) {
+                    ensureMarketBase();
+                    const advised = advisePokemons({
+                        pokemons: eligibleDepot,
+                        locationOf: (pk) => getPokemonLocation(pk, state),
+                        species: advisorSpecies,
+                        salesBySpecies: marketBase.salesBySpecies(),
+                        sacrifice: state.automation?.sacrificio || {},
+                        busyIds: busy,
+                        nowMs: getSyncedNowMs(),
+                        planOf,
+                        stonePriceOf,
+                        keepNota: config.dropKeepNota,
+                        keepFinalMult: config.dropKeepFinalMult,
+                        netOf: advisorNetOf(),
+                    });
+                    pokemonIds = advised
+                        .filter((r) => r.action === 'sacrificar' && !r.protectedSpecial && isEligible(pkById.get(String(r.id))))
+                        .map((r) => r.id);
+                }
+                if (pokemonIds.length === 0) {
+                    pokemonIds = eligibleDepot.map((pk) => pk.id);
+                }
+            }
+            pokemonIds = pokemonIds.slice(0, 50);
+            if (pokemonIds.length === 0) {
+                pushLog('warn', 'Sacrifício: nenhum Pokémon elegível no Depot (especiais protegidos são ignorados).');
+                return false;
+            }
+            if (sendFrame({ t: 'sacrificio.sacrificar', pokemonIds })) {
+                pushLog('info', `Sacrifício enviado com ${pokemonIds.length} Pokémon(s) do Depot.`);
+                return true;
+            }
+            return false;
+        }
+        if (name === 'sacrifice-bone') {
+            return sendFrame({ t: 'sacrificio.osso', qtd: Math.max(1, Math.floor(Number(payload?.qtd) || 1)) });
+        }
+        if (name === 'oferenda-run') {
+            if (!isOnline || !state) return false;
+            const pokes = Array.isArray(state.pokemons) ? state.pokemons : [];
+            const pkById = new Map(pokes.filter((p) => p && p.id != null).map((p) => [String(p.id), p]));
+            const busy = advisorBusyIds(state);
+            const travados = new Set((Array.isArray(state.automation?.pokemonTravado) ? state.automation.pokemonTravado : []).map(String));
+            const protectedSet = new Set([...busy, ...travados]);
+            const isSafeForOferenda = (pk) => Boolean(
+                pk &&
+                pk.id != null &&
+                pk.slot == null &&
+                !pk.starter &&
+                !protectedSet.has(String(pk.id)) &&
+                !isProtectedSpecial(pk)
+            );
+            if (Array.isArray(payload?.pokemonIds) && payload.pokemonIds.length > 0) {
+                const safeIds = [];
+                for (const rawId of payload.pokemonIds) {
+                    const pk = pkById.get(String(rawId));
+                    if (isSafeForOferenda(pk)) safeIds.push(pk.id);
+                }
+                const batchSize = Math.min(50, Math.floor(safeIds.length / 5) * 5);
+                if (batchSize < 5) {
+                    pushLog('warn', 'Oferenda exige múltiplos exatos de 5 Pokémons não protegidos.');
+                    return false;
+                }
+                const chosenIds = safeIds.slice(0, batchSize);
+                if (sendFrame({ t: 'oferenda.girar', pokemonIds: chosenIds })) {
+                    pushLog('info', `Oferenda enviada com ${chosenIds.length} Pokémon(s).`);
+                    return true;
+                }
+                return false;
+            }
+            const depotPokes = pokes.filter(isSafeForOferenda);
+            const batches = selectOferendaBatches(depotPokes, protectedSet, { monoTypeOnly: payload?.monoTypeOnly !== false })
+                .filter((b) => Array.isArray(b.pokemonIds) && b.pokemonIds.length === 5 && b.pokemonIds.every((id) => isSafeForOferenda(pkById.get(String(id)))));
+            if (batches.length === 0) {
+                pushLog('warn', 'Oferenda: nenhum lote de 5 Pokémons elegíveis no Depot.');
+                return false;
+            }
+            const toSend = payload?.allBatches ? batches.slice(0, 10) : [batches[0]];
+            let sentCount = 0;
+            for (const batch of toSend) {
+                if (sendFrame({ t: 'oferenda.girar', pokemonIds: batch.pokemonIds })) sentCount += 1;
+            }
+            if (sentCount > 0) {
+                pushLog('info', `Oferenda enviada: ${sentCount} lote(s) de 5 (${sentCount * 5} Pokémons).`);
+                return true;
+            }
+            return false;
+        }
+        if (name === 'auto-colecao') {
+            return sendFrame({ t: 'shop.autoColecao', regra: payload?.regra });
+        }
+        if (name === 'auto-venda-depot') {
+            return sendFrame({ t: 'shop.autoVendaDepot', ativo: Boolean(payload?.ativo) });
+        }
+        if (name === 'craft-shiny-stone') {
+            return sendFrame({ t: 'shinyStone.fabricar', tipo: String(payload?.tipo || '') });
+        }
+        if (name === 'craft-mega') {
+            const dex = Number(payload?.dex);
+            if (!Number.isFinite(dex) || dex <= 0) return false;
+            return sendFrame({
+                t: 'mega.fabricar',
+                dex,
+                shiny: Boolean(payload?.shiny),
+                ...(payload?.segunda ? { segunda: true } : {}),
+            });
+        }
+        if (name === 'open-box') {
+            return sendFrame({ t: 'caixa.abrir', id: payload?.id });
+        }
+        if (name === 'raid-enroll') {
+            return sendFrame({ t: 'raid.inscrever' });
+        }
+        if (name === 'showdown-enroll') {
+            return sendFrame({ t: 'showdown.inscrever', id: payload?.id ?? state?.showdown?.abertoId });
+        }
+        if (name === 'camp-enroll') {
+            return sendFrame({ t: 'campeonato.inscrever', id: payload?.id });
+        }
+        if (name === 'boss-enter') {
+            return sendFrame({ t: 'boss.entrar', key: payload?.key });
+        }
+        if (name === 'boss-auto') {
+            return sendFrame({ t: 'boss.auto', ativo: Boolean(payload?.ativo), key: payload?.key });
+        }
+        if (name === 'boss-leave') {
+            return sendFrame({ t: 'boss.sair' });
+        }
+        if (name === 'mistico-enter') {
+            return sendFrame({ t: 'mistico.entrar' });
+        }
+        if (name === 'safari-enter') {
+            const tickets = Math.max(1, Math.min(24, Math.floor(Number(payload?.tickets) || 6)));
+            return sendFrame({ t: 'safari.entrar', tickets });
+        }
+        if (name === 'gym-info') {
+            return sendFrame({ t: 'ginasio.info' });
+        }
+        if (name === 'gym-challenge') {
+            return sendFrame({ t: 'ginasio.desafiar', tipo: payload?.tipo });
+        }
+        if (name === 'bike-equip') {
+            return sendFrame({ t: 'bicicleta.equipar', bicicletaId: payload?.bicicletaId ?? null });
+        }
+        if (name === 'bike-craft') {
+            return sendFrame({ t: 'bicicleta.craftar', bicicletaIds: payload?.bicicletaIds });
+        }
+        if (name === 'bike-fabricar') {
+            return sendFrame({ t: 'bicicleta.fabricar' });
+        }
+        if (name === 'house-use') {
+            return sendFrame({ t: 'casa.usar', casaId: Number(payload?.casaId), usar: true });
+        }
+        if (name === 'house-craft') {
+            return sendFrame({ t: 'casa.craftar', casaIds: payload?.casaIds });
+        }
+        if (name === 'house-fabricar') {
+            return sendFrame({ t: 'casa.fabricar' });
+        }
+        if (name === 'team-active') {
+            return sendFrame({ t: 'team.active', pokemonId: payload?.pokemonId });
+        }
+        if (name === 'evolve-pokemon') {
+            return sendFrame({ t: 'pokemon.evoluir', pokemonId: payload?.pokemonId, alvoId: Number(payload?.alvoId) });
+        }
+        if (name === 'refine-pokemon') {
+            return sendFrame({ t: 'pokemon.refinar', pokemonId: payload?.pokemonId, stat: String(payload?.stat || '') });
+        }
+        if (name === 'zmove-toggle') {
+            return sendFrame({ t: 'tm.categoria', pokemonId: payload?.pokemonId, fisico: Boolean(payload?.fisico) });
+        }
+        if (name === 'reduce-level') {
+            return sendFrame({ t: 'pokemon.reduzirNivel', pokemonId: payload?.pokemonId, nivelAlvo: Number(payload?.nivelAlvo) });
+        }
+        if (name === 'pvp-save-formation') {
+            return sendFrame({ t: 'pvp.time.salvar', pokemonIds: payload?.pokemonIds, casas: payload?.casas });
+        }
+        if (name === 'apply-pvp-team') {
+            if (!isOnline || !state) return false;
+            const plan = computeTeamBuilderPlan(state);
+            const form = plan?.suggestedFormation;
+            if (!form || !Array.isArray(form.pokemonIds) || form.pokemonIds.length === 0) {
+                pushLog('warn', 'Montar Time PvP: nenhum Pokemon pronto para salvar formacao.');
+                return false;
+            }
+            if (sendFrame({ t: 'pvp.time.salvar', pokemonIds: form.pokemonIds, casas: form.casas || {} })) {
+                pushLog('ok', `Formacao PvP recomendada aplicada (${form.pokemonIds.length} slots).`);
+                return true;
+            }
+            return false;
+        }
+        if (name === 'csv-export') {
+            return sendFrame({ t: 'csv.pedir', tipo: String(payload?.tipo || 'pokemon') });
+        }
         return false;
     };
 
@@ -6096,12 +6619,23 @@ export function createHeadlessController(options = {}) {
             ? ''
             : (config.browserProfile && activeExistingProfile?.id ? activeExistingProfile.id : (config.browserProfile || ''));
 
+        const travadosSet = new Set((Array.isArray(state?.automation?.pokemonTravado) ? state.automation.pokemonTravado : []).map(String));
+        const capStatus = computeCapStatus(state?.pokemons || [], travadosSet);
+        const capIntel = {
+            ...capStatus,
+            max: 3000,
+            depotPct: capStatus.depot.pct,
+            colecaoPct: capStatus.colecao.pct,
+        };
+
         const modeWarnings = computeModeWarnings({
             config,
             status,
             mode: connectionMode,
             economyActive,
             campoFeedDegraded,
+            capStatus,
+            state,
         });
 
         const serverNowSnap = now + serverClockOffsetMs;
@@ -6122,7 +6656,7 @@ export function createHeadlessController(options = {}) {
             Number(state?.level || 0),
             topCatchState.rankingRows
         );
-        const objDec = (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch')
+        const objDec = (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch' || config.farmObjective === 'bestiary' || config.farmObjective === 'team-pvp')
             ? (objectiveLastDecision || evaluateFarmObjective({ triggerSwap: false }))
             : null;
         const collectionSnap = {
@@ -6217,6 +6751,285 @@ export function createHeadlessController(options = {}) {
             .map(([id, name]) => ({ id, name }))
             .sort((a, b) => a.name.localeCompare(b.name));
 
+        // Intel de jogo consolidada (Fase 1)
+        const seasonalWin = getSeasonalTypeWindow(serverNowSnap);
+        const tipoDia = seasonalDayState?.tipo ?? state?.diaSazonal?.tipo ?? null;
+        const activeEsp = active ? (advisorSpecies?.byId?.get(Number(active.speciesId)) || null) : null;
+        const activeTypes = active
+            ? (Array.isArray(active.tipos) && active.tipos.length ? active.tipos : [activeEsp?.type1, activeEsp?.type2].filter(Boolean))
+            : [];
+        const activeMult = tipoDia && activeTypes.length ? multDanoSazonal(tipoDia, activeTypes, []) : 1;
+        const activeHasBuff = Boolean(tipoDia && activeTypes.some((t) => String(t).toUpperCase() === String(tipoDia).toUpperCase()));
+
+        const pityRaw = state?.loja?.pityShiny ?? state?.automation?.pityShiny ?? state?.pityShiny ?? null;
+        const pityIntel = pityRaw
+            ? { ...resumoPityShiny(pityRaw, serverNowSnap), ...(latestPityNotice ? { notice: latestPityNotice } : {}) }
+            : (latestPityNotice ? { ...resumoPityShiny(null, serverNowSnap), notice: latestPityNotice } : null);
+
+        const trainerLevel = Number(state?.level || 0);
+        const rawOutlandTier = Number(state?.outlandTier ?? state?.outland?.tier ?? state?.automation?.outlandTier ?? 0) || null;
+        const curOutland = rawOutlandTier ? outlandTier(rawOutlandTier) : null;
+        const unlockedOutland = OUTLAND_TIERS.filter((t) => tierOutlandValido(t.tier, trainerLevel));
+        const suggestedOutland = unlockedOutland.length ? unlockedOutland[unlockedOutland.length - 1] : null;
+
+        const inOutland = currentHuntInfo?.area === 'outland';
+        const huntLevel = Number(currentHuntInfo?.nivel ?? currentHuntInfo?.level ?? 0);
+        const eggStepVal = inOutland ? 0 : degrauFragmentoOvoShiny(huntLevel);
+        const eggChanceVal = currentHuntInfo ? chanceFragmentoOvoShiny(currentHuntInfo) : 0;
+        const nextEggInfo = inOutland ? null : proximoDegrauOvoShiny(huntLevel);
+
+        const bestiaryRaw = state?.bestiario && typeof state.bestiario === 'object' ? state.bestiario : {};
+        const killsPerMinSnap = mins > 0 ? stats.kills / mins : 0;
+        let bestiaryPctTotal = 0;
+        const bestiarySpecies = [];
+        for (const [rawId, val] of Object.entries(bestiaryRaw)) {
+            const kills = typeof val === 'object' && val !== null
+                ? Number(val.abates ?? val.kills ?? val.count ?? val.c ?? 0)
+                : Number(val || 0);
+            const prog = bestiaryProgress(kills, killsPerMinSnap);
+            bestiaryPctTotal += prog.bonusPct;
+            const spId = Number(rawId) || null;
+            const nm = (spId != null ? catalog.pokemonNames?.[spId] : '') || val?.nome || val?.name || `#${rawId}`;
+            bestiarySpecies.push({ speciesId: spId, name: nm, ...prog });
+        }
+        bestiarySpecies.sort((a, b) => {
+            const aRem = a.next ? a.killsRemaining : Infinity;
+            const bRem = b.next ? b.killsRemaining : Infinity;
+            return (aRem - bRem) || (b.kills - a.kills);
+        });
+
+        const bossPairIdx = Number(state?.boss?.par ?? state?.bossPar ?? 1) || 1;
+        const bossChances = chancesBossPorPar(bossPairIdx);
+        const bossRegions = REGIOES_BOSS.map((reg, idx) => ({
+            region: reg,
+            index: idx,
+            prize: premioDoBossNoInstante(reg, serverNowSnap),
+            chances: bossChances,
+        }));
+
+        const upcomingList = getUpcomingEvents(serverNowSnap);
+        const nextRaid = upcomingList.find((e) => e.type === 'raid') || null;
+        const nextShowdown = upcomingList.find((e) => e.type === 'showdown') || null;
+        const raidRaw = eventStatus.raid || state?.raid || null;
+        const showdownRaw = eventStatus.showdown || state?.showdown || null;
+        const campRaw = eventStatus.camp || state?.campeonato || null;
+
+        const safariTickets = Number(state?.items?.[70095] || 0);
+        const safariOptimal = optimalSafariTickets(safariTickets);
+        const safariActiveUntil = Number(state?.safari?.ate ?? state?.safari?.fim ?? state?.safari?.prazo ?? 0) || null;
+
+        const gymPodiums = gymState?.podios ?? gymState?.podiums ?? state?.ginasiosPodio ?? state?.podio ?? state?.ginasios ?? [];
+        const gymBuffPct = Number(gymState?.bonusPct ?? gymState?.buffPct ?? state?.ginasioBonusPct ?? state?.guildBonusPct ?? 0) || 0;
+        const gymCooldownAt = Number(gymState?.cooldownAte ?? gymState?.nextCooldownAt ?? state?.ginasioCooldownAte ?? 0) || null;
+
+        const bikeList = Array.isArray(state?.bicicletas?.lista)
+            ? state.bicicletas.lista
+            : (Array.isArray(state?.bicicletas) ? state.bicicletas : (Array.isArray(state?.bikes) ? state.bikes : []));
+        const equippedBikeId = state?.bicicletas?.equipadaId
+            ?? state?.bicicleta?.id
+            ?? state?.bicicletaId
+            ?? bikeList.find((b) => b?.equipada)?.id
+            ?? null;
+        const bestBikeUpgrade = findBestBikeUpgrade(bikeList, equippedBikeId);
+        const houseList = Array.isArray(state?.casa?.lista) ? state.casa.lista : [];
+        const housesUsed = houseList.filter((c) => c && !c.anunciada && c.emUso !== false).length;
+        const craftableSets = findCraftableSets(state?.items || {}, 5);
+        const bikeFragCount = Number(state?.items?.[70013] || 0);
+        const houseFragCount = Number(state?.items?.[70019] || state?.items?.fragCasa || 0);
+
+        const dexCapturedSet = getPokedexCapturedSet(state?.pokedex, optimisticPokedexKeys);
+        const evolutionDexReady = findPokedexEvolutions(
+            state?.pokemons || [],
+            dexCapturedSet,
+            advisorSpecies,
+            state?.items || {},
+            { pedras: lastWelcome?.pedrasEvolucao || null }
+        );
+
+        const teamPokes = (state?.pokemons || []).filter((p) => p && p.slot != null);
+        const pvpTeam = teamPokes.map((pk) => {
+            const esp = advisorSpecies?.byId?.get(Number(pk.speciesId)) || null;
+            const lv = Number(pk.level ?? pk.nivel ?? 1) || 1;
+            return {
+                id: pk.id,
+                name: pk.apelido || pk.nome || pk.name || esp?.name || `#${pk.speciesId ?? pk.id}`,
+                level: lv,
+                arenaLevel: effectiveArenaLevel(lv, 'ginasio'),
+                warLevel: effectiveArenaLevel(lv, 'guerra'),
+                passive: passivaParaEspecie(esp || pk),
+            };
+        });
+        const guildBoostUntil = Number(state?.guild?.boostAte || 0) || null;
+        const guildBoostPct = guildBoostUntil && guildBoostUntil > serverNowSnap
+            ? 10
+            : (Number(state?.guildBonusPct || 0) || 0);
+
+        const baseSpeed = active ? (Number(activeEsp?.baseSpeed ?? active.stats?.speed ?? 0) || 0) : 0;
+        const ivSpeed = active ? (Number(active.ivs?.speed ?? active.ivSpeed ?? 1) || 1) : 1;
+        const activePot = active ? (Number(active.potencia || 1) || 1) : 1;
+        const potMults = [1, 1.05, 1.1, 1.25, 2];
+
+        const passCanClaim = Boolean(state?.passe && computePassStatus(state.passe, trainerLevel, serverNowSnap).canClaim);
+        const sacCanClaim = Number(state?.automation?.sacrificio?.pts || 0) >= 50;
+        const affCanClaim = Boolean(state?.afiliado?.pendente || Number(state?.afiliado?.saldo || state?.afiliado?.gold || 0) > 0);
+
+        const teamBuilderSnap = state ? computeTeamBuilderPlan(state) : null;
+        const probAlerts = [];
+        if (pityIntel?.ativo && !pityIntel.garantido && Number(pityIntel.restanteMs) > 0 && Number(pityIntel.restanteMs) <= 300_000) {
+            probAlerts.push({
+                id: 'lure-pity',
+                level: 'good',
+                title: 'Garantia Lure quase pronta',
+                detail: '+50 Beast Balls ao fechar esta hora sem Shiny',
+            });
+        }
+        if (!inOutland && nextEggInfo && Number(nextEggInfo.deltaLevel) > 0 && Number(nextEggInfo.deltaLevel) <= 500) {
+            probAlerts.push({
+                id: 'egg-step',
+                level: 'info',
+                title: 'Proximo degrau de Ovo Shiny perto',
+                detail: `Faltam ${nextEggInfo.deltaLevel} niveis para aumentar o drop de fragmentos`,
+            });
+        }
+        if (safariTickets >= 6) {
+            probAlerts.push({
+                id: 'safari-6x',
+                level: 'good',
+                title: 'Combo 6x Safari disponivel',
+                detail: 'Usar multiplos de 6 tickets rende +30m bonus e 3,04x Shiny',
+            });
+        }
+        if (tipoDia && activeHasBuff) {
+            probAlerts.push({
+                id: 'seasonal-match',
+                level: 'good',
+                title: 'Dia Sazonal ativo no seu Pokemon',
+                detail: '2x dano e 1/4 de dano recebido nas hunts do Mapa',
+            });
+        }
+
+        const gameIntel = {
+            serverHealth: {
+                ok: Boolean(serverHealth.ok),
+                checkedAt: Number(serverHealth.checkedAt || 0),
+                note: String(serverHealth.note || ''),
+            },
+            blackFriday: {
+                active: isBlackFridayActive(serverNowSnap),
+                pct: BLACK_FRIDAY.pct,
+                endsAt: BLACK_FRIDAY.fim,
+            },
+            diaSazonal: {
+                tipo: tipoDia,
+                startsAt: seasonalDayState?.startsAt ?? state?.diaSazonal?.inicio ?? seasonalWin.startsAt,
+                endsAt: seasonalDayState?.endsAt ?? state?.diaSazonal?.fim ?? seasonalWin.endsAt,
+                activeHasBuff,
+                activeMult,
+            },
+            pityShiny: pityIntel,
+            cap: capIntel,
+            outlandTier: {
+                current: curOutland ? curOutland.tier : rawOutlandTier,
+                label: curOutland ? curOutland.rotulo : (rawOutlandTier ? `Outland ${rawOutlandTier - 100}` : null),
+                mult: curOutland ? curOutland.mult : 1,
+                suggested: suggestedOutland
+                    ? { tier: suggestedOutland.tier, label: suggestedOutland.rotulo, nivel: suggestedOutland.nivel, mult: suggestedOutland.mult }
+                    : null,
+                tiers: OUTLAND_TIERS.map((t) => ({
+                    tier: t.tier,
+                    numero: t.numero,
+                    label: t.rotulo,
+                    nivel: t.nivel,
+                    mult: t.mult,
+                    unlocked: tierOutlandValido(t.tier, trainerLevel),
+                })),
+            },
+            eggStep: {
+                step: eggStepVal,
+                maxSteps: 32,
+                chance: eggChanceVal,
+                fragments: Number(state?.items?.[70017] || 0),
+                nextLevel: nextEggInfo ? nextEggInfo.nextLevel : null,
+                nextStep: nextEggInfo ? nextEggInfo.nextStep : null,
+                deltaLevel: nextEggInfo ? nextEggInfo.deltaLevel : null,
+                inOutland,
+            },
+            bestiary: {
+                species: bestiarySpecies.slice(0, 50),
+                nextPctTotal: Math.round(bestiaryPctTotal * 100) / 100,
+            },
+            bossRotation: {
+                dayKey: seasonalWin.key,
+                nextAt: seasonalWin.endsAt,
+                regions: bossRegions,
+            },
+            upcomingEvents: {
+                raid: nextRaid
+                    ? { ...nextRaid, inscrito: Boolean(raidRaw?.inscrito), status: raidRaw }
+                    : (raidRaw ? { type: 'raid', inscrito: Boolean(raidRaw.inscrito), status: raidRaw } : null),
+                showdown: nextShowdown
+                    ? { ...nextShowdown, abertoId: showdownRaw?.abertoId ?? null, inscrito: Boolean(showdownRaw?.inscrito), status: showdownRaw }
+                    : (showdownRaw ? { type: 'showdown', abertoId: showdownRaw.abertoId ?? null, inscrito: Boolean(showdownRaw.inscrito), status: showdownRaw } : null),
+                camp: campRaw ? { ...campRaw, inscrito: Boolean(campRaw.inscrito) } : null,
+            },
+            safari: {
+                tickets: safariTickets,
+                optimalBatch: safariOptimal,
+                bonusMin: Math.round((safariOptimal.durationMs || 0) / 60_000),
+                multShiny: MULT_SHINY_TUDO_NO_SAFARI,
+                activeUntil: safariActiveUntil,
+            },
+            gyms: {
+                podiums: Array.isArray(gymPodiums) ? gymPodiums : [],
+                activeBuffPct: gymBuffPct,
+                nextCooldownAt: gymCooldownAt,
+            },
+            bikesAndHouses: {
+                equippedBikeId,
+                bestBikeUpgrade,
+                bikesCount: bikeList.length,
+                housesUsed,
+                maxHouses: MAX_CASAS_EM_USO,
+                housesTotal: houseList.length,
+                craftableBikes: Math.floor(bikeFragCount / 5),
+                craftableHouses: Math.floor(houseFragCount / 5),
+                craftableSets,
+                bikeRates: BICICLETA_VELOCIDADE,
+                houseRates: CASA_XP_SHARE,
+            },
+            evolutionDexReady,
+            pvpMeta: {
+                passivesActive: serverNowSnap >= PASSIVAS_DESDE_MS,
+                passivesSince: PASSIVAS_DESDE_MS,
+                team: pvpTeam,
+                guildBoostPct,
+                guildBoostUntil,
+            },
+            teamBuilder: teamBuilderSnap,
+            probAlerts,
+            activeStatsMeta: active ? {
+                id: active.id,
+                name: active.nome || active.name || catalog.pokemonNames?.[active.speciesId] || `#${active.speciesId ?? '?'}`,
+                level: Number(active.level ?? active.nivel ?? 0),
+                potencia: activePot,
+                potenciaMult: potMults[Math.max(0, Math.min(4, Math.round(activePot) - 1))] ?? 1,
+                baseSpeed,
+                ivSpeed,
+                speedCdrPct: baseSpeed > 0 ? Number(descontoDoSpeedPct(baseSpeed, ivSpeed).toFixed(2)) : 0,
+                maxSpeedCdrPct: baseSpeed > 0 ? Number(potencialDoSpeed(baseSpeed).toFixed(2)) : 7,
+                refino: active.refino || null,
+                nextRefine: sugerirProximoRefino(active.refino),
+                tmElemental: Boolean(active.tmElemental || active.zmove || active.zMove),
+                tmFisico: Boolean(active.tmFisico ?? active.fisico),
+            } : null,
+            claimPending: {
+                pass: passCanClaim,
+                sacrifice: sacCanClaim,
+                affiliate: affCanClaim,
+                count: Number(passCanClaim) + Number(sacCanClaim) + Number(affCanClaim),
+            },
+        };
+
         return {
             version: APP_VERSION,
             status,
@@ -6230,6 +7043,7 @@ export function createHeadlessController(options = {}) {
             browserProfiles: buildBrowserProfileOptions(),
             huntGuide: huntGuideStatus,
             collection: collectionSnap,
+            gameIntel,
             xpTrainer: {
                 ...xpTrainerPlan.summary,
                 availablePokemons,
@@ -6716,6 +7530,8 @@ export async function startGuiServer(options = {}) {
                     });
                 }, 50);
                 return;
+            } else if (controller.triggerAction(action, body?.payload || body)) {
+                ok = true;
             } else {
                 sendJson(res, 400, { ok: false, error: `Acao desconhecida: ${action}` });
                 return;

@@ -187,3 +187,124 @@ export function planFinalEvolution(pk, species, { pedras = {}, stonePrice = () =
     for (const f of finals) if (f.nota != null && (best == null || f.nota > best.nota)) best = f;
     return { nota: notaAgora, best: best || finals[0] || null, finals };
 }
+
+function dexKeyOf(pokeId) {
+    const id = Number(pokeId);
+    if (!Number.isFinite(id) || id < 1) return null;
+    if (id >= 10501 && id <= 10548) return id - 8500;
+    if (id >= 2001 && id < 2059) return id;
+    if (id >= 13000) return id % 1000;
+    return id;
+}
+
+function normalizePokedexSet(pokedexSet) {
+    const out = new Set();
+    if (!pokedexSet) return out;
+    if (pokedexSet instanceof Set) {
+        for (const k of pokedexSet) {
+            if (k != null && String(k)) out.add(String(k));
+        }
+        return out;
+    }
+    if (Array.isArray(pokedexSet)) {
+        for (const k of pokedexSet) {
+            if (k != null && String(k)) out.add(String(k));
+        }
+        return out;
+    }
+    if (typeof pokedexSet === 'object') {
+        for (const [k, v] of Object.entries(pokedexSet)) {
+            if (v === true || (typeof v === 'number' && v > 0) || Number(v?.c || 0) > 0) {
+                const canon = dexKeyOf(k);
+                out.add(String(canon ?? k));
+            }
+        }
+    }
+    return out;
+}
+
+/**
+ * Lista Pokémons (na equipe ou fora dela) cuja evolução direta registra uma espécie
+ * ainda ausente em `pokedexSet`.
+ * @param {Array<object>} [pokemons=[]] Lista de Pokémons da conta.
+ * @param {Set<string|number>|Record<string, object>|Array<string|number>} [pokedexSet=new Set()] Chaves já capturadas.
+ * @param {{ byId?: Map<number, object>, pedras?: Record<string, object> }|Map<number, object>|null} [speciesIndex=null] Índice de espécies.
+ * @param {Record<string, number>} [items={}] Inventário do jogador (`state.items`).
+ * @param {{ pedras?: Record<string, { itemId?: number, nome?: string }> }} [opts={}] Mapa opcional de pedras (`welcome.pedrasEvolucao`).
+ * @returns {Array<{ pokemonId: number|string, alvoId: number, fromName: string, toName: string, currentLevel: number, requiredLevel: number, ready: boolean, stoneNeeded: string|null }>}
+ */
+export function findPokedexEvolutions(
+    pokemons = [],
+    pokedexSet = new Set(),
+    speciesIndex = null,
+    items = {},
+    { pedras = null } = {},
+) {
+    const byId = speciesIndex instanceof Map ? speciesIndex : speciesIndex?.byId;
+    if (!Array.isArray(pokemons) || !(byId instanceof Map)) return [];
+
+    const dexSet = normalizePokedexSet(pokedexSet);
+    const pedrasMap = pedras || speciesIndex?.pedras || null;
+    const bag = items && typeof items === 'object' ? items : null;
+    const bagEmpty = bag ? Object.keys(bag).length === 0 : false;
+    const out = [];
+
+    const hasInDex = (id) => {
+        const raw = Number(id);
+        if (!Number.isFinite(raw) || raw < 1) return true;
+        if (dexSet.has(String(raw))) return true;
+        const canon = dexKeyOf(raw);
+        return canon != null && dexSet.has(String(canon));
+    };
+
+    for (const pk of pokemons) {
+        if (!pk || pk.id == null) continue;
+        const spId = Number(pk.speciesId) || 0;
+        if (spId >= OUTLAND_POKE_MIN && spId <= OUTLAND_POKE_MAX) continue;
+        const esp = byId.get(spId);
+        if (!esp) continue;
+
+        const currentLevel = Math.max(1, Number(pk.level ?? pk.nivel ?? 1) || 1);
+        const fromName = String(pk.apelido || pk.nome || pk.name || esp.name || `#${spId}`);
+        const targets = evolutionTargets(esp, byId);
+
+        for (const target of targets) {
+            const alvoId = Number(target.pokeId);
+            if (!alvoId || hasInDex(alvoId)) continue;
+
+            const requiredLevel = Math.max(0, Number(target.nivel) || 0);
+            const stoneType = stoneTypeFor(esp, target.esp);
+            const pedraInfo = stoneType && pedrasMap ? (pedrasMap[stoneType] ?? pedrasMap.NORMAL ?? null) : null;
+            const stoneItemId = pedraInfo?.itemId ?? target.esp?.stoneItemId ?? esp.stoneItemId ?? null;
+            const stoneNeeded = pedraInfo?.nome || stoneType || null;
+
+            let hasStone = true;
+            if (stoneType) {
+                if (bag == null) {
+                    hasStone = true;
+                } else if (stoneItemId != null) {
+                    hasStone = Number(bag[stoneItemId] ?? bag[String(stoneItemId)] ?? 0) >= 1;
+                } else if (bag[stoneType] !== undefined) {
+                    hasStone = Number(bag[stoneType] || 0) >= 1;
+                } else if (bagEmpty) {
+                    hasStone = false;
+                }
+            }
+
+            const ready = currentLevel >= requiredLevel && hasStone;
+            out.push({
+                pokemonId: pk.id,
+                alvoId,
+                fromName,
+                toName: String(target.esp?.name || `#${alvoId}`),
+                currentLevel,
+                requiredLevel,
+                ready,
+                stoneNeeded,
+            });
+        }
+    }
+
+    out.sort((a, b) => (Number(b.ready) - Number(a.ready)) || (a.requiredLevel - b.requiredLevel) || a.toName.localeCompare(b.toName));
+    return out;
+}

@@ -30,6 +30,8 @@ import {
     DEFAULT_BALL_PRICES,
     ITEM_IDS,
     DEFAULT_ITEM_PRICES,
+    renovaOVigia,
+    computeReconnectDelay,
     getSeasonalDayKey,
     computePassStatus,
     createStateMerger,
@@ -3938,4 +3940,435 @@ test('chocadeira automatica coloca ovos da mochila nos slots livres com priorida
         nowMs: t0 + 30_000,
     });
     assert.equal(actOff.some((a) => a.t === 'chocadeira.colocar'), false);
+});
+
+test('fase1: watchdog do simulador nao renova lastSimAt com pong/chat e renova com estado/batalha', async () => {
+    let fakeNow = 1_700_100_000_000;
+    const sockets = [];
+    const controller = createHeadlessController({
+        configPath: null,
+        disableBrowserProfileSync: true,
+        disableHeadlessHuntGuide: true,
+        disableVotePolling: true,
+        disableAdvisor: true,
+        nowFn: () => fakeNow,
+        watchdogIntervalMs: 15,
+        watchdogTimeoutMs: 35_000,
+        pingIntervalMs: 60_000,
+        resolveSession: () => ({ nick: 'WatchdogTester', token: 'tok', dispositivo: 'dev-1' }),
+        wsFactory: () => {
+            const s = {
+                readyState: 1,
+                sent: [],
+                closed: null,
+                send(frame) { this.sent.push(JSON.parse(frame)); },
+                close(code, reason) { this.readyState = 3; this.closed = { code, reason }; },
+            };
+            sockets.push(s);
+            return s;
+        },
+    });
+    try {
+        assert.equal(renovaOVigia('pong'), false);
+        assert.equal(renovaOVigia('chat'), false);
+        assert.equal(renovaOVigia('estado'), true);
+        assert.equal(renovaOVigia('batalha'), true);
+
+        assert.equal(controller.start(), true);
+        const sock = sockets[0];
+        sock.onopen();
+
+        // Avanca 20s e recebe estado -> renova lastSimAt
+        fakeNow += 20_000;
+        sock.onmessage({ data: JSON.stringify({ t: 'estado', estado: { cheio: true, nick: 'WatchdogTester', level: 100 } }) });
+        await new Promise((r) => setTimeout(r, 30));
+        assert.equal(sock.closed, null);
+
+        // Avanca mais 20s e recebe batalha -> renova lastSimAt (total 40s desde abertura, mas 20s desde estado)
+        fakeNow += 20_000;
+        sock.onmessage({ data: JSON.stringify({ t: 'batalha', ev: [] }) });
+        await new Promise((r) => setTimeout(r, 30));
+        assert.equal(sock.closed, null);
+
+        // Avanca 36s recebendo apenas pong e chat -> NAO renova lastSimAt, watchdog dispara
+        fakeNow += 20_000;
+        sock.onmessage({ data: JSON.stringify({ t: 'pong' }) });
+        sock.onmessage({ data: JSON.stringify({ t: 'chat', msg: 'oi' }) });
+        fakeNow += 16_000;
+        await new Promise((r) => setTimeout(r, 40));
+
+        assert.equal(sock.closed?.code, 4000);
+        assert.ok(controller.getSnapshot({ includeHunts: false }).logs.some((l) => /Watchdog do simulador sem resposta/i.test(l.text)));
+    } finally {
+        controller.stop();
+    }
+});
+
+test('fase1: computeReconnectDelay para close 1012 fica em [1000, 15000] e atualiza serverHealth via /saude', async () => {
+    for (const r of [0, 0.25, 0.5, 0.75, 1]) {
+        const d = computeReconnectDelay({ attempt: 1, code: 1012, rand: () => r });
+        assert.ok(d >= 1000 && d <= 15_000, `delay ${d} fora de [1000, 15000]`);
+    }
+
+    const fakeNow = 1_700_200_000_000;
+    const sockets = [];
+    let saudeCalls = 0;
+    const controller = createHeadlessController({
+        configPath: null,
+        disableBrowserProfileSync: true,
+        disableHeadlessHuntGuide: true,
+        disableVotePolling: true,
+        disableAdvisor: true,
+        nowFn: () => fakeNow,
+        fetch: async (url) => {
+            if (String(url).includes('/saude')) saudeCalls += 1;
+            return { ok: false, status: 503 };
+        },
+        resolveSession: () => ({ nick: 'HealthTester', token: 'tok', dispositivo: 'dev-2' }),
+        wsFactory: () => {
+            const s = {
+                readyState: 1,
+                send() {},
+                close() { this.readyState = 3; },
+            };
+            sockets.push(s);
+            return s;
+        },
+    });
+    try {
+        controller.start();
+        sockets[0].onopen();
+        // 1a queda (1012): attempt 1, nao consulta /saude ainda
+        sockets[0].onclose({ code: 1012 });
+        assert.equal(saudeCalls, 0);
+        // 2a tentativa falha antes do onopen: attempt 2, consulta /saude
+        assert.equal(controller.reconnect(), true);
+        sockets[1].onclose({ code: 1012 });
+        await new Promise((r) => setTimeout(r, 25));
+        assert.equal(saudeCalls, 1);
+        const intel = controller.getSnapshot({ includeHunts: false }).gameIntel;
+        assert.equal(intel.serverHealth.ok, false);
+        assert.match(intel.serverHealth.note, /503/);
+    } finally {
+        controller.stop();
+    }
+});
+
+test('fase1: autoCraftShinyEgg no tick e farmObjective bestiary no controlador', () => {
+    const t0 = 1_700_300_000_000;
+    const tracker = {};
+    const tickOn = evaluateHeadlessTick({
+        state: { items: { 70017: 12 } },
+        config: { autoCraftShinyEgg: true, restockEnabled: false, ensureNativeAutoHeal: false, caidosEnabled: false, dailyPassEnabled: false, preyEnabled: false, incubatorEnabled: false },
+        tracker,
+        nowMs: t0,
+    });
+    assert.deepEqual(tickOn.find((a) => a.t === 'ovoShiny.fabricar'), { t: 'ovoShiny.fabricar' });
+
+    const tickOff = evaluateHeadlessTick({
+        state: { items: { 70017: 12 } },
+        config: { autoCraftShinyEgg: false, restockEnabled: false, ensureNativeAutoHeal: false, caidosEnabled: false, dailyPassEnabled: false, preyEnabled: false, incubatorEnabled: false },
+        tracker: {},
+        nowMs: t0,
+    });
+    assert.equal(tickOff.some((a) => a.t === 'ovoShiny.fabricar'), false);
+
+    const sent = [];
+    const controller = createHeadlessController({
+        configPath: null,
+        disableBrowserProfileSync: true,
+        disableHeadlessHuntGuide: true,
+        disableVotePolling: true,
+        disableAdvisor: true,
+        nowFn: () => t0,
+        initialConfig: { farmObjective: 'bestiary', farmObjectiveFocus: 'fast', restockEnabled: false, ensureNativeAutoHeal: false, caidosEnabled: false, dailyPassEnabled: false, preyEnabled: false, incubatorEnabled: false, liveEnabled: false },
+    });
+    try {
+        const hooks = controller.attachExternalBridge({
+            isReady: () => true,
+            send: (frame) => { sent.push(frame); return true; },
+            close: () => {},
+        }, { waitForWelcome: true });
+        hooks.onFrame(JSON.stringify({
+            t: 'welcome',
+            hunts: [
+                { slug: 'hunt-longe', nome: 'Longe', nivel: 10, especies: [{ pokeId: 10, nome: 'Caterpie' }] },
+                { slug: 'hunt-perto', nome: 'Perto', nivel: 12, especies: [{ pokeId: 13, nome: 'Weedle' }] },
+            ],
+            estado: {
+                cheio: true,
+                nick: 'BestiaryTester',
+                level: 50,
+                activeId: 1,
+                huntSlug: 'hunt-longe',
+                noCentro: false,
+                bestiario: { 10: 5000, 13: 24500 },
+                pokemons: [{ id: 1, speciesId: 1, level: 50 }],
+            },
+        }));
+        const snap = controller.getSnapshot({ includeHunts: false });
+        assert.equal(snap.collection.mode, 'bestiary');
+        assert.equal(snap.collection.targetSlug, 'hunt-perto');
+        assert.ok(sent.some((m) => m.t === 'hunt.select' && m.slug === 'hunt-perto'));
+    } finally {
+        controller.stop();
+    }
+});
+
+test('fase1: triggerAction claim-all, sacrifice-run, oferenda-run e prey-regions respeitam protecoes e multiplos de 5', () => {
+    const t0 = Date.UTC(2026, 10, 27, 12, 0, 0);
+    const sent = [];
+    const controller = createHeadlessController({
+        configPath: null,
+        disableBrowserProfileSync: true,
+        disableHeadlessHuntGuide: true,
+        disableVotePolling: true,
+        disableAdvisor: true,
+        nowFn: () => t0,
+        initialConfig: { restockEnabled: false, ensureNativeAutoHeal: false, caidosEnabled: false, dailyPassEnabled: false, preyEnabled: false, incubatorEnabled: false, liveEnabled: false },
+    });
+    try {
+        const hooks = controller.attachExternalBridge({
+            isReady: () => true,
+            send: (frame) => { sent.push(frame); return true; },
+            close: () => {},
+        }, { waitForWelcome: true });
+        hooks.onFrame(JSON.stringify({
+            t: 'welcome',
+            estado: {
+                cheio: true,
+                nick: 'ActionTester',
+                level: 50,
+                activeId: 1,
+                passe: { ultimo: null, degrau: 0 },
+                automation: {
+                    sacrificio: { pts: 60 },
+                    pokemonTravado: [20],
+                },
+                pokemons: [
+                    { id: 1, speciesId: 6, level: 50, slot: 0 },
+                    { id: 10, speciesId: 19, level: 20, type1: 'NORMAL' },
+                    { id: 11, speciesId: 19, level: 21, type1: 'NORMAL' },
+                    { id: 12, speciesId: 19, level: 22, type1: 'NORMAL' },
+                    { id: 13, speciesId: 19, level: 23, type1: 'NORMAL' },
+                    { id: 14, speciesId: 19, level: 24, type1: 'NORMAL' },
+                    { id: 15, speciesId: 19, level: 25, type1: 'NORMAL' },
+                    { id: 20, speciesId: 19, level: 20, type1: 'NORMAL' }, // travado na colecao
+                    { id: 21, speciesId: 19, level: 20, shiny: true },
+                    { id: 22, speciesId: 150, level: 50 }, // lendario
+                    { id: 23, speciesId: 3006, level: 50, mega: true },
+                    { id: 24, speciesId: 19, level: 101 }, // nivel > 100
+                    { id: 25, speciesId: 19, level: 20, potencia: 5 }, // p5
+                    { id: 26, speciesId: 19, level: 20, zmove: true },
+                    { id: 27, speciesId: 19, level: 20, aoe: true },
+                    { id: 28, speciesId: 19, level: 20, refino: { atk: 1 } },
+                ],
+            },
+        }));
+
+        sent.length = 0;
+        assert.equal(controller.triggerAction('claim-all'), true);
+        assert.ok(sent.some((f) => f.t === 'passe.resgatar'));
+        assert.ok(sent.some((f) => f.t === 'afiliado.recolher'));
+        assert.ok(sent.some((f) => f.t === 'sacrificio.resgatar'));
+
+        sent.length = 0;
+        assert.equal(controller.triggerAction('sacrifice-run', {
+            pokemonIds: [1, 10, 11, 20, 21, 22, 23, 24, 25, 26, 27, 28],
+        }), true);
+        const sacFrame = sent.find((f) => f.t === 'sacrificio.sacrificar');
+        assert.deepEqual(sacFrame, { t: 'sacrificio.sacrificar', pokemonIds: [10, 11] });
+
+        // Oferenda com menos de 5 validos apos filtrar protegidos deve retornar false
+        sent.length = 0;
+        assert.equal(controller.triggerAction('oferenda-run', {
+            pokemonIds: [10, 11, 12, 13, 21, 22, 23],
+        }), false);
+        assert.equal(sent.some((f) => f.t === 'oferenda.girar'), false);
+
+        // Oferenda com 6 validos + protegidos deve enviar exatamente 5 (multiplo de 5)
+        assert.equal(controller.triggerAction('oferenda-run', {
+            pokemonIds: [10, 11, 12, 13, 14, 15, 21, 24, 28],
+        }), true);
+        const ofFrame = sent.find((f) => f.t === 'oferenda.girar');
+        assert.equal(ofFrame?.pokemonIds.length, 5);
+        assert.deepEqual(ofFrame?.pokemonIds, [10, 11, 12, 13, 14]);
+
+        // prey-regions exige >= 2 regioes
+        assert.equal(controller.triggerAction('prey-regions', { regioes: ['kanto'] }), false);
+        assert.equal(controller.triggerAction('prey-regions', { cartela: 1, regioes: ['kanto', 'johto'] }), true);
+        assert.deepEqual(sent.find((f) => f.t === 'prey.regioes'), { t: 'prey.regioes', cartela: 1, regioes: ['kanto', 'johto'] });
+    } finally {
+        controller.stop();
+    }
+});
+
+test('fase1: getSnapshot().gameIntel retorna todos os campos populados com seguranca', () => {
+    const t0 = Date.UTC(2026, 10, 27, 15, 0, 0); // Black Friday ativa
+    const controller = createHeadlessController({
+        configPath: null,
+        disableBrowserProfileSync: true,
+        disableHeadlessHuntGuide: true,
+        disableVotePolling: true,
+        disableAdvisor: true,
+        nowFn: () => t0,
+    });
+    try {
+        const hooks = controller.attachExternalBridge({
+            isReady: () => true,
+            send: () => true,
+            close: () => {},
+        }, { waitForWelcome: true });
+        hooks.onFrame(JSON.stringify({
+            t: 'welcome',
+            hunts: [{ slug: 'unova-1', nome: 'Unova 1', area: 'unova', nivel: 5400, especies: [{ pokeId: 495, nome: 'Snivy' }] }],
+            estado: {
+                cheio: true,
+                nick: 'IntelTester',
+                level: 6000,
+                activeId: 1,
+                huntSlug: 'unova-1',
+                outlandTier: 105,
+                diaSazonal: { tipo: 'FIRE' },
+                items: { 70017: 14, 70095: 13 },
+                passe: { ultimo: null, degrau: 0 },
+                bestiario: { 495: 12000 },
+                automation: {
+                    pityShiny: { bolas: 25, inicio: t0 - 600_000 },
+                    sacrificio: { pts: 55 },
+                    pokemonTravado: [2],
+                },
+                bicicletas: { equipadaId: 10, lista: [{ id: 10, raridade: 'comum' }, { id: 11, raridade: 'rara' }] },
+                casa: { lista: [{ id: 1, rar: 'epica', emUso: true }, { id: 2, rar: 'rara', emUso: false }] },
+                pokemons: [
+                    { id: 1, speciesId: 6, nome: 'Charizard', level: 200, slot: 0, potencia: 5, ivs: { speed: 32 }, stats: { speed: 100 }, refino: { hp: 1 }, tmElemental: true },
+                    { id: 2, speciesId: 10, nome: 'Caterpie', level: 10 },
+                    { id: 3, speciesId: 13, nome: 'Weedle', level: 10 },
+                ],
+            },
+        }));
+        hooks.onFrame(JSON.stringify({ t: 'ginasio', bonusPct: 12, podios: [{ tipo: 'FIRE', pos: 1 }] }));
+        hooks.onFrame(JSON.stringify({ t: 'garantiaLure' }));
+
+        const intel = controller.getSnapshot({ includeHunts: false }).gameIntel;
+        assert.ok(intel && typeof intel === 'object');
+        for (const key of [
+            'serverHealth', 'blackFriday', 'diaSazonal', 'pityShiny', 'cap',
+            'outlandTier', 'eggStep', 'bestiary', 'bossRotation', 'upcomingEvents',
+            'safari', 'gyms', 'bikesAndHouses', 'evolutionDexReady', 'pvpMeta',
+            'activeStatsMeta', 'claimPending',
+        ]) {
+            assert.ok(Object.prototype.hasOwnProperty.call(intel, key), `faltando chave gameIntel.${key}`);
+        }
+        assert.equal(intel.blackFriday.active, true);
+        assert.equal(intel.blackFriday.pct, 50);
+        assert.equal(intel.diaSazonal.tipo, 'FIRE');
+        assert.equal(intel.pityShiny.bolas, 25);
+        assert.equal(intel.cap.depot.count, 1);
+        assert.equal(intel.cap.colecao.count, 1);
+        assert.equal(intel.outlandTier.current, 105);
+        assert.equal(intel.eggStep.step, 2);
+        assert.equal(intel.eggStep.fragments, 14);
+        assert.equal(intel.bestiary.species.length, 1);
+        assert.equal(intel.bossRotation.regions.length, 9);
+        assert.equal(intel.safari.tickets, 13);
+        assert.equal(intel.safari.optimalBatch.ticketsToUse, 12);
+        assert.equal(intel.gyms.activeBuffPct, 12);
+        assert.equal(intel.bikesAndHouses.housesUsed, 1);
+        assert.equal(intel.bikesAndHouses.bestBikeUpgrade.upgrade.id, 11);
+        assert.equal(intel.activeStatsMeta.potenciaMult, 2);
+        assert.equal(intel.activeStatsMeta.nextRefine.stat, 'atk');
+        assert.equal(intel.claimPending.pass, true);
+        assert.equal(intel.claimPending.sacrifice, true);
+    } finally {
+        controller.stop();
+    }
+});
+
+test('team-pvp + loja.pityShiny + probAlerts + apply-pvp-team', () => {
+    const t0 = Date.UTC(2026, 10, 29, 15, 0, 0);
+    const controller = createHeadlessController({
+        configPath: null,
+        disableBrowserProfileSync: true,
+        disableHeadlessHuntGuide: true,
+        disableVotePolling: true,
+        disableAdvisor: true,
+        nowFn: () => t0,
+    });
+    const sent = [];
+    try {
+        const hooks = controller.attachExternalBridge({
+            isReady: () => true,
+            send: (raw) => {
+                sent.push(typeof raw === 'string' ? JSON.parse(raw) : raw);
+                return true;
+            },
+            close: () => {},
+        }, { waitForWelcome: true });
+        hooks.onFrame(JSON.stringify({
+            t: 'welcome',
+            hunts: [
+                {
+                    slug: 'unova-5450',
+                    nome: 'Unova Campo',
+                    area: 'unova',
+                    nivel: 5450,
+                    especies: [{ pokeId: 212, nome: 'Scizor', pontos: 3 }],
+                },
+                {
+                    slug: 'unova-5400',
+                    nome: 'Rota Unova',
+                    area: 'unova',
+                    nivel: 5400,
+                    especies: [{ pokeId: 6, nome: 'Charizard', pontos: 3 }],
+                },
+            ],
+            estado: {
+                cheio: true,
+                nick: 'PvpBuilder',
+                level: 6000,
+                activeId: 101,
+                huntSlug: 'unova-5400',
+                diaSazonal: { tipo: 'FIRE' },
+                items: { 70095: 6 },
+                loja: {
+                    pityShiny: { bolas: 18, inicio: t0 - 3_480_000 }, // falta 2 min p/ fechar hora
+                },
+                pokemons: [
+                    { id: 101, speciesId: 6, nome: 'Charizard', tipos: ['FIRE', 'FLYING'], level: 120, slot: 0, potencia: 5, quality: 1.5, ivs: { speed: 28 }, stats: { hp: 300, atk: 200, def: 180, spAtk: 250, spDef: 180, speed: 220 } },
+                    { id: 102, speciesId: 130, nome: 'Gyarados', tipos: ['WATER', 'FLYING'], level: 110, potencia: 4, quality: 1.4 },
+                    { id: 103, speciesId: 94, nome: 'Gengar', tipos: ['GHOST', 'POISON'], level: 100, shiny: true },
+                    { id: 104, speciesId: 248, nome: 'Tyranitar', tipos: ['ROCK', 'DARK'], level: 100, potencia: 4, quality: 1.35 },
+                ],
+            },
+        }));
+
+        const snap = controller.getSnapshot({ includeHunts: false });
+        const intel = snap.gameIntel;
+        assert.equal(intel.pityShiny.bolas, 18);
+        assert.equal(intel.pityShiny.ativo, true);
+        assert.ok(intel.probAlerts.some((a) => a.id === 'lure-pity'));
+        assert.ok(intel.probAlerts.some((a) => a.id === 'egg-step'));
+        assert.ok(intel.probAlerts.some((a) => a.id === 'safari-6x'));
+        assert.ok(intel.probAlerts.some((a) => a.id === 'seasonal-match'));
+        assert.ok(intel.teamBuilder);
+        assert.ok(intel.teamBuilder.readyCount >= 4);
+        assert.ok(intel.teamBuilder.suggestedFormation.pokemonIds.length >= 4);
+
+        sent.length = 0;
+        assert.equal(controller.triggerAction('apply-pvp-team'), true);
+        const saveFrame = sent.find((f) => f.t === 'pvp.time.salvar');
+        assert.ok(saveFrame && Array.isArray(saveFrame.pokemonIds) && saveFrame.pokemonIds.length >= 4);
+        assert.ok(saveFrame.casas && typeof saveFrame.casas === 'object');
+
+        // Ativar farmObjective team-pvp deve apontar para a hunt do slot pendente (Scizor)
+        sent.length = 0;
+        controller.updateConfig({ farmObjective: 'team-pvp' });
+        const snapObj = controller.getSnapshot({ includeHunts: false });
+        assert.equal(snapObj.collection.mode, 'team-pvp');
+        assert.equal(snapObj.collection.targetSlug, 'unova-5450');
+        assert.ok(sent.some((f) => f.t === 'hunt.select' && f.slug === 'unova-5450'));
+    } finally {
+        controller.stop();
+    }
 });

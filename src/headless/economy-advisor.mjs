@@ -1,6 +1,56 @@
 // Consultor de economia: compara depot, sacrifício e mercado para cada Pokémon fora da equipe
 // e avalia a mochila pela média de vendas. As fórmulas seguem as do jogo (sell-value, nota-pokemon
 // e sacrificio do pokeidle.io); os preços de mercado vêm da base local de vendas (market-base.mjs).
+import { isProtectedSpecial, motivosEspecial, taxaOrbDaVenda, liquidoVenda } from './pvp-meta.mjs';
+
+function getOrbFeeRate(price, tipo = 'pokemon') {
+    const p = Number(price) || 0;
+    if (p <= 0) return 0.15;
+    if (typeof taxaOrbDaVenda === 'function') {
+        const feeOrbs = Number(taxaOrbDaVenda(p, tipo));
+        if (Number.isFinite(feeOrbs) && feeOrbs >= 0) return feeOrbs / p;
+    }
+    if (tipo === 'pokemon') {
+        if (p <= 500) return 0.13;
+        if (p <= 5000) return 0.10;
+        return 0.075;
+    }
+    return 0.15;
+}
+
+export function netOrbSale(price, tipo = 'pokemon') {
+    const p = Math.max(0, Number(price) || 0);
+    if (typeof liquidoVenda === 'function') {
+        const net = Number(liquidoVenda(p, 'orb', tipo));
+        if (Number.isFinite(net) && net >= 0) return net;
+    }
+    return Math.max(0, p - Math.round(p * getOrbFeeRate(p, tipo)));
+}
+
+function getSpecialReasons(pk, esp) {
+    if (!pk || typeof pk !== 'object') return [];
+    const out = new Set();
+    if (typeof motivosEspecial === 'function') {
+        const list = motivosEspecial(pk, esp);
+        if (Array.isArray(list)) {
+            for (const item of list) if (item) out.add(String(item));
+        }
+    }
+    if (typeof isProtectedSpecial === 'function' && isProtectedSpecial(pk, esp) && out.size === 0) {
+        out.add('especial');
+    }
+    if (pk.shiny) out.add('shiny');
+    if (isLegendary(esp, pk.speciesId)) out.add('lendario');
+    if (pk.mega || esp?.mega) out.add('mega');
+    if (Number(pk.level ?? pk.nivel ?? 0) > 100) out.add('nivel > 100');
+    if (Number(pk.potencia) >= 5) out.add('p5');
+    if (pk.zmove || pk.zMove) out.add('zmove');
+    if (pk.aoe || pk.tmAoe) out.add('aoe');
+    if (pk.refino && typeof pk.refino === 'object' && Object.values(pk.refino).some((v) => Number(v) > 0)) {
+        out.add('refino');
+    }
+    return [...out];
+}
 
 // ---------- valor no depot (NPC) ----------
 const NIVEL_ANCORA = 150;
@@ -252,6 +302,8 @@ export function advisePokemons({
         const depot = depotValueOf(pk, origem);
         const pts = sacrificePointsOf(nota);
         const legend = isLegendary(esp, spId);
+        const specialReasons = getSpecialReasons(pk, esp);
+        const protectedSpecial = specialReasons.length > 0;
         const eligible = Boolean(pk.shiny) || Number(pk.potencia) === 5 || legend
             || (level >= MERCADO_POKEMON_MIN.level && nota != null && nota >= MERCADO_POKEMON_MIN.nota - 1e-9);
         const market = eligible ? estimatePokemonPrice({ ...pk, level }, nota, salesBySpecies, { nowMs }) : null;
@@ -279,16 +331,20 @@ export function advisePokemons({
             delete finalPk.nota;
             finalMarket = estimatePokemonPrice(finalPk, bestPlan.nota, salesBySpecies, { nowMs });
         }
-        rows.push({ pk, loc, esp, nota, level, depot, pts, legend, eligible, market, evolveTo, evolveGain, plan, finalMarket });
+        rows.push({ pk, loc, esp, nota, level, depot, pts, legend, specialReasons, protectedSpecial, eligible, market, evolveTo, evolveGain, plan, finalMarket });
     }
     // Sacrifício enche uma barra só: os de maior nota usam os pontos primeiro.
     rows.sort((a, b) => (b.pts - a.pts) || (b.depot - a.depot));
     for (const r of rows) {
-        const { pk, nota, depot, pts, legend, eligible, market, evolveGain, plan, finalMarket } = r;
+        const { pk, nota, depot, pts, legend, specialReasons, protectedSpecial, eligible, market, evolveGain, plan, finalMarket } = r;
         const busy = busyIds.has(String(pk.id));
         const best = plan?.best || null;
-        const marketNet = market?.currency === 'gold' ? netOf(market.price) : null;
-        const nowValue = Math.max(depot, marketNet || 0);
+        const marketNet = market?.currency === 'gold'
+            ? netOf(market.price)
+            : (market?.currency === 'orb' ? netOrbSale(market.price) : null);
+        const marketNetGold = market?.currency === 'gold' ? marketNet : null;
+        const marketNetOrb = market?.currency === 'orb' ? marketNet : null;
+        const nowValue = Math.max(depot, marketNetGold || 0);
         const finalGain = finalMarket?.currency === 'gold' && finalMarket.confidence !== 'baixa'
             ? finalMarket.price - (best?.stoneCostKnown ? best.stoneCost : 0) : null;
         // Nota máxima: a da melhor forma final, ou a de agora quando ele já é a forma final (ou não evolui).
@@ -299,10 +355,21 @@ export function advisePokemons({
         const keepByValue = keepFinalMult > 0 && finalGain != null && finalGain >= nowValue * keepFinalMult;
         let action = 'depot';
         let reason = `Depot paga ${fmt(depot)} gold.`;
-        if (pk.shiny || legend || Number(pk.potencia) === 5) {
+        if (protectedSpecial || pk.shiny || legend || Number(pk.potencia) === 5) {
             action = 'manter';
-            reason = pk.shiny ? 'Shiny: só sai por gemas, decida com calma.' : (legend ? 'Lendário ou mítico: não vai para depot nem sacrifício.' : 'Potência máxima: vale olhar o mercado com calma.');
-            if (market) reason += ` Vendas parecidas: ~${fmt(market.price)} ${market.currency === 'orb' ? 'gemas' : 'gold'}.`;
+            if (pk.shiny && specialReasons.length <= 1) {
+                reason = 'Shiny: só sai por gemas, decida com calma.';
+            } else if (legend && specialReasons.length <= 1) {
+                reason = 'Lendário ou mítico: não vai para depot nem sacrifício.';
+            } else if (Number(pk.potencia) === 5 && specialReasons.length <= 1) {
+                reason = 'Potência máxima: vale olhar o mercado com calma.';
+            } else {
+                reason = `Especial protegido (${specialReasons.join(', ')}): não vai para depot, oferenda nem sacrifício.`;
+            }
+            if (market) {
+                const netTxt = market.currency === 'orb' && marketNetOrb != null ? ` (líquido ~${fmt(marketNetOrb)} gemas)` : '';
+                reason += ` Vendas parecidas: ~${fmt(market.price)} ${market.currency === 'orb' ? 'gemas' : 'gold'}${netTxt}.`;
+            }
         } else if (busy) {
             action = 'manter';
             reason = 'Em uso (ativo, casa, Exp. Share ou fila do Treinador).';
@@ -320,12 +387,12 @@ export function advisePokemons({
             action = 'evoluir';
             const pedraTxt = evolveGain.stone ? ` menos ~${fmt(evolveGain.stone)} da ${evolveGain.stoneName || 'pedra'}` : '';
             reason = `Evoluído para ${evolveGain.name} sai por ~${fmt(evolveGain.price)} gold (${evolveGain.n} vendas)${pedraTxt}. Do jeito que está vale ~${fmt(nowValue)}.`;
-        } else if (eligible && marketNet != null && marketNet >= depot * 1.5) {
+        } else if (eligible && marketNetGold != null && marketNetGold >= depot * 1.5) {
             action = 'mercado';
-            reason = `Vendas parecidas saem por ~${fmt(market.price)} gold (${market.n} vendas, confiança ${market.confidence}); tirando taxa e diária sobra ~${fmt(marketNet)}. Depot paga ${fmt(depot)}.`;
+            reason = `Vendas parecidas saem por ~${fmt(market.price)} gold (${market.n} vendas, confiança ${market.confidence}); tirando taxa e diária sobra ~${fmt(marketNetGold)}. Depot paga ${fmt(depot)}.`;
         } else if (eligible && market && market.currency === 'orb') {
             action = 'mercado';
-            reason = `Vende em gemas: ~${fmt(market.price)} (${market.n} vendas, confiança ${market.confidence}).`;
+            reason = `Vende em gemas: ~${fmt(market.price)} (${market.n} vendas, confiança ${market.confidence}); líquido ~${fmt(marketNetOrb)} após taxa.`;
         } else if (pts > 0 && sacLeft > 0) {
             action = 'sacrificar';
             reason = `+${fmt(pts)} pontos de sacrifício (nota ${nota.toFixed(1)}). Depot pagaria ${fmt(depot)} gold.`;
@@ -344,9 +411,17 @@ export function advisePokemons({
             depot,
             sacPoints: pts,
             market,
+            marketNet,
+            marketNetOrb,
             eligible,
             legend,
             potencia: Number(pk.potencia) || 1,
+            mega: Boolean(pk.mega || r.esp?.mega),
+            zmove: Boolean(pk.zmove || pk.zMove),
+            aoe: Boolean(pk.aoe || pk.tmAoe),
+            refino: pk.refino || null,
+            protectedSpecial,
+            motivosEspecial: specialReasons,
             starter: Boolean(pk.starter),
             busy,
             potential: best ? {
@@ -388,14 +463,18 @@ export function adviseItems({ items = {}, medias = {}, names = {}, keepIds = new
         let reason = `Saíram ${fmt(sold)} unidades em 7 dias.`;
         if (keep) { action = 'manter'; reason = 'O bot usa este item no farm.'; }
         else if (liquidity === 'baixa') { action = 'aos-poucos'; reason = `Pouca saída (${fmt(sold)} em 7 dias): venda aos poucos para não derrubar o preço.`; }
+        const valueGold = gold ? Math.round(gold.avg * qty) : 0;
+        const valueOrb = orb ? Math.round(orb.avg * qty) : 0;
+        const netValueOrb = orb ? netOrbSale(orb.avg, 'item') * qty : 0;
         out.push({
             id,
             name: names?.[id] || `Item #${id}`,
             qty,
             gold,
             orb,
-            valueGold: gold ? Math.round(gold.avg * qty) : 0,
-            valueOrb: orb ? Math.round(orb.avg * qty) : 0,
+            valueGold,
+            valueOrb,
+            netValueOrb,
             liquidity,
             action,
             reason,

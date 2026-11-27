@@ -1734,6 +1734,7 @@ function broadcastSoundCfg(invalidateEvent = null) {
 
 function alertTick() {
     const snaps = getAllSnapshots();
+    const nowMs = Date.now();
     for (const acc of ACCOUNT_IDS) {
         const snap = snaps[acc];
         if (!snap) continue;
@@ -1750,6 +1751,14 @@ function alertTick() {
         const chestsClaimed = Number(snap.lives?.chestsClaimed || 0);
         const voteReady = Boolean(snap.vote?.available);
         const lastLogId = logs.length ? Number(logs[logs.length - 1].id || 0) : 0;
+
+        const cap = snap.gameIntel?.cap || null;
+        const maxCapPct = Math.max(Number(cap?.depot?.pct || 0), Number(cap?.colecao?.pct || 0));
+        const capBand = cap?.anyDanger ? (maxCapPct >= 100 ? '100' : (maxCapPct >= 98 ? '98' : '95')) : '';
+        const pityGarantido = Boolean(snap.gameIntel?.pityShiny?.garantido);
+        const pityNoticeTs = Number(snap.gameIntel?.pityShiny?.notice?.ts || 0);
+        const gymBuffPct = Number(snap.gameIntel?.gyms?.activeBuffPct || 0);
+
         const base = alertBase.get(acc);
         if (!base) {
             // primeira leitura: so marca a linha de base, sem tocar nada antigo
@@ -1761,6 +1770,11 @@ function alertTick() {
                 chestsClaimed,
                 voteReady,
                 lastLogId,
+                capBand,
+                pityGarantido,
+                pityNoticeTs,
+                notifiedEvents: new Set(),
+                gymBuffPct,
             });
             continue;
         }
@@ -1782,10 +1796,12 @@ function alertTick() {
             const topRare = freshRare[0];
             fireAlert('rareDrop', acc, `Drop raro · Conta ${acc}`, `${nick}: ${topRare.name} x${topRare.qty || 1}`, { name: topRare.name || '', count: freshRare.length });
         }
-        const freshErr = logs.filter((l) => Number(l.id || 0) > base.lastLogId && l.kind === 'error');
+        const freshLogs = logs.filter((l) => Number(l.id || 0) > base.lastLogId);
+        const freshErr = freshLogs.filter((l) => l.kind === 'error');
         if (freshErr.length) {
             fireAlert('error', acc, `Erro · Conta ${acc}`, `${nick}: ${String(freshErr[freshErr.length - 1].text || '').slice(0, 180)}`);
         }
+        const freshPityLog = freshLogs.some((l) => /garantia de Lure ativada/i.test(String(l.text || '')));
         base.lastLogId = lastLogId;
         if (chestsClaimed > Number(base.chestsClaimed || 0)) {
             fireAlert('chest', acc, `Caixinha +50 · Conta ${acc}`, `${nick} resgatou +50 pontos na Twitch.`);
@@ -1799,6 +1815,41 @@ function alertTick() {
         base.chests = chests;
         if (voteReady && !base.voteReady) fireAlert('vote', acc, `Voto liberado · Conta ${acc}`, 'Voto diário liberado no IdleHub.io.');
         base.voteReady = voteReady;
+
+        if (capBand && capBand !== base.capBand) {
+            const depCount = Number(cap?.depot?.count || 0);
+            const colCount = Number(cap?.colecao?.count || 0);
+            const alvo = colCount > depCount ? `Coleção (${colCount}/3000)` : `Depósito (${depCount}/3000)`;
+            notifyWindows('depotCapDanger', acc, `Capacidade crítica: Conta ${acc}`, `${nick}: ${alvo} em ${Math.round(maxCapPct)}%. Venda, sacrifique ou limpe excedentes.`);
+        }
+        base.capBand = capBand;
+
+        if ((pityGarantido && !base.pityGarantido) || pityNoticeTs > base.pityNoticeTs || freshPityLog) {
+            notifyWindows('pityShiny', acc, `Pity Shiny garantido: Conta ${acc}`, `${nick}: garantia de Lure ativada (50/50 bolas)!`);
+        }
+        base.pityGarantido = pityGarantido;
+        base.pityNoticeTs = Math.max(base.pityNoticeTs || 0, pityNoticeTs);
+
+        for (const evType of ['raid', 'showdown']) {
+            const ev = snap.gameIntel?.upcomingEvents?.[evType];
+            if (!ev || ev.inscrito) continue;
+            const refTime = ev.active ? Number(ev.endsAt || 0) : Number(ev.startsAt || 0);
+            const remMs = refTime > nowMs ? refTime - nowMs : 0;
+            if (remMs > 0 && remMs <= 30 * 60_000) {
+                const evKey = `${evType}:${refTime}`;
+                if (!base.notifiedEvents.has(evKey)) {
+                    base.notifiedEvents.add(evKey);
+                    const evLabel = evType === 'raid' ? 'Raid Gigantamax' : 'Showdown';
+                    const minLeft = Math.max(1, Math.ceil(remMs / 60_000));
+                    notifyWindows('eventClosing', acc, `${evLabel} fechando: Conta ${acc}`, `${nick} ainda não está inscrito (${minLeft} min restantes).`);
+                }
+            }
+        }
+
+        if (base.gymBuffPct > 0 && gymBuffPct < base.gymBuffPct) {
+            notifyWindows('gymLost', acc, `Ginásio perdido: Conta ${acc}`, `${nick}: bônus de ginásio caiu de ${base.gymBuffPct}% para ${gymBuffPct}%.`);
+        }
+        base.gymBuffPct = gymBuffPct;
     }
     updateTrayState(snaps);
 }
@@ -1988,6 +2039,47 @@ function stopLiveWatchJobs() {
     }
 }
 
+const DIRECT_CONTROLLER_ACTIONS = new Set([
+    'outland-tier',
+    'prey-regions',
+    'craft-shiny-egg',
+    'claim-all',
+    'sacrifice-run',
+    'sacrifice-bone',
+    'oferenda-run',
+    'auto-colecao',
+    'auto-venda-depot',
+    'craft-shiny-stone',
+    'craft-mega',
+    'open-box',
+    'raid-enroll',
+    'showdown-enroll',
+    'camp-enroll',
+    'boss-enter',
+    'boss-auto',
+    'boss-leave',
+    'mistico-enter',
+    'safari-enter',
+    'gym-info',
+    'gym-challenge',
+    'bike-equip',
+    'bike-craft',
+    'bike-fabricar',
+    'house-use',
+    'house-craft',
+    'house-fabricar',
+    'team-active',
+    'evolve-pokemon',
+    'refine-pokemon',
+    'zmove-toggle',
+    'reduce-level',
+    'pvp-save-formation',
+    'apply-pvp-team',
+    'csv-export',
+    'sniper-scan-now',
+    'trainer-step-now',
+]);
+
 function registerIpcHandlers() {
     ipcMain.handle('hub:get-all-snapshots', () => getAllSnapshots());
     ipcMain.handle('hub:get-perf', () => perf.read());
@@ -2123,6 +2215,8 @@ function registerIpcHandlers() {
             await ses.clearStorageData();
             await ses.clearCache();
             ok = true;
+        } else if (DIRECT_CONTROLLER_ACTIONS.has(act)) {
+            ok = Boolean(controller.triggerAction(act, payload));
         } else {
             return { ok: false, error: `Acao desconhecida: ${act}` };
         }

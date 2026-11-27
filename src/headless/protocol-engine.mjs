@@ -1,6 +1,47 @@
 export const DEFAULT_WS_URL = 'wss://pokeidle.io';
 export const DEFAULT_ORIGIN = 'https://pokeidle.io';
 
+export const GATEWAY_ONLY_TYPES = Object.freeze([
+    'chat',
+    'chat.historico',
+    'chat.del',
+    'chat.fixadas',
+    'chat.fixada',
+    'chat.interrompido',
+    'chat.aviso',
+    'shiny.captura',
+    'lendario.captura',
+    'drop.raro',
+    'mg',
+    'pong',
+    'sessao.renovada',
+]);
+const GATEWAY_ONLY_SET = new Set(GATEWAY_ONLY_TYPES);
+
+/**
+ * Indica se um tipo de mensagem recebida deve renovar o watchdog da conexao.
+ * @param {string} type Tipo `t` do frame WebSocket.
+ * @returns {boolean} True quando o frame deve renovar o vigia.
+ */
+export function renovaOVigia(type) {
+    return !GATEWAY_ONLY_SET.has(String(type || ''));
+}
+
+/**
+ * Calcula o atraso de reconexao com backoff exponencial e jitter,
+ * usando janela ampliada no reinicio do servidor (close code 1012).
+ * @param {object} [params] Parametros: attempt, code e rand.
+ * @returns {number} Atraso em milissegundos.
+ */
+export function computeReconnectDelay({ attempt = 1, code = 0, rand = Math.random } = {}) {
+    if (attempt <= 1) {
+        if (code === 1012) return Math.round(1000 + rand() * 14_000);
+        return Math.round(800 + rand() * 1700);
+    }
+    const cap = Math.min(30_000, 2000 * (2 ** (attempt - 2)));
+    return Math.round(cap / 2 + rand() * (cap / 2));
+}
+
 export const BALL_IDS = Object.freeze({ POKE: 1, GREAT: 2, SUPER: 3, ULTRA: 4, BEAST: 5 });
 export const DEFAULT_BALL_PRICES = Object.freeze({ 1: 5, 2: 20, 3: 50, 4: 130 });
 
@@ -498,6 +539,9 @@ export function computeModeWarnings({
     mode = 'headless',
     economyActive = false,
     campoFeedDegraded = false,
+    capStatus = null,
+    state = null,
+    tracker = null,
 } = {}) {
     const warnings = [];
     const cfg = config || {};
@@ -548,6 +592,103 @@ export function computeModeWarnings({
             detail: 'O servidor não está enviando o feed de campo nesta hunt. O bot continua tentando lançar Pokébolas pelo fallback de batalha, mas pode perder caídos.',
             fixLabel: 'Restaurar feed de campo',
             fixConfig: { economyMode: 'auto', economyPingOnly: false, caidosEnabled: true },
+        });
+    }
+
+    // Capacidade do depot / colecao (limite oficial: 3000 por compartimento)
+    let capCount = null;
+    let capMax = 3000;
+    let capPct = null;
+    let capWarn = false;
+    let capDanger = false;
+    let capLabel = 'Depósito';
+    if (typeof capStatus === 'number' && Number.isFinite(capStatus)) {
+        capCount = capStatus;
+    } else if (capStatus && typeof capStatus === 'object') {
+        if (capStatus.depot || capStatus.colecao) {
+            const dep = capStatus.depot || {};
+            const col = capStatus.colecao || {};
+            const depPct = Number(dep.pct ?? 0);
+            const colPct = Number(col.pct ?? 0);
+            const useCol = colPct > depPct;
+            const target = useCol ? col : dep;
+            capLabel = useCol ? 'Coleção' : 'Depósito';
+            capCount = Number(target.count ?? 0);
+            capMax = Number(target.cap ?? 3000) || 3000;
+            capPct = Number(target.pct ?? (capMax > 0 ? (capCount / capMax) * 100 : 0));
+            capDanger = Boolean(capStatus.anyDanger || dep.danger || col.danger);
+            capWarn = Boolean(capStatus.anyWarn || dep.warn || col.warn);
+        } else {
+            const rawMax = Number(capStatus.max ?? capStatus.limit ?? capStatus.cap ?? capStatus.totalCap ?? 3000);
+            if (Number.isFinite(rawMax) && rawMax > 0) capMax = rawMax;
+            const rawCount = capStatus.count ?? capStatus.used ?? capStatus.total ?? capStatus.depotCount ?? capStatus.atual;
+            if (rawCount != null && Number.isFinite(Number(rawCount))) capCount = Number(rawCount);
+            const rawPct = capStatus.pct ?? capStatus.percent ?? (capStatus.ratio != null ? Number(capStatus.ratio) * 100 : null);
+            if (rawPct != null && Number.isFinite(Number(rawPct))) capPct = Number(rawPct);
+        }
+    } else if (state && typeof state === 'object') {
+        const list = Array.isArray(state.pokemons) ? state.pokemons : (Array.isArray(state.colecao) ? state.colecao : null);
+        if (list) {
+            const travados = new Set((Array.isArray(state.automation?.pokemonTravado) ? state.automation.pokemonTravado : []).map(String));
+            let depCount = 0;
+            let colCount = 0;
+            for (const pk of list) {
+                if (!pk || pk.id == null) continue;
+                if (travados.has(String(pk.id)) || pk.colecao || pk.travado || pk.location === 'colecao') colCount++;
+                else if (pk.slot == null) depCount++;
+            }
+            if (colCount > depCount) {
+                capCount = colCount;
+                capLabel = 'Coleção';
+            } else {
+                capCount = depCount;
+            }
+        }
+    }
+    if (capPct == null && capCount != null && capMax > 0) {
+        capPct = (capCount / capMax) * 100;
+    }
+    if (capDanger || (capPct != null && capPct >= 95) || (capCount != null && capCount >= 2850)) {
+        warnings.push({
+            code: 'depot-cap-danger',
+            severity: 'danger',
+            title: `${capLabel} quase lotado (${capCount != null ? `${capCount}/${capMax}` : `${Math.round(capPct)}%`})`,
+            detail: 'Capacidade de Pokémon acima de 95% (2850+). Novas capturas podem ser bloqueadas; venda, sacrifique ou limpe excedentes.',
+        });
+    } else if (capWarn || (capPct != null && capPct >= 90) || (capCount != null && capCount >= 2700)) {
+        warnings.push({
+            code: 'depot-cap-warn',
+            severity: 'warn',
+            title: `${capLabel} enchendo (${capCount != null ? `${capCount}/${capMax}` : `${Math.round(capPct)}%`})`,
+            detail: 'Capacidade de Pokémon acima de 90% (2700+). Considere limpar o depot antes de atingir o limite.',
+        });
+    }
+
+    // Revive 205 cura apenas 10% do HP: sem pocao adequada em nivel alto causa ciclo de morte
+    const prefPotions = normalizePotionIds(cfg.preferredPotionIds);
+    const onlySmallOrEmptyPotions = prefPotions.length === 0 || (prefPotions.length === 1 && prefPotions[0] === ITEM_IDS.SMALL_POTION);
+    const activePk = Array.isArray(state?.pokemons)
+        ? state.pokemons.find((p) => p && String(p.id) === String(state?.activeId))
+        : null;
+    const trainerLvl = Number(state?.level || 0);
+    const activeLvl = Number(activePk?.level ?? activePk?.nivel ?? 0);
+    const activeMaxHp = Number(activePk?.maxHp ?? activePk?.hpMax ?? 0);
+    const highLevel = trainerLvl >= 100 || activeLvl >= 100 || activeMaxHp >= 600;
+    const reviveIds = Array.isArray(state?.automation?.reviveIds)
+        ? state.automation.reviveIds.map(Number)
+        : [];
+    const usesRevive205 =
+        cfg.restockRevive !== false ||
+        reviveIds.includes(ITEM_IDS.REVIVE) ||
+        Number(state?.items?.[ITEM_IDS.REVIVE] || 0) > 0;
+    if (tracker?.recentReviveNoPotion || (!cfg.potionOptimize && onlySmallOrEmptyPotions && highLevel && usesRevive205)) {
+        warnings.push({
+            code: 'revive-low-hp',
+            severity: 'warn',
+            title: 'Revive cura só 10% do HP sem poção forte',
+            detail: 'Em nível alto, usar Revive (205) com Small Potion ou sem poção configurada pode gerar loop de morte. Configure Hyper/Ultimate Potion ou ative a otimização de poções.',
+            fixLabel: 'Ativar otimização de poções',
+            fixConfig: { potionOptimize: true },
         });
     }
 
@@ -1031,6 +1172,67 @@ export function evaluateHeadlessTick({
         }
     }
 
+    // Fabricacao automatica de Ovo Shiny (10 fragmentos 70017)
+    if (
+        config.autoCraftShinyEgg !== false &&
+        Number(state.items?.[70017] || 0) >= 10 &&
+        nowMs - (tracker.lastShinyEggCraftAt || 0) >= 15_000
+    ) {
+        tracker.lastShinyEggCraftAt = nowMs;
+        actions.push({ t: 'ovoShiny.fabricar' });
+    }
+
+    // Resgate opt-in de boost de sacrificio (>= 50 pts e sem boost ativo com folga)
+    if (
+        config.autoSacrificeRedeem === true &&
+        Number(state.automation?.sacrificio?.pts || 0) >= 50 &&
+        !(Number(state.automation?.sacrificio?.ate || 0) > nowMs + 60_000) &&
+        nowMs - (tracker.lastSacrificeRedeemAt || 0) >= 60_000
+    ) {
+        tracker.lastSacrificeRedeemAt = nowMs;
+        actions.push({ t: 'sacrificio.resgatar' });
+    }
+
+    // Inscricao opt-in na Raid (segunda-feira BRT UTC-3 antes das 16h, com ingresso 70000)
+    const brtNow = new Date(Number(nowMs) - FUSO_BRASILIA_MS);
+    if (
+        config.autoRaidEnroll === true &&
+        brtNow.getUTCDay() === 1 &&
+        brtNow.getUTCHours() < 16 &&
+        !state.raid?.inscrito &&
+        Number(state.items?.[70000] || 0) >= 1 &&
+        nowMs - (tracker.lastRaidEnrollAt || 0) >= 600_000
+    ) {
+        tracker.lastRaidEnrollAt = nowMs;
+        actions.push({ t: 'raid.inscrever' });
+    }
+
+    // Inscricao opt-in no Showdown (quarta-feira BRT UTC-3 antes das 20h, nivel >= 100)
+    if (
+        config.autoShowdownEnroll === true &&
+        brtNow.getUTCDay() === 3 &&
+        brtNow.getUTCHours() < 20 &&
+        Number(state.level || 0) >= 100 &&
+        state.showdown?.abertoId &&
+        !state.showdown?.inscrito &&
+        nowMs - (tracker.lastShowdownEnrollAt || 0) >= 600_000
+    ) {
+        tracker.lastShowdownEnrollAt = nowMs;
+        actions.push({ t: 'showdown.inscrever', id: state.showdown.abertoId });
+    }
+
+    // Entrada opt-in no Portal Mistico (chave 70090, fora do centro e sem mistico ativo)
+    if (
+        config.autoMisticoEnter === true &&
+        Number(state.items?.[70090] || 0) >= 1 &&
+        !(Number(state.mistico?.prazo || 0) > nowMs) &&
+        !state.noCentro &&
+        nowMs - (tracker.lastMisticoEnterAt || 0) >= 30_000
+    ) {
+        tracker.lastMisticoEnterAt = nowMs;
+        actions.push({ t: 'mistico.entrar' });
+    }
+
     return actions;
 }
 
@@ -1293,8 +1495,37 @@ export function computeCollectionSummary({
     };
 }
 
+const BESTIARY_TIERS = Object.freeze([25_000, 50_000, 100_000]);
+const BESTIARY_MAX = 100_000;
+
+function readBestiaryKills(source, sp) {
+    if (!source || !sp) return 0;
+    const keys = [sp.key, String(sp.pokeId), sp.pokeId, Number(sp.key)];
+    let raw = null;
+    if (source instanceof Map) {
+        for (const k of keys) {
+            if (k != null && source.has(k)) {
+                raw = source.get(k);
+                break;
+            }
+        }
+    } else if (typeof source === 'object') {
+        for (const k of keys) {
+            if (k != null && Object.prototype.hasOwnProperty.call(source, k)) {
+                raw = source[k];
+                break;
+            }
+        }
+    }
+    if (raw == null) return 0;
+    if (typeof raw === 'object') {
+        return Math.max(0, Number(raw.abates ?? raw.kills ?? raw.count ?? raw.c ?? 0) || 0);
+    }
+    return Math.max(0, Number(raw) || 0);
+}
+
 /**
- * Seleciona a melhor hunt alvo para o modo Completar Pokedex ou Modo Top Catch,
+ * Seleciona a melhor hunt alvo para o modo Completar Pokedex, Top Catch ou Bestiario,
  * combinando especies faltantes com o ranking real do /hunt (xp, ouro, shiny) ou modo rapido (fast).
  * @param {object} params Contexto de selecao.
  * @returns {object} Decisao com targetSlug, targetHunt, metricas e contagem pendente.
@@ -1311,8 +1542,10 @@ export function selectObjectiveHunt({
     activePokemonLevel = 0,
     capturedSet = null,
     huntRanking = null,
+    bestiaryMap = null,
+    bestiaryCounts = null,
 } = {}) {
-    if (mode !== 'pokedex' && mode !== 'topcatch') {
+    if (mode !== 'pokedex' && mode !== 'topcatch' && mode !== 'bestiary') {
         return { active: false, targetSlug: null, completed: false };
     }
     const lvl = Number(trainerLevel) || 0;
@@ -1325,6 +1558,7 @@ export function selectObjectiveHunt({
     }
     const hasRank = rankMap.size > 0;
     const metricKey = focus === 'ouro' ? 'goldH' : (focus === 'shiny' ? 'shinyH' : 'xpH');
+    const bestiarySource = bestiaryMap ?? bestiaryCounts ?? null;
 
     const candidates = [];
     let currentCandidate = null;
@@ -1333,7 +1567,24 @@ export function selectObjectiveHunt({
     for (const h of hunts || []) {
         if (!h?.slug) continue;
         if (lvl > 0 && Number(h.nivel || 0) > lvl) continue;
-        const missing = getHuntMissingSpecies(h, capturedSet);
+        let missing;
+        let bestiaryClosestRemaining = Infinity;
+        if (mode === 'bestiary') {
+            const allSp = getHuntMissingSpecies(h, null);
+            missing = [];
+            for (const sp of allSp) {
+                const kills = readBestiaryKills(bestiarySource, sp);
+                if (kills >= BESTIARY_MAX) continue;
+                const nextTier = BESTIARY_TIERS.find((t) => kills < t) ?? BESTIARY_MAX;
+                const remainingToTier = Math.max(1, nextTier - kills);
+                if (remainingToTier < bestiaryClosestRemaining) {
+                    bestiaryClosestRemaining = remainingToTier;
+                }
+                missing.push({ ...sp, kills, nextTier, remainingToTier });
+            }
+        } else {
+            missing = getHuntMissingSpecies(h, capturedSet);
+        }
         if (missing.length === 0) continue;
         for (const sp of missing) missingSpeciesAll.add(sp.key);
 
@@ -1348,6 +1599,7 @@ export function selectObjectiveHunt({
             name: h.nome || h.slug,
             level: Number(h.nivel || 0),
             missing,
+            bestiaryClosestRemaining,
             rankRow: r,
             metricValue,
             unsafe,
@@ -1385,7 +1637,15 @@ export function selectObjectiveHunt({
         : [];
     const pool = alternatives.length ? alternatives : basePool;
 
-    if (focus === 'fast') {
+    if (mode === 'bestiary') {
+        pool.sort((a, b) =>
+            (a.bestiaryClosestRemaining - b.bestiaryClosestRemaining) ||
+            (b.metricValue - a.metricValue) ||
+            (b.missing.length - a.missing.length) ||
+            (focus === 'fast' ? (a.level - b.level) : (b.level - a.level)) ||
+            a.name.localeCompare(b.name)
+        );
+    } else if (focus === 'fast') {
         pool.sort((a, b) =>
             (a.level - b.level) ||
             (b.missing.length - a.missing.length) ||
@@ -1437,5 +1697,6 @@ export function selectObjectiveHunt({
         usedHuntGuide: Boolean(chosen.rankRow),
         metricValue: chosen.metricValue,
         unsafe: chosen.unsafe,
+        ...(mode === 'bestiary' ? { bestiaryClosestRemaining: chosen.bestiaryClosestRemaining } : {}),
     };
 }
