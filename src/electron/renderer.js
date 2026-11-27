@@ -200,14 +200,31 @@ const wvZoomObservers = new Map();
 function wvAutoZoomOn() {
     try { return localStorage.getItem('nexo.wvAutoZoom') !== '0'; } catch { return true; }
 }
-// Em telas baixas da grade o jogo some com o mapa; afasta o zoom para caber (altura de referência ~700px).
+// O pokeidle tem três layouts pela largura efetiva (largura da tela / zoom): até 720px é o móvel
+// (preenche a tela), acima de 1100px o de desktop, e no meio um de tablet que vira página de rolagem
+// com o mapa preso em 62% da altura e um vazio preto embaixo. A conta nunca pode cair no meio.
+const GAME_MOBILE_MAX_W = 720;
+const GAME_TABLET_MAX_W = 1100;
+const GAME_MAX_ZOOM_IN = 1.4;
+function gameZoomFor(width, height, autoZoom) {
+    // Telas baixas: afasta o zoom para caber (altura de referência ~700px).
+    let z = autoZoom && height > 0 ? Math.max(0.6, Math.min(1, height / 700)) : 1;
+    z = Math.round(z * 20) / 20;
+    if (!(width > 0)) return z;
+    const eff = width / z;
+    if (eff <= GAME_MOBILE_MAX_W || eff > GAME_TABLET_MAX_W) return z;
+    const zMobile = Math.ceil((width / GAME_MOBILE_MAX_W) * 20) / 20;
+    if (zMobile <= GAME_MAX_ZOOM_IN) return Math.max(z, zMobile);
+    // Larga demais para o móvel sem ficar gigante: afasta até o layout de desktop.
+    let zDesk = Math.floor((width / GAME_TABLET_MAX_W) * 20) / 20;
+    while (zDesk > 0.3 && width / zDesk <= GAME_TABLET_MAX_W) zDesk -= 0.05;
+    return Math.round(zDesk * 100) / 100;
+}
 function applyWebviewZoom(acc) {
     const wv = webviews.get(acc);
     const body = $(`wv-body-${acc}`);
     if (!wv || !body || !wv.__ready) return;
-    let z = 1;
-    if (wvAutoZoomOn() && body.clientHeight > 0) z = Math.max(0.6, Math.min(1, body.clientHeight / 700));
-    z = Math.round(z * 20) / 20;
+    const z = gameZoomFor(body.clientWidth, body.clientHeight, wvAutoZoomOn());
     if (wv.__zoom === z) return;
     try { wv.setZoomFactor(z); wv.__zoom = z; } catch { /* ainda carregando */ }
 }
@@ -2180,7 +2197,15 @@ function renderTopTabsAndSlots() {
         const toggleBtn = document.querySelector(`[data-slot-act="toggle"][data-slot="${acc}"]`);
         if (toggleBtn) {
             // mesmo texto do botão do painel, para não parecer outra função
-            setText(toggleBtn, isEmbedded ? 'Voltar para Headless' : 'Abrir no Embutido');
+            // o prefixo some em tela estreita (CSS), sobrando só "Headless"/"Embutido"
+            const toggleState = isEmbedded ? 'emb' : 'hl';
+            if (toggleBtn.dataset.state !== toggleState) {
+                toggleBtn.dataset.state = toggleState;
+                toggleBtn.innerHTML = isEmbedded
+                    ? '<span class="lbl-pre">Voltar para </span>Headless'
+                    : '<span class="lbl-pre">Abrir no </span>Embutido';
+                toggleBtn.setAttribute('aria-label', isEmbedded ? `Voltar a Conta ${acc} para Headless` : `Abrir a Conta ${acc} no Embutido`);
+            }
             setClass(toggleBtn, isEmbedded ? 'btn sm primary grid-only' : 'btn sm teal grid-only');
             const tip = isEmbedded
                 ? 'Fecha o jogo desta tela e o bot segue farmando sozinho em 2º plano (Headless: sem tela, quase sem GPU).'
