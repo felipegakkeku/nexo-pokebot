@@ -3873,3 +3873,64 @@ test('huntGuideMode=notify pausa trocas automaticas (inclusive Top Catch) e canc
         rmSync(dir, { recursive: true, force: true });
     }
 });
+
+test('chocadeira automatica coloca ovos da mochila nos slots livres com prioridade Shiny > P4 > P3 > P2', () => {
+    const t0 = 1_700_000_500_000;
+    const tracker = {};
+    const baseCfg = {
+        incubatorEnabled: true,
+        restockEnabled: false,
+        ensureNativeAutoHeal: false,
+        caidosEnabled: false,
+        dailyPassEnabled: false,
+        preyEnabled: false,
+    };
+
+    // Slot 0 ocupado, slot 1 livre, mochila tem P2 e Ovo Shiny -> prioriza Ovo Shiny no slot 1
+    const act1 = evaluateHeadlessTick({
+        state: {
+            items: { 70091: 2, 70094: 1 },
+            chocadeira: { total: 2, ovos: [{ slot: 0, ovo: 'p3', inicio: t0 - 1000, fim: t0 + 3600_000 }] },
+        },
+        config: baseCfg,
+        tracker,
+        nowMs: t0,
+    });
+    assert.deepEqual(act1.find((a) => a.t === 'chocadeira.colocar'), { t: 'chocadeira.colocar', slot: 1, ovo: 'shiny' });
+
+    // Cooldown de 10s evita envio duplicado antes do servidor responder
+    const actCooldown = evaluateHeadlessTick({
+        state: { items: { 70091: 2 }, chocadeira: { total: 2, ovos: [] } },
+        config: baseCfg,
+        tracker,
+        nowMs: t0 + 3000,
+    });
+    assert.equal(actCooldown.some((a) => a.t === 'chocadeira.colocar'), false);
+
+    // Todos slots ocupados -> nao envia nada
+    const actFull = evaluateHeadlessTick({
+        state: {
+            items: { 70093: 1 },
+            chocadeira: {
+                total: 2,
+                ovos: [
+                    { slot: 0, ovo: 'p3', inicio: t0, fim: t0 + 3600_000 },
+                    { slot: 1, ovo: 'shiny', inicio: t0, fim: t0 + 3600_000 },
+                ],
+            },
+        },
+        config: baseCfg,
+        tracker,
+        nowMs: t0 + 15_000,
+    });
+    assert.equal(actFull.some((a) => a.t === 'chocadeira.colocar'), false);
+
+    // Desligado na config -> nao envia nada
+    const actOff = evaluateHeadlessTick({
+        state: { items: { 70093: 1 }, chocadeira: { total: 2, ovos: [] } },
+        config: { ...baseCfg, incubatorEnabled: false },
+        tracker,
+        nowMs: t0 + 30_000,
+    });
+    assert.equal(actOff.some((a) => a.t === 'chocadeira.colocar'), false);
+});

@@ -1245,6 +1245,7 @@
         cRestock: 'Compra bolas, poções e revives no mercado quando ficam abaixo dos alvos, sem passar da reserva mínima de gold.',
         cPass: 'Resgata a recompensa diária do passe assim que libera.',
         cPrey: 'Rola o Prey diário automaticamente.',
+        cIncubator: 'Coloca ovos da mochila (Ovo Shiny, P4, P3 e P2) nos slots livres da chocadeira automaticamente.',
         cLives: 'Assiste Twitch e Kick em protocolo leve (sem vídeo, ~40 lives para 4 contas) e resgata as recompensas.',
         cLiveStreak: 'Assiste os primeiros 15 min de cada live no player real da Twitch, invisível, em 160p e sem som, para contar a sequência.',
         cLiveFollow: 'Segue os canais das lives para liberar as recompensas que pedem follow.',

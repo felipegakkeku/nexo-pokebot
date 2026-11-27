@@ -1379,6 +1379,7 @@ function readConfigForm() {
         restockEnabled: $('cRestock').checked,
         dailyPassEnabled: $('cPass').checked,
         preyEnabled: $('cPrey').checked,
+        incubatorEnabled: Boolean($('cIncubator')?.checked),
         liveEnabled: $('cLives').checked,
         liveStreakWatch: $('cLiveStreak').checked,
         liveAutoFollow: $('cLiveFollow').checked,
@@ -1846,6 +1847,7 @@ function renderActiveAccountPanel() {
         $('cRestock').checked = Boolean(cfg.restockEnabled);
         $('cPass').checked = Boolean(cfg.dailyPassEnabled);
         $('cPrey').checked = Boolean(cfg.preyEnabled);
+    if ($('cIncubator')) $('cIncubator').checked = cfg.incubatorEnabled !== false;
         $('cLives').checked = Boolean(cfg.liveEnabled);
         $('cLiveStreak').checked = cfg.liveStreakWatch !== false;
         $('cLiveFollow').checked = cfg.liveAutoFollow !== false;

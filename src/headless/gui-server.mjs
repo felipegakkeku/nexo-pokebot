@@ -152,6 +152,7 @@ const EDITABLE_CONFIG_KEYS = new Set([
     'restockRevive',
     'dailyPassEnabled',
     'preyEnabled',
+    'incubatorEnabled',
     'ensureNativeAutoHeal',
     'targetHuntSlug',
     'huntGuideMode',
@@ -372,6 +373,7 @@ function buildConfig(prefs = {}, saved = {}, overrides = {}, isolatedAccount = f
         ensureNativeAutoHeal: p.ensureNativeAutoHeal ?? true,
         dailyPassEnabled: p.dailyPassEnabled ?? true,
         preyEnabled: p.preyEnabled ?? true,
+        incubatorEnabled: p.incubatorEnabled ?? true,
         targetHuntSlug: null,
         huntGuideMode: 'off',
         huntGuideMetric: 'xp',
@@ -516,6 +518,7 @@ function normalizeConfigPatch(current, patch = {}) {
     }
     if (patch.dailyPassEnabled !== undefined) next.dailyPassEnabled = Boolean(patch.dailyPassEnabled);
     if (patch.preyEnabled !== undefined) next.preyEnabled = Boolean(patch.preyEnabled);
+    if (patch.incubatorEnabled !== undefined) next.incubatorEnabled = Boolean(patch.incubatorEnabled);
     if (patch.ensureNativeAutoHeal !== undefined) next.ensureNativeAutoHeal = Boolean(patch.ensureNativeAutoHeal);
     if (patch.targetHuntSlug !== undefined) {
         next.targetHuntSlug = typeof patch.targetHuntSlug === 'string' && patch.targetHuntSlug.trim()
@@ -4090,6 +4093,9 @@ export function createHeadlessController(options = {}) {
                 pushLog('shop', `Restock enviado: ${describeShopBuy(a)} x${a.qty}`);
             } else if (a?.t === 'passe.resgatar') {
                 pushLog('reward', 'Resgate automatico do Passe Diario enviado.');
+            } else if (a?.t === 'chocadeira.colocar') {
+                const eggLabel = ({ shiny: 'Ovo Shiny', p4: 'Mystery Egg P4', p3: 'Mystery Egg P3', p2: 'Mystery Egg P2' })[a.ovo] || a.ovo;
+                pushLog('reward', `Chocadeira: colocando ${eggLabel} no slot ${Number(a.slot) + 1}.`);
             } else if (a?.t === 'mistico.bola') {
                 pushLog('catch', `Arena Mistica: lancando bola #${a.ballId}`);
             } else if (a?.t === 'prey.escolher') {

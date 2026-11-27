@@ -635,6 +635,13 @@ export function resolveRestockBallId(config = {}, playerGold = 0) {
 }
 
 const MAX_SHOP_BUY_QTY = 9999;
+export const INCUBATOR_EGGS = Object.freeze([
+    Object.freeze({ id: 'shiny', itemId: 70094, nome: 'Ovo Shiny' }),
+    Object.freeze({ id: 'p4', itemId: 70093, nome: 'Mystery Egg P4' }),
+    Object.freeze({ id: 'p3', itemId: 70092, nome: 'Mystery Egg P3' }),
+    Object.freeze({ id: 'p2', itemId: 70091, nome: 'Mystery Egg P2' }),
+]);
+
 export const BUYABLE_POTION_IDS = Object.freeze([
     ITEM_IDS.SMALL_POTION,
     ITEM_IDS.GREAT_POTION,
@@ -996,6 +1003,30 @@ export function evaluateHeadlessTick({
                 tracker.lastPreyActionAt = nowMs;
                 actions.push({ t: 'prey.escolher', cartela: i, dia, pk });
                 break;
+            }
+        }
+    }
+
+    if (config.incubatorEnabled !== false && state.items && nowMs - (tracker.lastIncubatorAt || 0) >= 10_000) {
+        const rawChc = state.chocadeira && typeof state.chocadeira === 'object' ? state.chocadeira : null;
+        const totalSlots = Math.max(1, Math.min(6, Math.floor(Number(rawChc?.total)) || 1));
+        const usedSlots = new Set(
+            (Array.isArray(rawChc?.ovos) ? rawChc.ovos : [])
+                .map((o) => Number(o?.slot))
+                .filter((s) => Number.isInteger(s) && s >= 0 && s < totalSlots)
+        );
+        let freeSlot = null;
+        for (let s = 0; s < totalSlots; s++) {
+            if (!usedSlots.has(s)) {
+                freeSlot = s;
+                break;
+            }
+        }
+        if (freeSlot !== null) {
+            const egg = INCUBATOR_EGGS.find((e) => Number(state.items[e.itemId] ?? state.items[String(e.itemId)] ?? 0) > 0);
+            if (egg) {
+                tracker.lastIncubatorAt = nowMs;
+                actions.push({ t: 'chocadeira.colocar', slot: freeSlot, ovo: egg.id });
             }
         }
     }
