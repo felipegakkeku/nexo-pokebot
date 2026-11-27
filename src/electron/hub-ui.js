@@ -237,7 +237,23 @@
     ];
     let evFilter = LS.get('nexo.stageEvFilter', ['catch', 'shiny', 'reward', 'alert']);
     if (!Array.isArray(evFilter)) evFilter = ['catch', 'shiny', 'reward', 'alert'];
+    let stagePrefs = LS.get('nexo.stagePrefs', { hidden: [], swapped: false, stacked: false });
+    if (!stagePrefs || typeof stagePrefs !== 'object') stagePrefs = { hidden: [], swapped: false, stacked: false };
+    if (!Array.isArray(stagePrefs.hidden)) stagePrefs.hidden = [];
+    const STAGE_SEC_LABELS = [
+        ['poke', 'Pokémon'],
+        ['kpis', 'KPIs'],
+        ['events', 'Eventos'],
+        ['buffs', 'Buffs'],
+        ['drops', 'Drops'],
+    ];
     const STAGE_HTML = `
+      <div class="sl-custom-bar">
+        <span class="sl-cb-lbl">Lado direito:</span>
+        ${STAGE_SEC_LABELS.map(([id, lbl]) => `<button type="button" class="sl-cb-btn" data-sl-vis="${id}" aria-pressed="true">${lbl}</button>`).join('')}
+        <button type="button" class="sl-cb-btn" data-sl-opt="swap" aria-pressed="false" title="Inverte Eventos e Buffs/Drops de lado">Inverter</button>
+        <button type="button" class="sl-cb-btn" data-sl-opt="stack" aria-pressed="false" title="Alterna entre 2 colunas ou 1 coluna">1 coluna</button>
+      </div>
       <div class="sl-hero">
         <div class="sl-poke">
           <div class="sl-ring"><img class="sl-sprite" alt="" /></div>
@@ -310,6 +326,24 @@
         applyEvSize();
     });
     document.addEventListener('click', (ev) => {
+        const slVis = ev.target.closest?.('[data-sl-vis]');
+        if (slVis) {
+            const k = slVis.dataset.slVis;
+            stagePrefs.hidden = stagePrefs.hidden.includes(k)
+                ? stagePrefs.hidden.filter((x) => x !== k)
+                : [...stagePrefs.hidden, k];
+            LS.set('nexo.stagePrefs', stagePrefs);
+            for (const acc of ACCOUNTS) applyStagePrefs(acc);
+            return;
+        }
+        const slOpt = ev.target.closest?.('[data-sl-opt]');
+        if (slOpt) {
+            if (slOpt.dataset.slOpt === 'swap') stagePrefs.swapped = !stagePrefs.swapped;
+            else if (slOpt.dataset.slOpt === 'stack') stagePrefs.stacked = !stagePrefs.stacked;
+            LS.set('nexo.stagePrefs', stagePrefs);
+            for (const acc of ACCOUNTS) applyStagePrefs(acc);
+            return;
+        }
         const b = ev.target.closest?.('[data-ev-f]');
         if (!b) return;
         const id = b.dataset.evF;
@@ -321,6 +355,22 @@
             renderStageLive(acc);
         }
     });
+    function applyStagePrefs(acc) {
+        const host = $(`stageLive-${acc}`);
+        if (!host) return;
+        for (const [id] of STAGE_SEC_LABELS) {
+            const hidden = stagePrefs.hidden.includes(id);
+            host.classList.toggle(`sl-hide-${id}`, hidden);
+            const btn = host.querySelector(`[data-sl-vis="${id}"]`);
+            if (btn) btn.setAttribute('aria-pressed', hidden ? 'false' : 'true');
+        }
+        host.classList.toggle('sl-swapped', Boolean(stagePrefs.swapped));
+        host.classList.toggle('sl-stacked', Boolean(stagePrefs.stacked));
+        const swBtn = host.querySelector('[data-sl-opt="swap"]');
+        if (swBtn) swBtn.setAttribute('aria-pressed', stagePrefs.swapped ? 'true' : 'false');
+        const stBtn = host.querySelector('[data-sl-opt="stack"]');
+        if (stBtn) stBtn.setAttribute('aria-pressed', stagePrefs.stacked ? 'true' : 'false');
+    }
     function renderStageLive(acc) {
         const host = $(`stageLive-${acc}`);
         const ph = $(`wv-ph-${acc}`);
@@ -340,6 +390,7 @@
             host.dataset.built = '1';
             host.innerHTML = STAGE_HTML;
         }
+        applyStagePrefs(acc);
         const q = (sel) => host.querySelector(sel);
         const st = s.stats || {};
         const poke = s.activePokemon;
@@ -1059,7 +1110,7 @@
             const startX = ev.clientX;
             document.body.classList.add('is-resizing');
             const move = (e) => {
-                const dx = Math.max(-wa + 260, Math.min(wb - 260, e.clientX - startX));
+                const dx = Math.max(-wa + 180, Math.min(wb - 180, e.clientX - startX));
                 dockWeights[idx - 1] = ga * ((wa + dx) / wa);
                 dockWeights[idx] = gb * ((wb - dx) / wb);
                 a.style.flexGrow = String(dockWeights[idx - 1]);
@@ -2027,7 +2078,7 @@
         trainer: 'Treinador (Exp. Share e Casas)', sniper: 'Sniper do Mercado',
         advisor: 'Consultor de Economia',
         alerts: 'Alertas', conn: 'Contas vinculadas', liveStats: 'Recompensas da conta',
-        channels: 'Canais e chat', shinyFeed: 'Shinies do servidor',
+        channels: 'Canais e chat', activityLog: 'Registro de eventos', shinyFeed: 'Shinies do servidor',
     };
     let cardState = LS.get('nexo.cards', null);
     function sanitizeCards() {
@@ -2043,7 +2094,7 @@
     }
     const DEFAULT_ORDER = {};
     // Cards com versão resumida: o CSS esconde o que é detalhe em .card.is-resumo.
-    const RESUMO_CARDS = new Set(['poke', 'collection', 'perf', 'events', 'drops', 'inv', 'routines', 'prefs', 'prey', 'utilities', 'trainer', 'advisor', 'alerts', 'conn', 'liveStats', 'channels', 'shinyFeed']);
+    const RESUMO_CARDS = new Set(['poke', 'collection', 'perf', 'events', 'drops', 'inv', 'routines', 'prefs', 'prey', 'utilities', 'trainer', 'advisor', 'alerts', 'conn', 'liveStats', 'channels', 'activityLog', 'shinyFeed']);
     const panelCards = (panel) => [...panel.querySelectorAll(':scope > .card[data-card]')];
     // Reposiciona os cards na ordem salva usando os lugares que eles já ocupam:
     // barras e avisos que não são card ficam onde estão.

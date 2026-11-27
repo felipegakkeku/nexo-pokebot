@@ -396,7 +396,7 @@ function saveSplitDockMode() {
 }
 
 function makeDefaultSlotSidebars() {
-    const mk = (defDock, defDensity) => Object.fromEntries(ACCOUNTS.map((a) => [a, { dock: defDock, density: defDensity }]));
+    const mk = (defDock, defDensity) => Object.fromEntries(ACCOUNTS.map((a) => [a, { dock: defDock, density: defDensity, size: 0 }]));
     return {
         grid: mk('right', 'compact'),
         split: mk('off', 'compact'),
@@ -416,6 +416,8 @@ function loadSlotSidebarState() {
                 if (!item || typeof item !== 'object') continue;
                 if (SUMMARY_DOCK_MODES.includes(item.dock)) def[viewKey][acc].dock = item.dock;
                 if (SUMMARY_DENSITY_MODES.includes(item.density)) def[viewKey][acc].density = item.density;
+                const sz = Number(item.size);
+                if (Number.isFinite(sz) && sz > 0) def[viewKey][acc].size = Math.round(sz);
             }
         }
         return def;
@@ -468,15 +470,32 @@ function applySummaryLayout() {
         const show = viewMode !== 'panel-only' && viewMode !== 'panels-grid' && cfg.dock !== 'off';
         const slot = $(`wv-slot-${acc}`);
         if (slot) slot.dataset.summaryDock = show ? cfg.dock : 'off';
+        const resizer = slot?.querySelector('.wv-sum-resizer');
+        if (resizer) resizer.hidden = !show;
         const sumEl = $(`wv-summary-${acc}`);
         if (sumEl) {
             sumEl.hidden = !show;
             sumEl.dataset.sumDensity = cfg.density;
+            const sz = Number(cfg.size || 0);
+            if (!show || sz <= 0) {
+                sumEl.style.width = '';
+                sumEl.style.height = '';
+            } else if (cfg.dock === 'bottom') {
+                sumEl.style.width = '';
+                sumEl.style.height = `${Math.max(86, Math.min(380, sz))}px`;
+            } else {
+                sumEl.style.height = '';
+                sumEl.style.width = `${Math.max(160, Math.min(540, sz))}px`;
+            }
         }
         const btn = document.querySelector(`[data-slot-act="summary"][data-slot="${acc}"]`);
         if (btn) btn.classList.toggle('active-toggle', show);
         applyWebviewZoom(acc);
     }
+    requestAnimationFrame(() => {
+        for (const acc of ACCOUNTS) applyWebviewZoom(acc);
+        if (viewMode === 'grid') positionGridGutters(gridGutters);
+    });
     window.hubUi?.renderWvSummaries?.();
 }
 
@@ -536,7 +555,16 @@ function clampSplit(v) {
 }
 
 function loadGridState() {
-    const st = { layout: '2x2', order: [...ACCOUNTS], hidden: [], max: 0, colSplit: 0.5, rowSplit: 0.5 };
+    const st = {
+        layout: '2x2',
+        order: [...ACCOUNTS],
+        hidden: [],
+        max: 0,
+        colSplit: 0.5,
+        rowSplit: 0.5,
+        colWeights: [1, 1, 1, 1],
+        rowWeights: [1, 1, 1, 1],
+    };
     let raw = null;
     try { raw = JSON.parse(localStorage.getItem(GRID_STATE_KEY) || 'null'); } catch { raw = null; }
     if (!raw || typeof raw !== 'object') return st;
@@ -549,6 +577,11 @@ function loadGridState() {
     if (ACCOUNTS.includes(Number(raw.max))) st.max = Number(raw.max);
     st.colSplit = clampSplit(raw.colSplit);
     st.rowSplit = clampSplit(raw.rowSplit);
+    const normWeights = (arr) => (Array.isArray(arr) && arr.length === 4
+        ? arr.map((w) => (Number.isFinite(Number(w)) && Number(w) >= 0.2 ? Math.min(5, Number(w)) : 1))
+        : [1, 1, 1, 1]);
+    st.colWeights = normWeights(raw.colWeights);
+    st.rowWeights = normWeights(raw.rowWeights);
     return st;
 }
 
@@ -640,16 +673,18 @@ function applyGridLayout() {
     const place = new Map(); // conta -> [linha, coluna] (linha 1 e a barra de ferramentas)
     let cols = 'minmax(0, 1fr)';
     let rows = 'minmax(0, 1fr)';
-    const gutters = { v: false, h: false };
+    const gutters = { v: false, h: false, multiV: 0, multiH: 0 };
 
     if (n <= 1) {
         if (n === 1) place.set(visible[0], ['2', '1']);
     } else if (gridState.layout === 'cols') {
-        cols = `repeat(${n}, minmax(0, 1fr))`;
+        cols = visible.map((_, i) => fr(gridState.colWeights[i] || 1)).join(' ');
         visible.forEach((acc, i) => place.set(acc, ['2', String(i + 1)]));
+        gutters.multiV = Math.max(0, n - 1);
     } else if (gridState.layout === 'rows') {
-        rows = `repeat(${n}, minmax(0, 1fr))`;
+        rows = visible.map((_, i) => fr(gridState.rowWeights[i] || 1)).join(' ');
         visible.forEach((acc, i) => place.set(acc, [String(i + 2), '1']));
+        gutters.multiH = Math.max(0, n - 1);
     } else if (gridState.layout === 'focus') {
         cols = `${fr(cs)} ${fr(1 - cs)}`;
         rows = `repeat(${n - 1}, minmax(0, 1fr))`;
@@ -697,7 +732,6 @@ function positionGridGutters(gutters) {
     if (!stage || !gv || !gh) return;
     gv.hidden = !gutters.v;
     gh.hidden = !gutters.h;
-    if (!gutters.v && !gutters.h) return;
     const sr = stage.getBoundingClientRect();
     const tb = $('gridToolbar')?.getBoundingClientRect();
     const top = (tb ? tb.bottom : sr.top) - sr.top + 4;
@@ -721,6 +755,150 @@ function positionGridGutters(gutters) {
             gh.style.width = `${sr.width - 16}px`;
         }
     }
+    for (let idx = 0; idx < 3; idx++) {
+        let dv = stage.querySelector(`.grid-gutter.dyn.v[data-idx="${idx}"]`);
+        if (idx < (gutters.multiV || 0) && visible.length > idx + 1) {
+            if (!dv) {
+                dv = document.createElement('div');
+                dv.className = 'grid-gutter v dyn';
+                dv.dataset.idx = String(idx);
+                dv.title = 'Arraste para mudar a largura · duplo clique iguala';
+                wireMultiGridGutter(dv, 'v', idx);
+                stage.appendChild(dv);
+            }
+            const a = rect(visible[idx]);
+            const b = rect(visible[idx + 1]);
+            dv.hidden = !(a && b);
+            if (a && b) {
+                dv.style.left = `${(a.right + b.left) / 2 - sr.left}px`;
+                dv.style.top = `${top}px`;
+                dv.style.height = `${sr.height - top - 8}px`;
+            }
+        } else if (dv) {
+            dv.hidden = true;
+        }
+        let dh = stage.querySelector(`.grid-gutter.dyn.h[data-idx="${idx}"]`);
+        if (idx < (gutters.multiH || 0) && visible.length > idx + 1) {
+            if (!dh) {
+                dh = document.createElement('div');
+                dh.className = 'grid-gutter h dyn';
+                dh.dataset.idx = String(idx);
+                dh.title = 'Arraste para mudar a altura · duplo clique iguala';
+                wireMultiGridGutter(dh, 'h', idx);
+                stage.appendChild(dh);
+            }
+            const a = rect(visible[idx]);
+            const b = rect(visible[idx + 1]);
+            dh.hidden = !(a && b);
+            if (a && b) {
+                dh.style.top = `${(a.bottom + b.top) / 2 - sr.top}px`;
+                dh.style.left = '8px';
+                dh.style.width = `${sr.width - 16}px`;
+            }
+        } else if (dh) {
+            dh.hidden = true;
+        }
+    }
+}
+
+function wireMultiGridGutter(el, axis, idx) {
+    el.addEventListener('pointerdown', (ev) => {
+        ev.preventDefault();
+        const stage = $('browserStage');
+        const visible = getEffectiveAccountOrder().filter((acc) => !gridState.hidden.includes(acc));
+        const aEl = $(`wv-slot-${visible[idx]}`);
+        const bEl = $(`wv-slot-${visible[idx + 1]}`);
+        if (!aEl || !bEl) return;
+        const weights = axis === 'v' ? gridState.colWeights : gridState.rowWeights;
+        const ar = aEl.getBoundingClientRect();
+        const br = bEl.getBoundingClientRect();
+        const sizeA = axis === 'v' ? ar.width : ar.height;
+        const sizeB = axis === 'v' ? br.width : br.height;
+        const totalSize = sizeA + sizeB;
+        if (totalSize <= 10) return;
+        const wA = weights[idx] || 1;
+        const wB = weights[idx + 1] || 1;
+        const totalWeight = wA + wB;
+        const startCoord = axis === 'v' ? ev.clientX : ev.clientY;
+        stage.classList.add('resizing');
+        stage.classList.toggle('row', axis === 'h');
+        try { el.setPointerCapture(ev.pointerId); } catch { /* ignore */ }
+        const move = (e) => {
+            const delta = (axis === 'v' ? e.clientX : e.clientY) - startCoord;
+            const minSz = totalSize * 0.14;
+            const nextA = Math.max(minSz, Math.min(totalSize - minSz, sizeA + delta));
+            const ratio = nextA / totalSize;
+            weights[idx] = totalWeight * ratio;
+            weights[idx + 1] = totalWeight * (1 - ratio);
+            applyGridLayout();
+        };
+        const up = () => {
+            el.removeEventListener('pointermove', move);
+            el.removeEventListener('pointerup', up);
+            el.removeEventListener('pointercancel', up);
+            stage.classList.remove('resizing', 'row');
+            saveGridState();
+        };
+        el.addEventListener('pointermove', move);
+        el.addEventListener('pointerup', up);
+        el.addEventListener('pointercancel', up);
+    });
+    el.addEventListener('dblclick', () => {
+        if (axis === 'v') gridState.colWeights = [1, 1, 1, 1];
+        else gridState.rowWeights = [1, 1, 1, 1];
+        saveGridState();
+        applyGridLayout();
+    });
+}
+
+function wireSummaryResizers() {
+    document.querySelectorAll('.wv-sum-resizer[data-sum-resize]').forEach((rz) => {
+        const acc = Number(rz.dataset.sumResize);
+        rz.addEventListener('pointerdown', (ev) => {
+            ev.preventDefault();
+            const bucket = getSlotSidebarBucket();
+            const cfg = slotSidebarState[bucket]?.[acc];
+            const sumEl = $(`wv-summary-${acc}`);
+            const stage = $('browserStage');
+            if (!cfg || !sumEl || cfg.dock === 'off') return;
+            const dock = cfg.dock;
+            const rect = sumEl.getBoundingClientRect();
+            const startX = ev.clientX;
+            const startY = ev.clientY;
+            const startW = rect.width;
+            const startH = rect.height;
+            stage?.classList.add('resizing');
+            stage?.classList.toggle('row', dock === 'bottom');
+            try { rz.setPointerCapture(ev.pointerId); } catch { /* ignore */ }
+            const move = (e) => {
+                if (dock === 'bottom') {
+                    cfg.size = Math.round(Math.max(86, Math.min(380, startH - (e.clientY - startY))));
+                } else {
+                    const delta = dock === 'left' ? (e.clientX - startX) : (startX - e.clientX);
+                    cfg.size = Math.round(Math.max(160, Math.min(540, startW + delta)));
+                }
+                applySummaryLayout();
+            };
+            const up = () => {
+                rz.removeEventListener('pointermove', move);
+                rz.removeEventListener('pointerup', up);
+                rz.removeEventListener('pointercancel', up);
+                stage?.classList.remove('resizing', 'row');
+                saveSlotSidebarState();
+            };
+            rz.addEventListener('pointermove', move);
+            rz.addEventListener('pointerup', up);
+            rz.addEventListener('pointercancel', up);
+        });
+        rz.addEventListener('dblclick', () => {
+            const bucket = getSlotSidebarBucket();
+            if (slotSidebarState[bucket]?.[acc]) {
+                slotSidebarState[bucket][acc].size = 0;
+                saveSlotSidebarState();
+                applySummaryLayout();
+            }
+        });
+    });
 }
 
 function wireGridGutter(el, axis) {
@@ -1451,7 +1629,16 @@ function initGridControls() {
             embedded.forEach((acc) => setAccountMuted(acc, anyOn));
             return;
         } else if (ev.target.closest('#btnGridReset')) {
-            gridState = { layout: '2x2', order: [...ACCOUNTS], hidden: [], max: 0, colSplit: 0.5, rowSplit: 0.5 };
+            gridState = {
+                layout: '2x2',
+                order: [...ACCOUNTS],
+                hidden: [],
+                max: 0,
+                colSplit: 0.5,
+                rowSplit: 0.5,
+                colWeights: [1, 1, 1, 1],
+                rowWeights: [1, 1, 1, 1],
+            };
             accSortMode = 'manual';
             saveAccSortMode();
             slotSidebarState = makeDefaultSlotSidebars();
@@ -1532,6 +1719,7 @@ function initGridControls() {
     });
     wireGridGutter($('gridGutterV'), 'v');
     wireGridGutter($('gridGutterH'), 'h');
+    wireSummaryResizers();
     wireGridDrag();
     wireAccountTabDrag();
     for (const acc of ACCOUNTS) {
