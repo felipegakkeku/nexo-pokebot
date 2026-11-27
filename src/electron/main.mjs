@@ -2438,7 +2438,7 @@ async function createMainWindow() {
         minHeight: 680,
         show: false,
         autoHideMenuBar: true,
-        backgroundColor: '#0a0f19',
+        backgroundColor: '#080d17', // igual ao --bg do tema padrão: sem flash de outra cor ao abrir
         title: `Nexo PokeBot v${installedVersion}`,
         ...(icon ? { icon } : {}),
         webPreferences: {

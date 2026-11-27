@@ -1231,7 +1231,7 @@ function renderPanelsGrid() {
         setText(card.querySelector('.pcard-poke-name'), pk ? `${pk.shiny ? '★ ' : ''}${pk.name} Nv ${pk.level}` : 'Aguardando Pokémon');
         const fill = card.querySelector('.pcard-hp i');
         fill.style.width = `${pct}%`;
-        fill.style.background = pct > 55 ? '#10b981' : pct > 25 ? '#f59e0b' : '#ef4444';
+        fill.style.background = pct > 55 ? 'var(--green)' : pct > 25 ? 'var(--amber)' : 'var(--red)';
         setText(card.querySelector('.pcard-hp-txt'), pk ? `${fmtNum(pk.hp)} / ${fmtNum(pk.maxHp)} HP (${pct}%)` : '');
 
         const profitH = Number(st.netGoldPerHour ?? st.goldPerHour ?? 0);
@@ -2267,7 +2267,7 @@ function renderActiveAccountPanel() {
     const pct = pk ? pk.hpPercent : 0;
     const fill = $('pokeHpFill');
     fill.style.width = `${pct}%`;
-    fill.style.background = pct > 55 ? '#10b981' : pct > 25 ? '#f59e0b' : '#ef4444';
+    fill.style.background = pct > 55 ? 'var(--green)' : pct > 25 ? 'var(--amber)' : 'var(--red)';
 
     const pkDex = pk ? resolvePokemonSpriteDex(pk.speciesId, pk.name, pk.spriteDex) : 0;
     const spKey = pk && pkDex > 0 ? `${activeAccount}:${pkDex}:${pk.shiny ? 1 : 0}` : '';

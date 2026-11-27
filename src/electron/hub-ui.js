@@ -1704,7 +1704,7 @@
             const buffs = flatBuffsHtml(acc);
             const profitH = Number(st.netGoldPerHour ?? st.goldPerHour ?? 0) || 0;
             const pct = pk ? Math.max(0, Math.min(100, Number(pk.hpPercent) || 0)) : 0;
-            const hpColor = pct > 55 ? '#10b981' : pct > 25 ? '#f59e0b' : '#ef4444';
+            const hpColor = pct > 55 ? 'var(--green)' : pct > 25 ? 'var(--amber)' : 'var(--red)';
             const pkDex = pk ? resolvePokemonSpriteDex(pk.speciesId, pk.name, pk.spriteDex) : 0;
             const url = pkDex > 0 ? pokemonSpriteUrl(pk.speciesId, Boolean(pk.shiny), pkDex, pk.name) : '';
             const curDock = box.closest('.wv-slot')?.dataset?.summaryDock || 'right';
