@@ -36,6 +36,14 @@
 
 ---
 
+> [!IMPORTANT]
+> ## AVISO IMPORTANTE: PROJETO 100% CÓDIGO ABERTO (LEIA ANTES DE BAIXAR)
+>
+> - **É uma ferramenta gratuita e de código aberto (licença MIT).** Todo o código-fonte do aplicativo, do motor Headless e do empacotamento está público neste repositório, e os arquivos da aba **Releases** são gerados diretamente por build aberto do GitHub Actions.
+> - **Não se sinta obrigado a baixar nem a usar.** Se você não confia ou não quer instalar no seu PC, simplesmente não baixe.
+> - **Não acuse de tentativa de golpe, vírus ou roubo de conta sem saber do que está falando.** Como o código é totalmente aberto, **qualquer pessoa (mesmo sem entender de programação)** pode jogar o link ou os arquivos deste repositório para qualquer IA (ChatGPT, Claude, Gemini, Copilot, etc.) ou pedir para alguém revisar linha por linha e confirmar que **não existe código malicioso, keylogger nem envio de senha ou sessão para terceiros**.
+> - Se ainda assim preferir, você não precisa nem baixar o `.zip` pronto: basta rodar direto pelo código-fonte com Node.js (`npm ci` e `npm run hub`).
+
 O **Nexo PokeBot** nasceu de uma vontade simples: jogar mais e se preocupar menos. É um cliente desktop gratuito e open source (licença MIT) para o **[PokeIdle (`pokeidle.io`)](https://pokeidle.io/app)**, pensado do zero para melhorar a sua experiência no jogo e ajudar na gestão das suas contas, sempre respeitando os limites e as regras do PokeIdle.
 
 Ele junta até **4 contas em uma única janela**, mantém o farm rodando em segundo plano gastando uma fração da memória de um navegador, acompanha as lives da Twitch e da Kick para os buffs e mostra tudo em painéis claros, em tema escuro. É o que há de melhor para o dia a dia no jogo reunido num lugar só, desenvolvido com carinho e testado em uso de verdade. Tudo roda no seu PC, sem anúncios.
@@ -208,7 +216,7 @@ Todas as sessões, cookies e configurações ficam salvos localmente em arquivos
 - `src/desktop/`: launcher Windows (`PokeBotApp.cs`, `build-exe.mjs`), patch de ícone/metadados PE do runtime Electron (`brand-runtime.mjs`, `launch-hub.mjs`) e gerador do ZIP limpo (`build-friend-zip.mjs`).
 - `src/modules/`: módulos de regras de automação compartilhados (`live-rewards.js`, `capture.js`, `restock.js`, `boss-loot.js`, `prey.js`, `daily-pass.js`, entre outros).
 - `assets/` e `docs/`: ícone original multi-resolução (`nexo-pokebot-icon.png`, `nexo-pokebot.ico`) e QR Code Pix offline (`docs/pix-qr.png`).
-- `tests/`: suíte automatizada com `node:test` + `jsdom` (293 testes cobrindo protocolo, lives, perfis, Centro Médico, `/hunt` e build desktop).
+- `tests/`: suíte automatizada com `node:test` + `jsdom` (340 testes cobrindo protocolo, lives, perfis, Centro Médico, `/hunt` e build desktop).
 
 ## Referências e ecossistema PokeIdle
 
@@ -225,7 +233,7 @@ O **Nexo PokeBot** foi construído especificamente para a comunidade do **[PokeI
 
 ```powershell
 npm.cmd ci                  # instala dependências exatas do package-lock.json
-npm.cmd run check           # ESLint + build + 293 testes automatizados
+npm.cmd run check           # ESLint + build + 340 testes automatizados
 npm.cmd run brand:runtime   # aplica ícone e metadados PE no runtime Electron local
 npm.cmd run build:exe       # compila Nexo PokeBot.exe via csc.exe
 npm.cmd run package:friend  # gera release/Nexo-PokeBot-v1.0.zip limpo (sem dados pessoais)
