@@ -4372,3 +4372,316 @@ test('team-pvp + loja.pityShiny + probAlerts + apply-pvp-team', () => {
         controller.stop();
     }
 });
+
+test('wave2: persistencia de novas chaves de config no controlador', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'pokebot-w2-cfg-'));
+    const cfgPath = join(dir, 'config.json');
+    try {
+        const c1 = createHeadlessController({
+            cwd: dir,
+            configPath: cfgPath,
+            disableBrowserProfileSync: true,
+            disableHeadlessHuntGuide: true,
+            disableVotePolling: true,
+            disableAdvisor: true,
+        });
+        try {
+            const def = c1.getSnapshot({ includeHunts: false }).config;
+            assert.equal(def.autoSeasonalSwap, false);
+            assert.equal(def.autoTeamManage, false);
+            assert.equal(def.revivePotionCombo, true);
+            assert.equal(def.autoPokedexEvolve, false);
+            assert.equal(def.autoBossEnabled, false);
+            assert.equal(def.autoBossPrize, 'mega');
+            assert.equal(def.topCatchPreferEasyStage, true);
+            assert.equal(def.autoSafariSmart, false);
+            assert.equal(def.autoRaidTeam, false);
+
+            c1.updateConfig({
+                autoSeasonalSwap: true,
+                autoTeamManage: true,
+                revivePotionCombo: false,
+                autoPokedexEvolve: true,
+                autoBossEnabled: true,
+                autoBossPrize: 'tickets',
+                topCatchPreferEasyStage: false,
+                autoSafariSmart: true,
+                autoRaidTeam: true,
+            });
+        } finally {
+            c1.stop();
+        }
+
+        const c2 = createHeadlessController({
+            cwd: dir,
+            configPath: cfgPath,
+            disableBrowserProfileSync: true,
+            disableHeadlessHuntGuide: true,
+            disableVotePolling: true,
+            disableAdvisor: true,
+        });
+        try {
+            const reloaded = c2.getSnapshot({ includeHunts: false }).config;
+            assert.equal(reloaded.autoSeasonalSwap, true);
+            assert.equal(reloaded.autoTeamManage, true);
+            assert.equal(reloaded.revivePotionCombo, false);
+            assert.equal(reloaded.autoPokedexEvolve, true);
+            assert.equal(reloaded.autoBossEnabled, true);
+            assert.equal(reloaded.autoBossPrize, 'tickets');
+            assert.equal(reloaded.topCatchPreferEasyStage, false);
+            assert.equal(reloaded.autoSafariSmart, true);
+            assert.equal(reloaded.autoRaidTeam, true);
+        } finally {
+            c2.stop();
+        }
+    } finally {
+        rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('wave2: novos handlers triggerAction, clamp prey-regions e autoRaidTeam/revive-combo', () => {
+    // Segunda-feira 14:00 BRT = 17:00 UTC (Monday BRT < 16h)
+    const mon14Brt = Date.UTC(2026, 10, 30, 17, 0, 0);
+    const sent = [];
+    const controller = createHeadlessController({
+        configPath: null,
+        disableBrowserProfileSync: true,
+        disableHeadlessHuntGuide: true,
+        disableVotePolling: true,
+        disableAdvisor: true,
+        nowFn: () => mon14Brt,
+        initialConfig: {
+            restockEnabled: false,
+            ensureNativeAutoHeal: false,
+            caidosEnabled: false,
+            dailyPassEnabled: false,
+            preyEnabled: false,
+            incubatorEnabled: false,
+            liveEnabled: false,
+            autoRaidTeam: true,
+            revivePotionCombo: true,
+        },
+    });
+    try {
+        const hooks = controller.attachExternalBridge({
+            isReady: () => true,
+            send: (raw) => { sent.push(typeof raw === 'string' ? JSON.parse(raw) : raw); return true; },
+            close: () => {},
+        }, { waitForWelcome: true });
+        hooks.onFrame(JSON.stringify({
+            t: 'welcome',
+            estado: {
+                cheio: true,
+                nick: 'ActionW2',
+                level: 200,
+                activeId: 1,
+                raid: { inscrito: true },
+                items: { 70091: 1, 70094: 1, 204: 2 },
+                chocadeira: { total: 2, ovos: [{ slot: 0, ovo: 'p2', terminaEm: mon14Brt + 60_000 }] },
+                pokemons: [
+                    { id: 1, speciesId: 6, nome: 'Charizard', level: 200, slot: 0, hp: 50, maxHp: 500, potencia: 5, quality: 1.5 },
+                    { id: 2, speciesId: 130, nome: 'Gyarados', level: 180, potencia: 4, quality: 1.3 },
+                ],
+            },
+        }));
+
+        // autoRaidTeam dispara na segunda < 16h BRT quando inscrito
+        assert.ok(sent.some((f) => f.t === 'raid.equipe' && Array.isArray(f.pokemonIds) && f.pokemonIds.includes(1)));
+
+        // Revive 205 seguido de estado aciona combo pos-revive (item.use 204)
+        sent.length = 0;
+        hooks.onFrame(JSON.stringify({ t: 'batalha', ev: [{ k: 'revive', itemId: ITEM_IDS.REVIVE }] }));
+        hooks.onFrame(JSON.stringify({ t: 'estado', estado: { pokemons: [{ id: 1, speciesId: 6, nome: 'Charizard', level: 200, slot: 0, hp: 50, maxHp: 500 }] } }));
+        assert.ok(sent.some((f) => f.t === 'item.use' && f.itemId === 204));
+
+        // Novos triggerAction handlers
+        sent.length = 0;
+        assert.equal(controller.triggerAction('incubator-run'), true);
+        assert.deepEqual(sent.find((f) => f.t === 'chocadeira.colocar'), { t: 'chocadeira.colocar', slot: 1, ovo: 'shiny' });
+
+        assert.equal(controller.triggerAction('pokemon-mega', { pokemonId: 1 }), true);
+        assert.deepEqual(sent.at(-1), { t: 'pokemon.mega', pokemonId: 1 });
+
+        assert.equal(controller.triggerAction('tm-apply', { pokemonId: 1, itemId: 59194 }), true);
+        assert.deepEqual(sent.at(-1), { t: 'tm.aplicar', pokemonId: 1, itemId: 59194 });
+
+        assert.equal(controller.triggerAction('team-move', { pokemonId: 2, slot: 1 }), true);
+        assert.deepEqual(sent.at(-1), { t: 'team.move', pokemonId: 2, slot: 1 });
+
+        assert.equal(controller.triggerAction('raid-team-auto'), true);
+        assert.equal(sent.at(-1).t, 'raid.equipe');
+
+        assert.equal(controller.triggerAction('raid-team-save', { pokemonIds: [1, 2] }), true);
+        assert.deepEqual(sent.at(-1), { t: 'raid.equipe', pokemonIds: [1, 2] });
+
+        assert.equal(controller.triggerAction('raid-refresh'), true);
+        assert.ok(sent.some((f) => f.t === 'raid.info'));
+        assert.ok(sent.some((f) => f.t === 'raid.fichas'));
+
+        assert.equal(controller.triggerAction('treino-lutar', { a: 1, b: 2 }), true);
+        assert.deepEqual(sent.at(-1), { t: 'treino.lutar', a: 1, b: 2 });
+
+        assert.equal(controller.triggerAction('market-edit', { id: 99, preco: 1200, moeda: 'orb' }), true);
+        assert.deepEqual(sent.at(-1), { t: 'market.editar', id: 99, preco: 1200, moeda: 'orb' });
+
+        assert.equal(controller.triggerAction('market-cancel', { id: 99 }), true);
+        assert.deepEqual(sent.at(-1), { t: 'market.cancelar', id: 99 });
+
+        sent.length = 0;
+        const batchIds = Array.from({ length: 60 }, (_, i) => i + 1);
+        assert.equal(controller.triggerAction('market-cancel-batch', { ids: batchIds }), true);
+        assert.equal(sent.filter((f) => f.t === 'market.cancelar').length, 50);
+
+        assert.equal(controller.triggerAction('market-quote-batch', { itens: [70017] }), true);
+        assert.deepEqual(sent.at(-1), { t: 'market.cotarLote', itens: [70017] });
+
+        assert.equal(controller.triggerAction('wiki-economy'), true);
+        assert.deepEqual(sent.at(-1), { t: 'wiki.economia' });
+
+        assert.equal(controller.triggerAction('oferenda-all'), true);
+        assert.deepEqual(sent.at(-1), { t: 'oferenda.tudo' });
+
+        assert.equal(controller.triggerAction('oferenda-protected'), true);
+        assert.deepEqual(sent.at(-1), { t: 'oferenda.protegidos' });
+
+        assert.equal(controller.triggerAction('bag-discard', { tipo: 'item', id: 200, qtd: 3 }), true);
+        assert.deepEqual(sent.at(-1), { t: 'bolsa.descartar', tipo: 'item', id: 200, qtd: 3 });
+
+        assert.equal(controller.triggerAction('use-item', { itemId: 204 }), true);
+        assert.deepEqual(sent.at(-1), { t: 'item.use', itemId: 204 });
+
+        assert.equal(controller.triggerAction('guild-boss-raid', { pagina: 2 }), true);
+        assert.deepEqual(sent.at(-1), { t: 'guild.bossRaid', pagina: 2 });
+
+        // prey-regions clamp 0..1
+        assert.equal(controller.triggerAction('prey-regions', { cartela: 5, regioes: ['kanto', 'johto'] }), true);
+        assert.deepEqual(sent.at(-1), { t: 'prey.regioes', cartela: 1, regioes: ['kanto', 'johto'] });
+        assert.equal(controller.triggerAction('prey-regions', { cartela: -3, regioes: ['kanto', 'johto'] }), true);
+        assert.deepEqual(sent.at(-1), { t: 'prey.regioes', cartela: 0, regioes: ['kanto', 'johto'] });
+    } finally {
+        controller.stop();
+    }
+});
+
+test('wave2: frames recebidos, gameIntel completo, gym-lost, sessionRolls e probAlerts', () => {
+    // 2026-11-30 20:40 UTC = 17:40 BRT (faltam 20 min para rotacao de boss das 18h BRT e 20 min para Raid das 18h BRT)
+    const t0 = Date.UTC(2026, 10, 30, 20, 40, 0);
+    const controller = createHeadlessController({
+        configPath: null,
+        disableBrowserProfileSync: true,
+        disableHeadlessHuntGuide: true,
+        disableVotePolling: true,
+        disableAdvisor: true,
+        nowFn: () => t0,
+        initialConfig: { restockEnabled: false, ensureNativeAutoHeal: false, caidosEnabled: false, dailyPassEnabled: false, preyEnabled: false, incubatorEnabled: false, liveEnabled: false },
+    });
+    try {
+        const hooks = controller.attachExternalBridge({
+            isReady: () => true,
+            send: () => true,
+            close: () => {},
+        }, { waitForWelcome: true });
+
+        const depotBulk = Array.from({ length: 2705 }, (_, i) => ({
+            id: 1000 + i,
+            speciesId: 19,
+            nome: 'Rattata',
+            level: 5,
+        }));
+
+        hooks.onFrame(JSON.stringify({
+            t: 'welcome',
+            hunts: [{ slug: 'outland-25k', nome: 'Outland 25k', area: 'outland', nivel: 25500, especies: [{ pokeId: 2001 }] }],
+            estado: {
+                cheio: true,
+                nick: 'IntelW2',
+                level: 1000,
+                activeId: 1,
+                huntSlug: 'outland-25k',
+                bonusLootPct: 15,
+                items: { 70091: 2, 70094: 1, 70095: 12 },
+                automation: { autoColecao: 'manter', autoVendaDepot: true },
+                pvp: { pr: 1500, escudo: 2, lastMatchAt: t0 - 22 * 3_600_000, casas: { 1: 2 } },
+                loja: {
+                    pityShiny: { bolas: 10, remainingMs: 45 * 60_000 },
+                },
+                bicicletas: { equipadaId: 10, lista: [{ id: 10, raridade: 'comum' }, { id: 11, raridade: 'lendaria', nome: 'Bike Lendaria' }] },
+                casa: { lista: [{ id: 1, rar: 'epica', emUso: true }, { id: 2, rar: 'mitica', nome: 'Casa Mitica', emUso: false }] },
+                meusAnuncios: [{ id: 500, itemId: 70017, nome: 'Shiny Egg Fragment', preco: 1000, moeda: 'gold', qtd: 2, expiraEm: t0 + 3600_000 }],
+                pokemons: [
+                    { id: 1, speciesId: 6, nome: 'Charizard', tipos: ['FIRE', 'FLYING'], level: 200, slot: 0, bst: 534, refino: { atk: 2 }, tmElemental: true, tmFisico: true },
+                    ...depotBulk,
+                ],
+            },
+        }));
+
+        hooks.onFrame(JSON.stringify({ t: 'market', aba: 'itens', resumo: { 70017: { minGold: 800 } } }));
+        hooks.onFrame(JSON.stringify({ t: 'ginasio', bonusPct: 25, podios: [{ tipo: 'FIRE', pos: 1 }, { tipo: 'FLYING', pos: 2 }] }));
+        hooks.onFrame(JSON.stringify({ t: 'ginasio', bonusPct: 10, podios: [{ tipo: 'FLYING', pos: 2 }] }));
+        hooks.onFrame(JSON.stringify({ t: 'raid.info', boss: 'Rayquaza', hp: 100000 }));
+        hooks.onFrame(JSON.stringify({ t: 'raid.fichas', fichas: [{ nick: 'IntelW2', dano: 5000 }] }));
+        hooks.onFrame(JSON.stringify({ t: 'treino.resultado', vencedor: 'Charizard', rounds: 4, resumo: 'Charizard venceu em 4 rounds' }));
+        hooks.onFrame(JSON.stringify({ t: 'wiki.economia', totalGold: 123456 }));
+        hooks.onFrame(JSON.stringify({ t: 'guild.bossRaid', id: 1, nome: 'Nexo', lutadores: 4, danoEquipe: 50000, diamantes: 250 }));
+        hooks.onFrame(JSON.stringify({ t: 'csv.pronto', tipo: 'pokemon', arquivo: 'meus.csv', csv: 'id,nome\n1,Charizard' }));
+        hooks.onFrame(JSON.stringify({ t: 'batalha', ev: [{ k: 'capturado', pokemon: { speciesId: 19, nome: 'Rattata', level: 5, potencia: 4, qualidade: 1.82 } }] }));
+
+        const snap = controller.getSnapshot({ includeHunts: false });
+        const intel = snap.gameIntel;
+
+        assert.equal(intel.incubator.eggsInBag.shiny, 1);
+        assert.equal(intel.autoColecaoState.regra, 'manter');
+        assert.equal(intel.autoColecaoState.autoVendaDepot, true);
+        assert.equal(intel.bikesAndHouses.bestBikeId, 11);
+        assert.equal(intel.bikesAndHouses.bestBikeName, 'Bike Lendaria');
+        assert.equal(intel.bikesAndHouses.bestHouseId, 2);
+        assert.equal(intel.bikesAndHouses.bestHouseName, 'Casa Mitica');
+        assert.equal(intel.bossRotation.regions[0].unlocked, true);
+        assert.equal(intel.bossRotation.regions[0].chancesMaxMult, 1);
+        assert.ok(Array.isArray(intel.bossRotation.regions[0].bosses) && intel.bossRotation.regions[0].bosses.length >= 1);
+        assert.ok(intel.upcomingEvents.raid.dayLabel.includes('BRT'));
+        assert.equal(intel.upcomingEvents.raid.hasToken, false);
+        assert.equal(intel.safari.bonusAddedMin, 60);
+        assert.equal(intel.safari.totalDurationMin, 420);
+        assert.equal(intel.gyms.recommendedType, 'FIRE');
+        assert.equal(intel.pvpMeta.team[0].bst, 534);
+        assert.equal(intel.pvpMeta.team[0].tmElemental, true);
+        assert.equal(intel.pvpMeta.team[0].tmFisico, true);
+        assert.deepEqual(intel.pvpMeta.casas, { 1: 2 });
+        assert.equal(intel.pvpMeta.lastTreinoResult.winner, 'Charizard');
+        assert.ok(intel.pvpMeta.modeFormations.ginasio && intel.pvpMeta.modeFormations.guerra && intel.pvpMeta.modeFormations.padrao);
+        assert.equal(intel.raidDetail.info.boss, 'Rayquaza');
+        assert.equal(intel.raidDetail.fichas[0].dano, 5000);
+        assert.equal(intel.guildRaid.bonusPct, 2.5);
+        assert.equal(intel.ownListings.undercutCount, 1);
+        assert.equal(intel.ownListings.listings[0].name, 'Shiny Egg Fragment');
+        assert.equal(intel.wikiEconomy.totalGold, 123456);
+        assert.ok(intel.probGuide && intel.probGuide.tables);
+        assert.equal(intel.sessionRolls.total, 1);
+        assert.equal(intel.sessionRolls.p4, 1);
+        assert.equal(intel.sessionRolls.q180, 1);
+        assert.equal(intel.lastCsvExport.filename, 'meus.csv');
+        assert.equal(intel.lootLeverage.active, true);
+
+        const alertIds = new Set(intel.probAlerts.map((a) => a.id));
+        for (const reqId of [
+            'lure-fraction-risk',
+            'boss-rotation',
+            'gym-cooldown-ready',
+            'gym-lost',
+            'pvp-decay',
+            'loot-leverage-25k',
+            'event-closing',
+            'depot-cap',
+        ]) {
+            assert.ok(alertIds.has(reqId), `probAlerts faltando ${reqId}`);
+        }
+        assert.equal(intel.probAlerts.find((a) => a.id === 'depot-cap').action, 'quick-clean');
+
+        // reset-stats limpa sessionRolls
+        assert.equal(controller.triggerAction('reset-stats'), true);
+        assert.equal(controller.getSnapshot({ includeHunts: false }).gameIntel.sessionRolls.total, 0);
+    } finally {
+        controller.stop();
+    }
+});

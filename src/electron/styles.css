@@ -4382,3 +4382,387 @@ button.btn.claim-btn.claim-ready {
 .stage-live.sl-stacked .sl-bottom { grid-template-columns: minmax(0, 1fr); }
 .stage-live.sl-swapped:not(.sl-stacked) .sl-bottom > .sl-col:first-child { order: 2; }
 .stage-live.sl-swapped:not(.sl-stacked) .sl-bottom > .sl-side { order: 1; }
+
+/* ===== Novos blocos: Chocadeira, Ranking /hunt, Rolagens, Guilda, PvP Formacoes, Meus Anuncios & Guia Probabilistico ===== */
+.toggle-item.toggle-with-select {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.toggle-inline-chk {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  flex: 1 1 180px;
+  min-width: 0;
+}
+.toggle-item.toggle-with-select select {
+  width: auto;
+  min-width: 132px;
+  padding: 3px 7px;
+  font-size: var(--fs-xs);
+}
+
+.hunt-rank-acc {
+  margin-top: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--tile);
+  padding: 5px 8px;
+}
+.hunt-rank-acc > summary {
+  cursor: pointer;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  color: var(--accent-text);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.hunt-rank-acc > summary::-webkit-details-marker { display: none; }
+.hunt-rank-acc > summary::before { content: '▸'; font-size: 10px; transition: transform var(--t-fast) ease; }
+.hunt-rank-acc[open] > summary::before { transform: rotate(90deg); }
+.hunt-rank-list {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.hunt-rank-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 6px;
+  border-radius: var(--r-sm);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  font-size: var(--fs-xs);
+}
+.hunt-rank-row.is-current { border-color: color-mix(in srgb, var(--accent-hi) 50%, var(--border)); }
+.hunt-rank-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.hunt-rank-main b { color: var(--text-strong); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hunt-rank-main small { color: var(--muted); font-variant-numeric: tabular-nums; }
+.hunt-rank-risk {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 5px;
+  border-radius: var(--r-pill);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--warn-text);
+  background: color-mix(in srgb, var(--amber) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 40%, transparent);
+}
+.hunt-rank-risk.safe {
+  color: var(--ok-text);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+  border-color: color-mix(in srgb, var(--green) 36%, transparent);
+}
+
+.incubator-box {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  background: var(--tile);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.inc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.inc-title { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-sm); color: var(--text-strong); }
+.inc-ready-badge {
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ok-text);
+  background: color-mix(in srgb, var(--green) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green) 42%, transparent);
+}
+.inc-slots {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 5px;
+}
+.inc-slot {
+  padding: 4px 7px;
+  border-radius: var(--r-sm);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  align-items: center;
+}
+.inc-slot.ready {
+  border-color: color-mix(in srgb, var(--green) 50%, var(--border));
+  color: var(--ok-text);
+}
+.inc-slot.free { color: var(--dim); }
+.inc-foot {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.session-rolls-strip {
+  margin-top: 8px;
+  padding: 6px 9px;
+  border-radius: var(--r-md);
+  background: var(--tile);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 8px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.roll-pill {
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  color: var(--text-soft);
+}
+.roll-pill b { color: var(--text-strong); }
+.loot-lev-pill {
+  margin-left: auto;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  font-weight: 700;
+  color: var(--shiny-text);
+  background: color-mix(in srgb, var(--shiny) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--shiny) 42%, transparent);
+}
+
+.intel-pill .pill-act {
+  border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+  background: color-mix(in srgb, currentColor 14%, transparent);
+  color: inherit;
+  border-radius: var(--r-pill);
+  padding: 0 6px;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.intel-pill .pill-act:hover { background: color-mix(in srgb, currentColor 24%, transparent); }
+.intel-pill.alert-lure-fraction-risk,
+.intel-pill.alert-pvp-decay,
+.intel-pill.alert-gym-lost,
+.intel-pill.alert-event-closing {
+  border-color: color-mix(in srgb, var(--amber) 55%, var(--border));
+}
+.intel-pill.alert-boss-rotation,
+.intel-pill.alert-loot-leverage-25k {
+  color: var(--shiny-text);
+  background: color-mix(in srgb, var(--shiny) 14%, var(--tile));
+  border-color: color-mix(in srgb, var(--shiny) 44%, var(--border));
+}
+.intel-pill.alert-gym-cooldown-ready {
+  color: var(--ok-text);
+  background: color-mix(in srgb, var(--green) 14%, var(--tile));
+  border-color: color-mix(in srgb, var(--green) 44%, var(--border));
+}
+
+.raid-team-box,
+.guild-raid-box,
+.gym-rec-box,
+.pvp-formations-box,
+.pvp-treino-box {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  background: var(--tile);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: var(--fs-xs);
+}
+.guild-bar {
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.guild-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--teal), var(--green-hi));
+  transition: width var(--t-med) ease;
+}
+.gym-cd-badge {
+  padding: 1px 6px;
+  border-radius: var(--r-pill);
+  font-size: 10px;
+  font-weight: 700;
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.gym-cd-badge.ready {
+  color: var(--ok-text);
+  background: color-mix(in srgb, var(--green) 16%, transparent);
+  border-color: color-mix(in srgb, var(--green) 42%, transparent);
+}
+.pvp-rank-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 6px;
+}
+.pvp-rank-badge {
+  padding: 2px 7px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-xs);
+  background: var(--tile);
+  border: 1px solid var(--border);
+  color: var(--text-soft);
+}
+.pvp-rank-badge.warn {
+  color: var(--warn-text);
+  border-color: color-mix(in srgb, var(--amber) 48%, var(--border));
+  background: color-mix(in srgb, var(--amber) 14%, var(--tile));
+}
+.pvp-rank-badge.ok {
+  color: var(--ok-text);
+  border-color: color-mix(in srgb, var(--green) 45%, var(--border));
+  background: color-mix(in srgb, var(--green) 14%, var(--tile));
+}
+.pvp-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+}
+.pvp-form-row select { flex: 1 1 110px; min-width: 0; font-size: var(--fs-xs); padding: 4px 6px; }
+.pvp-treino-result {
+  padding: 5px 8px;
+  border-radius: var(--r-sm);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  color: var(--text-soft);
+}
+
+.own-listings-badge {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--muted);
+}
+.own-listings-badge.has-undercut { color: var(--warn-text); }
+.own-listings-list {
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.own-listing-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 8px;
+  border-radius: var(--r-md);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  font-size: var(--fs-xs);
+}
+.own-listing-row.undercut { border-color: color-mix(in srgb, var(--amber) 50%, var(--border)); }
+.own-listing-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.own-listing-head { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.own-listing-acts { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.own-listing-acts input[type="number"] { width: 82px; padding: 3px 6px; font-size: var(--fs-xs); }
+.undercut-pill {
+  padding: 0 6px;
+  border-radius: var(--r-pill);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--warn-text);
+  background: color-mix(in srgb, var(--amber) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 45%, transparent);
+}
+.wiki-economy-box {
+  margin-top: 6px;
+  padding: 7px 9px;
+  border-radius: var(--r-md);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  font-size: var(--fs-xs);
+  color: var(--text-soft);
+}
+
+.prob-guide-card {
+  width: min(620px, 100%);
+  max-height: calc(100vh - 44px);
+  display: flex;
+  flex-direction: column;
+}
+.prob-guide-body {
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--border-hi) 65%, transparent) transparent;
+}
+.pg-sec {
+  padding: 8px 10px;
+  border-radius: var(--r-md);
+  background: var(--tile);
+  border: 1px solid var(--border);
+}
+.pg-sec h4 { margin: 0 0 6px; font-size: var(--fs-sm); color: var(--text-strong); }
+.pg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 6px;
+}
+.pg-stat {
+  padding: 5px 8px;
+  border-radius: var(--r-sm);
+  background: var(--bg-deep);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: var(--fs-xs);
+}
+.pg-stat span { color: var(--dim); }
+.pg-stat b { color: var(--text-strong); font-variant-numeric: tabular-nums; }
+.pg-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+.pg-table th, .pg-table td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+}
+.pg-table th { color: var(--dim); font-weight: 600; }
+.pg-table td { color: var(--text-soft); }

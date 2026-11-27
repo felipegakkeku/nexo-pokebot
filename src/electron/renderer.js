@@ -34,6 +34,16 @@ let lastDropsSig = '';
 let lastTrainerSig = '';
 let lastSniperSig = '';
 let lastAdvisorSig = '';
+let lastAutoColSig = '';
+const autoColUserDirtyByAcc = {};
+let lastCsvDownloadSig = '';
+let lastHuntRankSig = '';
+let lastOwnListingsSig = '';
+let pvpSelectedSlot = 1;
+let pvpSelectedMode = 'padrao';
+let treinoPickA = '';
+let treinoPickB = '';
+const PVP_FORMATIONS_KEY = 'nexo.pvpFormations.v1';
 // Listas do consultor vêm à parte, só com o card à vista (o snapshot de 1,25 s traz só o resumo).
 const ADVISOR_FETCH_MS = 15_000;
 let advisorLists = { account: 0, at: 0, data: null, busy: false };
@@ -346,6 +356,9 @@ function selectAccount(acc) {
     lastLogSig = '';
     lastLiveChanSig = '';
     lastDropsSig = '';
+    lastAutoColSig = '';
+    lastHuntRankSig = '';
+    lastOwnListingsSig = '';
     renderAll();
 }
 
@@ -1688,6 +1701,17 @@ function initGridControls() {
         $('blackFridayBanner')?.classList.add('hidden');
     });
     $('probAlertsHost')?.addEventListener('click', (ev) => {
+        const actBtn = ev.target.closest('[data-alert-act]');
+        if (actBtn) {
+            const alertId = actBtn.dataset.alertAct;
+            if (alertId === 'depot-cap') {
+                setSubtab('automation');
+                const acc = $('emergencyCleanupAcc');
+                if (acc) acc.open = true;
+                ($('utilitiesCard') || $('preyCollectCard'))?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+            }
+            return;
+        }
         const xBtn = ev.target.closest('[data-dismiss-alert]');
         if (!xBtn) return;
         const alertId = xBtn.dataset.dismissAlert;
@@ -1898,6 +1922,11 @@ function readConfigForm() {
         dailyPassEnabled: $('cPass').checked,
         preyEnabled: $('cPrey').checked,
         incubatorEnabled: Boolean($('cIncubator')?.checked),
+        autoSeasonalSwap: Boolean($('cAutoSeasonalSwap')?.checked),
+        autoTeamManage: Boolean($('cAutoTeamManage')?.checked),
+        revivePotionCombo: $('cRevivePotionCombo') ? Boolean($('cRevivePotionCombo').checked) : true,
+        autoPokedexEvolve: Boolean($('cAutoPokedexEvolve')?.checked),
+        topCatchPreferEasyStage: $('cTopCatchPreferEasyStage') ? Boolean($('cTopCatchPreferEasyStage').checked) : true,
         liveEnabled: $('cLives').checked,
         liveStreakWatch: $('cLiveStreak').checked,
         liveAutoFollow: $('cLiveFollow').checked,
@@ -1937,8 +1966,12 @@ function readConfigForm() {
         autoSacrificeRedeem: Boolean($('cAutoSacrificeRedeem')?.checked),
         autoOferendaOnFull: Boolean($('cAutoOferendaOnFull')?.checked),
         autoRaidEnroll: Boolean($('cAutoRaidEnroll')?.checked),
+        autoRaidTeam: Boolean($('cAutoRaidTeam')?.checked),
         autoShowdownEnroll: Boolean($('cAutoShowdownEnroll')?.checked),
         autoMisticoEnter: Boolean($('cAutoMisticoEnter')?.checked),
+        autoBossEnabled: Boolean($('cAutoBossEnabled')?.checked),
+        autoBossPrize: $('cAutoBossPrize')?.value || 'mega',
+        autoSafariSmart: Boolean($('cAutoSafariSmart')?.checked),
         autoExtendListings: Boolean($('cAutoExtendListings')?.checked),
         autoOptimizeGear: Boolean($('cAutoOptimizeGear')?.checked),
     };
@@ -2258,6 +2291,7 @@ function renderActiveAccountPanel() {
     $('huntGuideLine').textContent = guideMode !== 'off' && data.huntGuide?.note
         ? `/hunt: ${data.huntGuide.note}`
         : '';
+    renderHuntRanking(data);
 
     const huntSel = $('huntSelect');
     const huntsCount = Number(data.huntsCount || data.hunts?.length || 0);
@@ -2311,6 +2345,7 @@ function renderActiveAccountPanel() {
     setText($('eBallCapSub'), `${fmtDec(st.catchPerBallPct || 0)}% acerto/bola`);
     setText($('eSurv'), `${fmtNum(st.heals || 0)} poções · ${fmtNum(st.revivesUsed || 0)} revives`);
     setText($('eSurvSub'), `${fmtNum(st.playerDeaths || 0)} mortes · ${fmtDec(st.potionsPerHour || 0)} poç/h`);
+    renderSessionRollsStrip(data);
 
     // Drops da sessão & foco do mapa (memoizado por assinatura)
     const dr = data.drops || {};
@@ -2402,6 +2437,11 @@ function renderActiveAccountPanel() {
         $('cPass').checked = Boolean(cfg.dailyPassEnabled);
         $('cPrey').checked = Boolean(cfg.preyEnabled);
     if ($('cIncubator')) $('cIncubator').checked = cfg.incubatorEnabled !== false;
+        if ($('cAutoSeasonalSwap')) $('cAutoSeasonalSwap').checked = Boolean(cfg.autoSeasonalSwap);
+        if ($('cAutoTeamManage')) $('cAutoTeamManage').checked = Boolean(cfg.autoTeamManage);
+        if ($('cRevivePotionCombo')) $('cRevivePotionCombo').checked = cfg.revivePotionCombo !== false;
+        if ($('cAutoPokedexEvolve')) $('cAutoPokedexEvolve').checked = Boolean(cfg.autoPokedexEvolve);
+        if ($('cTopCatchPreferEasyStage')) $('cTopCatchPreferEasyStage').checked = cfg.topCatchPreferEasyStage !== false;
         $('cLives').checked = Boolean(cfg.liveEnabled);
         $('cLiveStreak').checked = cfg.liveStreakWatch !== false;
         $('cLiveFollow').checked = cfg.liveAutoFollow !== false;
@@ -2442,8 +2482,12 @@ function renderActiveAccountPanel() {
         if ($('cAutoSacrificeRedeem')) $('cAutoSacrificeRedeem').checked = Boolean(cfg.autoSacrificeRedeem);
         if ($('cAutoOferendaOnFull')) $('cAutoOferendaOnFull').checked = Boolean(cfg.autoOferendaOnFull);
         if ($('cAutoRaidEnroll')) $('cAutoRaidEnroll').checked = Boolean(cfg.autoRaidEnroll);
+        if ($('cAutoRaidTeam')) $('cAutoRaidTeam').checked = Boolean(cfg.autoRaidTeam);
         if ($('cAutoShowdownEnroll')) $('cAutoShowdownEnroll').checked = Boolean(cfg.autoShowdownEnroll);
         if ($('cAutoMisticoEnter')) $('cAutoMisticoEnter').checked = Boolean(cfg.autoMisticoEnter);
+        if ($('cAutoBossEnabled')) $('cAutoBossEnabled').checked = Boolean(cfg.autoBossEnabled);
+        if ($('cAutoBossPrize') && document.activeElement !== $('cAutoBossPrize')) $('cAutoBossPrize').value = cfg.autoBossPrize || 'mega';
+        if ($('cAutoSafariSmart')) $('cAutoSafariSmart').checked = Boolean(cfg.autoSafariSmart);
         if ($('cAutoExtendListings')) $('cAutoExtendListings').checked = Boolean(cfg.autoExtendListings);
         if ($('cAutoOptimizeGear')) $('cAutoOptimizeGear').checked = Boolean(cfg.autoOptimizeGear);
 
@@ -4163,8 +4207,162 @@ function fmtCountdownShort(target) {
 }
 
 function calcCubicRefineCost(level) {
-    const n = Math.max(1, Math.floor(Number(level || 0)) + 1);
-    return 500 * n * n * n;
+    const n = Math.max(0, Math.floor(Number(level || 0)));
+    return 500 * (3 * n * n + 3 * n + 1);
+}
+
+function calcNetSale(total, currency = 'gold', kind = 'item') {
+    const v = Math.max(0, Number(total) || 0);
+    if (v <= 0) return 0;
+    if (currency === 'orb') {
+        const pct = kind === 'pokemon' ? (v <= 500 ? 0.13 : (v <= 5000 ? 0.10 : 0.075)) : 0.15;
+        return Math.max(0, v - Math.round(v * pct));
+    }
+    return Math.floor(v * 0.85);
+}
+
+function loadPvpFormations() {
+    try {
+        const raw = localStorage.getItem(PVP_FORMATIONS_KEY);
+        const parsed = raw ? JSON.parse(raw) : {};
+        return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+        return {};
+    }
+}
+
+function savePvpFormations(map) {
+    try {
+        localStorage.setItem(PVP_FORMATIONS_KEY, JSON.stringify(map || {}));
+    } catch { /* ignore */ }
+}
+
+function csvCell(val) {
+    const s = String(val ?? '').replace(/\r?\n/g, ' ');
+    if (/[;"\n,]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+    return s;
+}
+
+function triggerCsvDownload(filename, csvText) {
+    const content = csvText.startsWith('\uFEFF') ? csvText : `\uFEFF${csvText}`;
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
+
+function buildSnapshotCsv(tipo, data, acc) {
+    const sep = ';';
+    const row = (cols) => cols.map(csvCell).join(sep);
+    if (tipo === 'drops') {
+        const lines = [row(['Tipo', 'Item', 'Categoria', 'Qtd', 'PorHora', 'Mochila', 'UltimaHora', 'Hunt'])];
+        for (const d of (data?.drops?.featured || [])) {
+            lines.push(row(['Resumo', d.name, d.category || '', d.qty || 0, d.perHour || 0, d.bagQty ?? '', d.lastTime || '', '']));
+        }
+        for (const r of (data?.drops?.recent || [])) {
+            lines.push(row(['Recente', r.name, r.category || '', r.qty || 1, '', '', r.time || '', r.hunt || '']));
+        }
+        return lines.join('\r\n');
+    }
+    if (tipo === 'session') {
+        const st = data?.stats || {};
+        const t = data?.trainer || {};
+        const lines = [
+            row(['Conta', 'Nick', 'Nivel', 'Gold', 'Hunt', 'UptimeSeg', 'Abates', 'AbatesMin', 'XP', 'XP_h', 'OuroBruto', 'Gasto', 'LucroLiq', 'Lucro_h', 'Capturas', 'Shinies', 'Bolas', 'Pocoes', 'Revives', 'Mortes']),
+            row([acc, t.nick || '', t.level || 0, t.gold || 0, t.huntName || '', st.uptimeSec || 0, st.kills || 0, st.killsPerMin || 0, st.xpGained || 0, st.xpPerHour || 0, st.goldGained || 0, st.spentGold || 0, st.netGold ?? st.goldGained ?? 0, st.netGoldPerHour ?? st.goldPerHour ?? 0, st.captures || 0, st.shiniesCaptured || 0, st.ballsThrown || 0, st.heals || 0, st.revivesUsed || 0, st.playerDeaths || 0]),
+        ];
+        return lines.join('\r\n');
+    }
+    if (tipo === 'shinies') {
+        const lines = [row(['Origem', 'DataHora', 'Treinador', 'Pokemon', 'Nivel', 'Ovo', 'Hunt', 'SpeciesId'])];
+        for (const sh of (data?.ownShinies || [])) {
+            lines.push(row(['Conta', sh.ts ? new Date(sh.ts).toISOString() : '', data?.trainer?.nick || '', sh.name || '', sh.level || '', sh.egg ? 'Sim' : 'Nao', sh.hunt || '', sh.speciesId || '']));
+        }
+        for (const sh of (data?.recentShinies || [])) {
+            lines.push(row(['Servidor', sh.ts ? new Date(sh.ts).toISOString() : '', sh.trainer || '', sh.name || '', sh.level || '', sh.egg ? 'Sim' : 'Nao', sh.hunt || '', sh.speciesId || '']));
+        }
+        return lines.join('\r\n');
+    }
+    if (tipo === 'market') {
+        const lines = [row(['Origem', 'Nome', 'Moeda', 'Preco', 'Piso', 'Liquido', 'Status', 'Hora'])];
+        for (const l of (data?.gameIntel?.ownListings?.listings || [])) {
+            lines.push(row(['MeuAnuncio', l.name || `#${l.id}`, l.currency || 'gold', l.price || 0, l.floorPrice ?? '', l.currentNet ?? calcNetSale(l.price, l.currency, l.kind), l.undercut ? 'Undercut' : 'OK', '']));
+        }
+        for (const h of (data?.sniper?.recentHits || [])) {
+            lines.push(row(['Sniper', h.itemName || `#${h.itemId || h.speciesId || ''}`, h.currency || 'gold', h.price || 0, '', '', h.status || (h.bought ? 'comprado' : 'oferta'), h.ts ? new Date(h.ts).toISOString() : '']));
+        }
+        return lines.join('\r\n');
+    }
+    return '';
+}
+
+function renderHuntRanking(data) {
+    const acc = $('huntRankAcc');
+    const host = $('huntRankingList');
+    if (!acc || !host) return;
+    const raw = data?.gameIntel?.huntRanking || data?.huntGuide?.ranking || [];
+    const list = Array.isArray(raw) ? raw.slice(0, 8) : [];
+    acc.classList.toggle('hidden', list.length === 0);
+    if (!list.length) {
+        if (host.innerHTML) host.innerHTML = '';
+        return;
+    }
+    const curSlug = data?.trainer?.huntSlug || '';
+    const sig = `${activeAccount}|${curSlug}|${list.map((r) => `${r.slug}:${r.xpH ?? r.xpPokemonH ?? 0}:${r.goldH ?? r.ouroH ?? 0}:${r.shinyH ?? 0}:${r.unsafe ? 1 : 0}`).join(';')}`;
+    if (sig === lastHuntRankSig) return;
+    lastHuntRankSig = sig;
+    const fmtCompactH = (v) => {
+        const n = Number(v || 0);
+        if (n >= 1e6) return `${(n / 1e6).toFixed(1).replace('.', ',')}M`;
+        if (n >= 1e3) return `${(n / 1e3).toFixed(1).replace('.', ',')}k`;
+        return fmtNum(Math.round(n));
+    };
+    setHtml(host, list.map((r, i) => {
+        const name = r.name || r.nome || r.slug || `#${i + 1}`;
+        const lv = r.level ?? r.nivel;
+        const xpH = Number(r.xpH ?? r.xpPokemonH ?? 0);
+        const goldH = Number(r.goldH ?? r.ouroH ?? 0);
+        const shinyH = Number(r.shinyH ?? 0);
+        const risk = r.unsafe || r.risk === 'high' || r.risco === 'alto';
+        const riskBadge = risk
+            ? '<span class="hunt-rank-risk">Risco</span>'
+            : '<span class="hunt-rank-risk safe">Seguro</span>';
+        const isCur = curSlug && r.slug === curSlug;
+        return `<div class="hunt-rank-row${isCur ? ' is-current' : ''}">` +
+            `<div class="hunt-rank-main"><b>#${i + 1} ${escapeHtml(name)}${lv != null ? ` (Nv ${fmtNum(lv)})` : ''}${riskBadge}</b>` +
+            `<small>XP/h ${fmtCompactH(xpH)} · Ouro/h ${fmtCompactH(goldH)} · Shiny/h ${shinyH.toFixed(2).replace('.', ',')}</small></div>` +
+            `<button type="button" class="btn sm ${isCur ? '' : 'primary'}" data-rank-hunt="${escapeHtml(r.slug)}" ${isCur ? 'disabled' : ''}>${isCur ? 'Atual' : 'Ir'}</button>` +
+            `</div>`;
+    }).join(''));
+}
+
+function renderSessionRollsStrip(data) {
+    const strip = $('sessionRollsStrip');
+    if (!strip) return;
+    const gi = data?.gameIntel || {};
+    const sr = gi.sessionRolls || null;
+    const ll = gi.lootLeverage || null;
+    const show = Boolean((sr && sr.total > 0) || ll?.active);
+    strip.classList.toggle('hidden', !show);
+    if (!show) return;
+    const parts = [];
+    if (sr && sr.total > 0) {
+        const exp = sr.expected || {};
+        parts.push(`<span class="roll-pill">P4: <b>${fmtNum(sr.p4 || 0)}</b></span>`);
+        parts.push(`<span class="roll-pill">P5: <b>${fmtNum(sr.p5 || 0)}</b></span>`);
+        parts.push(`<span class="roll-pill" title="Esperado: ${exp.q150 ?? 0}">Q>=1.50: <b>${fmtNum(sr.q150 || 0)}</b>/${String(exp.q150 ?? 0).replace('.', ',')}</span>`);
+        parts.push(`<span class="roll-pill" title="Esperado: ${exp.q170 ?? 0}">Q>=1.70: <b>${fmtNum(sr.q170 || 0)}</b>/${String(exp.q170 ?? 0).replace('.', ',')}</span>`);
+        parts.push(`<span class="roll-pill" title="Esperado: ${exp.q180 ?? 0}">Q>=1.80: <b>${fmtNum(sr.q180 || 0)}</b>/${String(exp.q180 ?? 0).replace('.', ',')}</span>`);
+    }
+    if (ll?.active) {
+        parts.push(`<span class="loot-lev-pill" title="${escapeHtml(ll.summary || '')}">Loot Nv 25k+ (${Number(ll.multiplier || 1).toFixed(2).replace('.', ',')}x)</span>`);
+    }
+    setHtml(strip, `<span>Rolagens:</span>${parts.join('')}`);
 }
 
 function getTeamChoices(data) {
@@ -4292,9 +4490,13 @@ function renderTopIntelBar(data) {
         if (probAlerts.length > 0) {
             shownAny = true;
             const html = probAlerts.map((a) => {
-                const lvl = a.level === 'warn' ? 'warn' : (a.level === 'good' ? 'good' : 'info');
-                return `<span class="intel-pill prob-${lvl}" title="${escapeHtml(a.detail || a.title)}">` +
-                    `<span>${escapeHtml(a.title)}</span>` +
+                const lvl = (a.level === 'warn' || a.level === 'danger') ? 'warn' : (a.level === 'good' ? 'good' : 'info');
+                const idSlug = String(a.id || '').replace(/[^a-z0-9_-]/gi, '-').toLowerCase();
+                const actBtn = a.id === 'depot-cap' || a.actionLabel
+                    ? `<button type="button" class="pill-act" data-alert-act="${escapeHtml(a.id)}">${escapeHtml(a.actionLabel || 'Limpar Depot')}</button>`
+                    : '';
+                return `<span class="intel-pill prob-${lvl} alert-${escapeHtml(idSlug)}" title="${escapeHtml(a.detail || a.title)}">` +
+                    `<span>${escapeHtml(a.title)}</span>${actBtn}` +
                     `<button type="button" class="pill-x" data-dismiss-alert="${escapeHtml(a.id)}" aria-label="Fechar aviso" title="Fechar aviso">×</button>` +
                     `</span>`;
             }).join('');
@@ -4343,7 +4545,22 @@ function renderPokeAndHuntIntel(data) {
                     const cdrTxt = asm.speedCdrPct != null && Number.isFinite(Number(asm.speedCdrPct))
                         ? `CDR ${asm.speedCdrPct}%/${asm.maxSpeedCdrPct || 7}%`
                         : '';
-                    const refTxt = asm.refino != null && typeof asm.refino !== 'object' ? `Refino +${asm.refino}` : '';
+                    let refTotal = 0;
+                    let hasRefInfo = false;
+                    if (asm.refino != null) {
+                        let rObj = asm.refino;
+                        if (typeof rObj === 'string') {
+                            try { rObj = JSON.parse(rObj); } catch { rObj = null; }
+                        }
+                        if (rObj && typeof rObj === 'object') {
+                            hasRefInfo = true;
+                            refTotal = ['hp', 'atk', 'def', 'spAtk', 'spDef'].reduce((s, k) => s + Math.max(0, Math.floor(Number(rObj[k]) || 0)), 0);
+                        } else if (typeof asm.refino === 'number' && Number.isFinite(asm.refino)) {
+                            hasRefInfo = true;
+                            refTotal = Math.max(0, Math.floor(asm.refino));
+                        }
+                    }
+                    const refTxt = hasRefInfo && refTotal > 0 ? `Refino +${refTotal}` : '';
                     const tmTxt = [asm.tmElemental ? 'Z-Move' : '', asm.tmFisico ? 'Físico' : ''].filter(Boolean).join(' · ');
                     const html = [
                         potTxt ? `<span class="stat-badge pot" title="Potência do Pokémon ativo">${escapeHtml(potTxt)}</span>` : '',
@@ -4425,7 +4642,7 @@ function renderPokeAndHuntIntel(data) {
         if (egg) {
             const frags = Number(egg.fragments || 0);
             const delta = Number(egg.deltaLevel || 0);
-            const warnNear = delta > 0 && delta <= 250 ? `<span class="egg-near">Faltam ${fmtNum(delta)} nv p/ Degrau ${egg.nextStep}</span>` : '';
+            const warnNear = delta > 0 && delta <= 500 ? `<span class="egg-near">Faltam ${fmtNum(delta)} nv p/ Degrau ${egg.nextStep}</span>` : '';
             const btnHtml = frags >= 10
                 ? `<button type="button" class="btn sm primary" data-intel-act="craft-shiny-egg">Fabricar Ovo Shiny (${frags}/10)</button>`
                 : `<small>Fragmentos: ${frags}/10</small>`;
@@ -4502,6 +4719,66 @@ function renderPokeAndHuntIntel(data) {
             setHtml(bestBox, `<div class="bestiary-title"><b>Bestiário da Hunt</b>${totalBadge}</div>${rows}`);
         }
     }
+
+    renderIncubatorBox(data);
+}
+
+function renderIncubatorBox(data) {
+    const box = $('incubatorBox');
+    if (!box) return;
+    const gi = data?.gameIntel || {};
+    const inc = gi.incubator || gi.chocadeira || null;
+    const items = data?.inventory?.items || {};
+    const bagEggs = inc?.eggsInBag || {
+        shiny: Math.max(0, Math.floor(Number(items[70094] || 0))),
+        p4: Math.max(0, Math.floor(Number(items[70093] || 0))),
+        p3: Math.max(0, Math.floor(Number(items[70092] || 0))),
+        p2: Math.max(0, Math.floor(Number(items[70091] || 0))),
+    };
+    const totalBag = (bagEggs.shiny || 0) + (bagEggs.p4 || 0) + (bagEggs.p3 || 0) + (bagEggs.p2 || 0);
+    const isOnline = data?.status === 'connected' || data?.status === 'bridge';
+    const show = Boolean(inc || totalBag > 0 || isOnline);
+    box.classList.toggle('hidden', !show);
+    if (!show) return;
+
+    const totalSlots = Number(inc?.totalSlots || 1);
+    const usedSlots = Number(inc?.usedSlots || 0);
+    const freeSlots = Number(inc?.freeSlots ?? Math.max(0, totalSlots - usedSlots));
+    const readyCount = Number(inc?.readyCount || 0);
+    const slots = Array.isArray(inc?.slots) && inc.slots.length > 0
+        ? inc.slots
+        : Array.from({ length: totalSlots }, (_, i) => ({ slot: i, occupied: false, ready: false }));
+
+    const eggLabel = (ovo) => {
+        const s = String(ovo || '');
+        if (/70094|shiny/i.test(s)) return 'Ovo Shiny';
+        if (/70093|p4/i.test(s)) return 'Ovo P4';
+        if (/70092|p3/i.test(s)) return 'Ovo P3';
+        if (/70091|p2/i.test(s)) return 'Ovo P2';
+        return s ? `Ovo ${s}` : 'Chocando';
+    };
+
+    const slotsHtml = slots.map((sl) => {
+        if (!sl.occupied) {
+            return `<div class="inc-slot free"><span>Slot ${Number(sl.slot) + 1}</span><span>Livre</span></div>`;
+        }
+        const rem = sl.ready
+            ? 'Pronto!'
+            : (sl.finishesAt ? fmtCountdownShort(sl.finishesAt) : (sl.remainingMs > 0 ? fmtEventCountdown(sl.remainingMs) : 'Chocando'));
+        return `<div class="inc-slot${sl.ready ? ' ready' : ''}"><span>Slot ${Number(sl.slot) + 1}: <b>${escapeHtml(eggLabel(sl.ovo))}</b></span><span>${escapeHtml(rem)}</span></div>`;
+    }).join('');
+
+    const readyBadge = readyCount > 0 ? `<span class="inc-ready-badge">${readyCount} pronto${readyCount > 1 ? 's' : ''}!</span>` : '';
+    const html = `
+      <div class="inc-head">
+        <span class="inc-title"><b>Chocadeira</b> <small>Slots: ${usedSlots}/${totalSlots} (${freeSlots} livre${freeSlots === 1 ? '' : 's'})</small>${readyBadge}</span>
+        <button type="button" class="btn sm primary" id="btnIncubatorRun" data-intel-act="incubator-run" ${totalBag === 0 && readyCount === 0 ? 'disabled' : ''}>Chocar agora</button>
+      </div>
+      <div class="inc-slots">${slotsHtml}</div>
+      <div class="inc-foot">
+        <span>Ovos na mochila: <b>Shiny ${fmtNum(bagEggs.shiny || 0)}</b> · P4 ${fmtNum(bagEggs.p4 || 0)} · P3 ${fmtNum(bagEggs.p3 || 0)} · P2 ${fmtNum(bagEggs.p2 || 0)}</span>
+      </div>`;
+    setHtml(box, html);
 }
 
 function renderEvolutionDexReady(data) {
@@ -4538,30 +4815,74 @@ function renderEventsMetaCard(data) {
         const r = events.raid || {};
         const sw = events.showdown || {};
         const cp = events.camp || {};
+        const rEnrolled = Boolean(r.enrolled ?? r.inscrito);
+        const rDay = r.dayLabel || (r.hourBrt != null ? `Hoje ${r.hourBrt}h BRT` : 'Segunda 16h');
+        const rTarget = r.closesAt ?? r.startsAt;
+        const rCd = rTarget ? fmtCountdownShort(rTarget) : '';
+        const raidDetail = gi.raidDetail || {};
+        const raidFichas = r.fichas ?? raidDetail.fichas ?? null;
+        const rTokenTxt = raidFichas != null ? ` · ${fmtNum(raidFichas)} ficha${Number(raidFichas) === 1 ? '' : 's'}` : ((r.hasToken ?? raidDetail.hasToken) ? ' · Token OK' : '');
+
+        const swEnrolled = Boolean(sw.enrolled ?? sw.inscrito);
+        const swDay = sw.dayLabel || (sw.hourBrt != null ? `Hoje ${sw.hourBrt}h BRT` : 'Quarta 20h');
+        const swTarget = sw.closesAt ?? sw.startsAt;
+        const swCd = swTarget ? fmtCountdownShort(swTarget) : '';
+
+        const cpEnrolled = Boolean(cp.enrolled ?? cp.inscrito);
+
+        const raidTeamObj = raidDetail.suggestedTeam || events.raidTeam || gi.raidTeam || null;
+        const raidMembers = Array.isArray(raidTeamObj?.members) ? raidTeamObj.members : [];
+        const raidTeamHtml = `
+          <div class="raid-team-box">
+            <div class="intel-pane-sub">
+              <span><b>Equipe sugerida Raid</b>${raidFichas != null ? ` (${fmtNum(raidFichas)} fichas)` : ''}</span>
+              <button type="button" class="btn sm teal" data-intel-act="raid-team-auto">Enviar equipe Raid</button>
+            </div>
+            <div class="hint-text">${raidMembers.length
+                ? raidMembers.map((m) => `${escapeHtml(m.name)} (Nv ${fmtNum(m.level)}${m.isMega ? ' Mega' : ''})`).join(' · ')
+                : 'Conecte para calcular a melhor equipe PvE para Raid.'}</div>
+          </div>`;
+
+        const gr = gi.guildRaid || null;
+        const grPct = gr ? Math.min(100, Math.round(Number(gr.damageRatio || 0) * 100)) : 0;
+        const grBoostLeft = gr?.boostAte ? fmtCountdownShort(gr.boostAte) : '';
+        const guildHtml = `
+          <div class="guild-raid-box">
+            <div class="intel-pane-sub">
+              <span><b>Raid da Reserva da Guilda</b>${gr?.hasGuild ? ` (+${Number(gr.bonusPct || 0).toFixed(2).replace('.', ',')}% / +${gr.maxBonusPct || 5}%)` : ''}</span>
+              <button type="button" class="btn sm" data-intel-act="guild-boss-raid">Atualizar</button>
+            </div>
+            ${gr?.hasGuild
+                ? `<div class="guild-bar"><div class="guild-bar-fill" style="width:${grPct}%"></div></div>
+                   <div class="hint-text">Dano equipe: <b>${fmtNum(gr.teamDamage || 0)}</b> / ${fmtNum(gr.reserveMaxHp || 0)} HP (${gr.fighters || 0} lutadores)</div>
+                   <div class="hint-text">Boost Guilda (+10% 7d): <b>${gr.boostActive ? `Ativo (${grBoostLeft || 'ativo'})` : 'Inativo'}</b> · Diamantes: <b>${fmtNum(gr.diamondsCurrent || 0)}/${fmtNum(gr.diamondsGoal || 500)}</b> (${Number(gr.diamondsPct || 0).toFixed(0)}%)</div>`
+                : '<div class="hint-text">Sem dados da guilda no momento. Clique em Atualizar se estiver em guilda.</div>'}
+          </div>`;
+
         const agHtml = `
           <div class="intel-event-list">
             <div class="intel-event-row">
               <div>
-                <b>Raid (${escapeHtml(r.dayLabel || 'Segunda 16h')})</b>
-                <small>${r.enrolled ? 'Inscrito ✓' : 'Não inscrito'}${r.hasToken ? ' · Token OK' : ''}${r.closesAt ? ` · fecha em ${fmtCountdownShort(r.closesAt)}` : ''}</small>
+                <b>Raid (${escapeHtml(rDay)})</b>
+                <small>${rEnrolled ? 'Inscrito ✓' : 'Não inscrito'}${rTokenTxt}${rCd ? ` · ${r.closesAt ? 'fecha' : 'em'} ${rCd}` : ''}</small>
               </div>
-              <button type="button" class="btn sm ${r.enrolled ? '' : 'primary'}" data-intel-act="raid-enroll" ${r.enrolled ? 'disabled' : ''}>${r.enrolled ? 'Inscrito' : 'Inscrever'}</button>
+              <button type="button" class="btn sm ${rEnrolled ? '' : 'primary'}" data-intel-act="raid-enroll" ${rEnrolled ? 'disabled' : ''}>${rEnrolled ? 'Inscrito' : 'Inscrever'}</button>
             </div>
             <div class="intel-event-row">
               <div>
-                <b>Showdown (${escapeHtml(sw.dayLabel || 'Quarta 20h')})</b>
-                <small>${sw.enrolled ? 'Inscrito ✓' : (sw.unlocked === false ? 'Bloqueado' : 'Disponível')}${sw.closesAt ? ` · fecha em ${fmtCountdownShort(sw.closesAt)}` : ''}</small>
+                <b>Showdown (${escapeHtml(swDay)})</b>
+                <small>${swEnrolled ? 'Inscrito ✓' : (sw.unlocked === false ? 'Bloqueado' : 'Disponível')}${swCd ? ` · ${sw.closesAt ? 'fecha' : 'em'} ${swCd}` : ''}</small>
               </div>
-              <button type="button" class="btn sm ${sw.enrolled ? '' : 'primary'}" data-intel-act="showdown-enroll" ${sw.enrolled || sw.unlocked === false ? 'disabled' : ''}>${sw.enrolled ? 'Inscrito' : 'Inscrever'}</button>
+              <button type="button" class="btn sm ${swEnrolled ? '' : 'primary'}" data-intel-act="showdown-enroll" ${swEnrolled || sw.unlocked === false ? 'disabled' : ''}>${swEnrolled ? 'Inscrito' : 'Inscrever'}</button>
             </div>
             <div class="intel-event-row">
               <div>
                 <b>Campeonatos</b>
-                <small>${escapeHtml(cp.nextLabel || 'Sem data informada')}${cp.enrolled ? ' · Inscrito ✓' : ''}</small>
+                <small>${escapeHtml(cp.nextLabel || 'Sem data informada')}${cpEnrolled ? ' · Inscrito ✓' : ''}</small>
               </div>
-              <button type="button" class="btn sm ${cp.enrolled ? '' : 'primary'}" data-intel-act="camp-enroll" ${cp.enrolled ? 'disabled' : ''}>${cp.enrolled ? 'Inscrito' : 'Inscrever'}</button>
+              <button type="button" class="btn sm ${cpEnrolled ? '' : 'primary'}" data-intel-act="camp-enroll" ${cpEnrolled ? 'disabled' : ''}>${cpEnrolled ? 'Inscrito' : 'Inscrever'}</button>
             </div>
-          </div>`;
+          </div>${raidTeamHtml}${guildHtml}`;
         setHtml(agPane, agHtml);
     }
 
@@ -4570,29 +4891,46 @@ function renderEventsMetaCard(data) {
     if (bsPane) {
         const regions = Array.isArray(bossRot.regions) ? bossRot.regions : [];
         const headTxt = `Rotação: ${escapeHtml(bossRot.dayKey || '-')}${bossRot.nextAt ? ` · próxima em ${fmtCountdownShort(bossRot.nextAt)}` : ''}`;
+        const fmtPct = (v) => `${(Number(v || 0) * 100).toFixed(1).replace('.', ',')}%`;
         const regHtml = regions.length
-            ? regions.map((reg) => {
+            ? regions.map((reg, idx) => {
                 const bosses = Array.isArray(reg.bosses) ? reg.bosses : [];
+                const regName = reg.nome || reg.regiao || reg.region || '?';
+                const regKey = String(reg.region || reg.regiao || regName).toLowerCase();
+                const maxMult = Number.isFinite(Number(reg.chancesMaxMult))
+                    ? Number(reg.chancesMaxMult)
+                    : (Number.isFinite(Number(reg.index)) ? Number(reg.index) + 1 : idx + 1);
+                const chObj = reg.chances && typeof reg.chances === 'object' ? reg.chances : null;
+                const chProbTxt = chObj
+                    ? `TM ${fmtPct(chObj.tm)} · Mega ${fmtPct(chObj.mega)} · Tickets ${fmtPct(chObj.tickets)}`
+                    : '';
+                const prizeTxt = reg.prize?.label || reg.prize?.tipo || (typeof reg.prize === 'string' ? reg.prize : '-');
+
                 if (bosses.length === 0) {
-                    const regName = reg.region || reg.nome || reg.regiao || '?';
-                    const prize = reg.prize?.label || reg.prize?.tipo || (typeof reg.prize === 'string' ? reg.prize : '-');
-                    const ch = Number(reg.chances || 1);
-                    return `<div class="boss-reg-card">` +
+                    const bKey = reg.key || regKey;
+                    return `<div class="boss-reg-card${reg.unlocked === false ? ' locked' : ''}">` +
                         `<div class="boss-reg-head"><b>${escapeHtml(String(regName).toUpperCase())}</b>` +
-                        `<small>${escapeHtml(String(prize))} · ${ch}x</small></div></div>`;
+                        `<small>${reg.nivelMin ? `Nv ${fmtNum(reg.nivelMin)} · ` : ''}Prêmio: ${escapeHtml(String(prizeTxt).toUpperCase())} · até ${fmtNum(maxMult)}x</small></div>` +
+                        `<div class="boss-row">` +
+                        `<div class="boss-info"><b>Boss ${escapeHtml(String(regName))}</b><span class="boss-prize">${escapeHtml(chProbTxt || `Par ${chObj?.par ?? reg.par ?? 1}`)}</span></div>` +
+                        `<div class="boss-acts">` +
+                        `<button type="button" class="btn sm primary" data-boss-enter="${escapeHtml(bKey)}" ${reg.unlocked === false ? 'disabled' : ''}>Entrar</button>` +
+                        `<button type="button" class="btn sm" data-boss-leave="1">Sair</button>` +
+                        `<label class="pill-chk"><input type="checkbox" data-boss-auto="${escapeHtml(bKey)}" ${reg.auto ? 'checked' : ''} /> Auto</label>` +
+                        `</div></div></div>`;
                 }
                 const bRows = bosses.map((b) => (
                     `<div class="boss-row">` +
-                    `<div class="boss-info"><b>${escapeHtml(b.key || `#${b.pokeId}`)}</b><span class="boss-prize">${escapeHtml(b.premio || '-')}</span></div>` +
+                    `<div class="boss-info"><b>${escapeHtml(b.key || `#${b.pokeId}`)}</b><span class="boss-prize">${escapeHtml(b.premio || prizeTxt)}${chProbTxt ? ` · ${escapeHtml(chProbTxt)}` : ''}</span></div>` +
                     `<div class="boss-acts">` +
-                    `<button type="button" class="btn sm primary" data-boss-enter="${escapeHtml(b.key)}" ${reg.unlocked === false ? 'disabled' : ''}>Entrar</button>` +
+                    `<button type="button" class="btn sm primary" data-boss-enter="${escapeHtml(b.key || regKey)}" ${reg.unlocked === false ? 'disabled' : ''}>Entrar</button>` +
                     `<button type="button" class="btn sm" data-boss-leave="1">Sair</button>` +
-                    `<label class="pill-chk"><input type="checkbox" data-boss-auto="${escapeHtml(b.key)}" ${b.auto ? 'checked' : ''} /> Auto</label>` +
+                    `<label class="pill-chk"><input type="checkbox" data-boss-auto="${escapeHtml(b.key || regKey)}" ${b.auto ? 'checked' : ''} /> Auto</label>` +
                     `</div></div>`
                 )).join('');
                 return `<div class="boss-reg-card${reg.unlocked === false ? ' locked' : ''}">` +
-                    `<div class="boss-reg-head"><b>${escapeHtml(reg.nome || reg.regiao || reg.region)}</b>` +
-                    `<small>Nv ${fmtNum(reg.nivelMin || 0)} · Par ${escapeHtml(reg.par || '-')} · ${reg.chances || 1}x</small></div>` +
+                    `<div class="boss-reg-head"><b>${escapeHtml(String(regName).toUpperCase())}</b>` +
+                    `<small>Nv ${fmtNum(reg.nivelMin || 0)} · Par ${escapeHtml(chObj?.par ?? reg.par ?? '-')} · até ${fmtNum(maxMult)}x</small></div>` +
                     `${bRows}</div>`;
             }).join('')
             : '<div class="hint-text">Conecte a conta para carregar os bosses de hoje.</div>';
@@ -4608,12 +4946,14 @@ function renderEventsMetaCard(data) {
         const sfActive = fmtCountdownShort(safari.activeUntil);
         const multVal = Number(safari.multShiny || 3.04);
         const multTxt = (Number.isFinite(multVal) ? multVal : 3.04).toFixed(2).replace('.', ',');
+        const bonusAddedMin = safari.bonusAddedMin ?? (batchObj?.bonusTickets != null ? batchObj.bonusTickets * 30 : 30);
+        const totalDurMin = safari.totalDurationMin ?? (batchObj?.totalSlots != null ? batchObj.totalSlots * 30 : (safari.bonusMin || 210));
         const sfHtml = `
           <div class="safari-grid">
             <div class="safari-card">
               <b>Safari</b>
               <div class="hint-text">Tickets: <b>${fmtNum(tickets)}</b> · Lote ótimo: <b>${fmtNum(batch)}</b> (múltiplo de 6)</div>
-              <div class="hint-text">Bônus: <b>+${fmtNum(safari.bonusMin || 30)}m</b> · Shiny: <b>${multTxt}x</b>${sfActive ? ` · ativo (${sfActive})` : ''}</div>
+              <div class="hint-text">Bônus grátis: <b>+${fmtNum(bonusAddedMin)}m</b> (${fmtNum(totalDurMin)}m total) · Shiny: <b>${multTxt}x</b>${sfActive ? ` · ativo (${sfActive})` : ''}</div>
               <div class="util-btn-row" style="margin-top:6px;">
                 <button type="button" class="btn sm primary" data-safari-enter="${batch}" ${tickets < 6 ? 'disabled' : ''}>Entrar Safari (${batch})</button>
               </div>
@@ -4634,6 +4974,17 @@ function renderEventsMetaCard(data) {
     if (gyPane) {
         const podiums = Array.isArray(gyms.podiums) ? gyms.podiums : [];
         const cdLeft = fmtCountdownShort(gyms.nextCooldownAt);
+        const cdBadge = gyms.cooldownReady
+            ? '<span class="gym-cd-badge ready">Pronto!</span>'
+            : (cdLeft ? `<span class="gym-cd-badge">Cooldown 24h: ${escapeHtml(cdLeft)}</span>` : '');
+        const recHtml = gyms.recommendedSummary
+            ? `<div class="gym-rec-box">
+                <div class="intel-pane-sub">
+                  <span>${escapeHtml(gyms.recommendedSummary)}</span>
+                  ${gyms.recommendedType ? `<button type="button" class="btn sm primary" data-gym-challenge="${escapeHtml(gyms.recommendedType)}" ${gyms.cooldownReady === false ? 'disabled' : ''}>Desafiar ${escapeHtml(gyms.recommendedType)}</button>` : ''}
+                </div>
+              </div>`
+            : '';
         const podHtml = podiums.length
             ? podiums.map((p) => (
                 `<div class="gym-row">` +
@@ -4644,23 +4995,24 @@ function renderEventsMetaCard(data) {
             : '<div class="hint-text">Nenhum pódio ativo no momento.</div>';
         const gyHtml = `
           <div class="intel-pane-sub">
-            <span>Buff ativo: <b>+${fmtNum(gyms.activeBuffPct || 0)}%</b>${cdLeft ? ` · Cooldown 24h: ${cdLeft}` : ''}</span>
+            <span>Buff ativo: <b>+${fmtNum(gyms.activeBuffPct || 0)}%</b> ${cdBadge}</span>
             <button type="button" class="btn sm" data-intel-act="gym-info">Atualizar</button>
           </div>
+          ${recHtml}
           ${podHtml}
           <div class="util-act-row" style="margin-top:6px;">
             <select id="gymChallengeTypeSel" aria-label="Tipo do ginásio para desafiar">
               ${['normal', 'fire', 'water', 'grass', 'electric', 'ice', 'fighting', 'poison', 'ground', 'flying', 'psychic', 'bug', 'rock', 'ghost', 'dragon', 'dark', 'steel', 'fairy']
-                .map((t) => `<option value="${t}">Ginásio: ${t}</option>`).join('')}
+                .map((t) => `<option value="${t}"${gyms.recommendedType && String(gyms.recommendedType).toLowerCase() === t ? ' selected' : ''}>Ginásio: ${t}</option>`).join('')}
             </select>
             <button type="button" class="btn sm primary" id="btnGymChallengeSel">Desafiar</button>
           </div>`;
         setHtml(gyPane, gyHtml);
     }
 
-    // PvP Meta (29/11/2026) + Montar Time PvP
+    // PvP Meta (29/11/2026) + Montar Time PvP + Formações + Simulador Treino
     const pvpPane = $('intelPvpPane');
-    if (pvpPane) {
+    if (pvpPane && !pvpPane.contains(document.activeElement)) {
         const team = Array.isArray(pvp.team) ? pvp.team : [];
         const gBoostLeft = fmtCountdownShort(pvp.guildBoostUntil);
         const sinceDate = pvp.passivesSince
@@ -4672,6 +5024,21 @@ function renderEventsMetaCard(data) {
           <span>Passivas: <b>${pvp.passivesActive ? 'Ativas' : 'Inativas'}</b>${sinceDate ? ` (${escapeHtml(sinceDate)})` : ''} · Guilda: <b>+${fmtNum(pvp.guildBoostPct || 0)}%</b>${gBoostLeft ? ` (${gBoostLeft})` : ''}</span>
           <button type="button" class="btn sm primary" data-intel-act="pvp-save-formation" ${team.length === 0 ? 'disabled' : ''}>Salvar formação</button>
         </div>`;
+
+        const ri = pvp.rankIntel || null;
+        let rankBadgesHtml = '';
+        if (ri) {
+            const decTxt = ri.decayActive
+                ? 'Decaimento 24h: Ativo!'
+                : (ri.decayRemainingMs != null ? `Decaimento 24h: ${fmtEventCountdown(ri.decayRemainingMs)}` : 'Decaimento 24h: Sem dados');
+            const prTxt = String(ri.prWindowLabel || '+-25').replace('+-', '±');
+            rankBadgesHtml = `<div class="pvp-rank-badges">` +
+                `<span class="pvp-rank-badge${ri.decayWarning ? ' warn' : ''}">${escapeHtml(decTxt)}</span>` +
+                `<span class="pvp-rank-badge${ri.tierShieldActive ? ' ok' : ''}">Escudo de Tier: ${ri.tierShieldActive ? `Ativo (${fmtNum(ri.escudo)})` : 'Inativo'}</span>` +
+                `<span class="pvp-rank-badge">Janela PR: ${escapeHtml(prTxt)}</span>` +
+                `</div>`;
+        }
+
         const rows = team.length
             ? team.map((m) => {
                 const passiveName = typeof m.passive === 'object' ? m.passive?.nome : m.passive;
@@ -4686,6 +5053,54 @@ function renderEventsMetaCard(data) {
                     `</div>`;
             }).join('')
             : '<div class="hint-text">Conecte a conta para analisar a equipe no meta PvP.</div>';
+
+        const savedAll = loadPvpFormations();
+        const savedAcc = savedAll[String(activeAccount)] || {};
+        const curSlotInfo = savedAcc[String(pvpSelectedSlot)] || null;
+        const slotOptions = [1, 2, 3, 4, 5].map((s) => {
+            const info = savedAcc[String(s)];
+            const label = info?.label ? `Slot ${s}: ${info.label}` : `Slot ${s} (vazio)`;
+            return `<option value="${s}"${Number(pvpSelectedSlot) === s ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+        }).join('');
+        const modeOptions = [
+            ['padrao', 'Modo: Padrão'],
+            ['ginasio', 'Modo: Ginásio ^0,45'],
+            ['guerra', 'Modo: Guerra ^0,20'],
+        ].map(([val, lbl]) => `<option value="${val}"${pvpSelectedMode === val ? ' selected' : ''}>${lbl}</option>`).join('');
+        const formBoxHtml = `
+          <div class="pvp-formations-box">
+            <b>Gerenciador das 5 Formações PvP</b>
+            <div class="pvp-form-row">
+              <select id="pvpModeSel" aria-label="Modo da formação PvP">${modeOptions}</select>
+              <button type="button" class="btn sm teal" data-intel-act="pvp-apply-mode">Aplicar Modo</button>
+            </div>
+            <div class="pvp-form-row">
+              <select id="pvpSlotSel" aria-label="Slot de formação PvP">${slotOptions}</select>
+              <button type="button" class="btn sm" data-intel-act="pvp-save-slot" ${team.length === 0 ? 'disabled' : ''}>Salvar no Slot</button>
+              <button type="button" class="btn sm primary" data-intel-act="pvp-load-slot" ${curSlotInfo ? '' : 'disabled'}>Carregar Slot</button>
+            </div>
+          </div>`;
+
+        const allChoices = getTeamChoices(data);
+        if (!treinoPickA && allChoices[0]) treinoPickA = String(allChoices[0].id);
+        if (!treinoPickB && (allChoices[1] || allChoices[0])) treinoPickB = String((allChoices[1] || allChoices[0]).id);
+        const mkTeamOpts = (picked) => allChoices.length
+            ? allChoices.map((p) => `<option value="${escapeHtml(p.id)}"${String(picked) === String(p.id) ? ' selected' : ''}>${escapeHtml(p.name)} (Nv ${fmtNum(p.level)})</option>`).join('')
+            : '<option value="">Sem equipe</option>';
+        const trRes = gi.lastTreinoResult || null;
+        const trResHtml = trRes
+            ? `<div class="pvp-treino-result">${escapeHtml(typeof trRes === 'string' ? trRes : (trRes.summary || trRes.message || `Vencedor: ${trRes.winnerName || trRes.winner || '?'}${trRes.turns ? ` (${trRes.turns} turnos)` : ''}`))}</div>`
+            : '';
+        const treinoHtml = `
+          <div class="pvp-treino-box">
+            <b>Simulador de Treino (treino.lutar)</b>
+            <div class="pvp-form-row">
+              <select id="treinoPokeA" aria-label="Pokémon A para treino">${mkTeamOpts(treinoPickA)}</select>
+              <select id="treinoPokeB" aria-label="Pokémon B para treino">${mkTeamOpts(treinoPickB)}</select>
+              <button type="button" class="btn sm primary" id="btnTreinoLutar" ${allChoices.length < 2 ? 'disabled' : ''}>Simular Treino</button>
+            </div>
+            ${trResHtml}
+          </div>`;
 
         const tb = gi.teamBuilder || null;
         const curObj = data?.config?.farmObjective || 'off';
@@ -4716,8 +5131,68 @@ function renderEventsMetaCard(data) {
                 slotsHtml +
                 `</div>`;
         }
-        setHtml(pvpPane, head + rows + tbHtml);
+        setHtml(pvpPane, head + rankBadgesHtml + rows + formBoxHtml + treinoHtml + tbHtml);
     }
+}
+
+function renderOwnListings(data) {
+    const gi = data?.gameIntel || {};
+    const ol = gi.ownListings || null;
+    const listEl = $('ownListingsList');
+    const badgeEl = $('ownListingsCount');
+    const cancelBatchBtn = $('btnMarketCancelUndercuts');
+    const wikiEl = $('wikiEconomyBox');
+
+    if (wikiEl) {
+        const wk = gi.wikiEconomy || null;
+        wikiEl.classList.toggle('hidden', !wk);
+        if (wk) {
+            const wkTxt = typeof wk === 'string'
+                ? wk
+                : (wk.summary || wk.resumo || JSON.stringify(wk));
+            setText(wikiEl, wkTxt);
+        }
+    }
+
+    if (!listEl) return;
+    if (listEl.contains(document.activeElement)) return;
+
+    const listings = Array.isArray(ol?.listings) ? ol.listings : [];
+    const undercutCount = Number(ol?.undercutCount ?? listings.filter((l) => l.undercut).length) || 0;
+    if (badgeEl) {
+        badgeEl.classList.toggle('has-undercut', undercutCount > 0);
+        setText(badgeEl, listings.length ? `${listings.length}${undercutCount > 0 ? ` (${undercutCount} undercut)` : ''}` : '');
+    }
+    if (cancelBatchBtn) cancelBatchBtn.disabled = undercutCount === 0;
+
+    const sig = `${activeAccount}|${listings.map((l) => `${l.id}:${l.price}:${l.floorPrice ?? ''}:${l.undercut ? 1 : 0}:${l.suggestedPrice ?? ''}`).join(';')}`;
+    if (sig === lastOwnListingsSig) return;
+    lastOwnListingsSig = sig;
+
+    if (!listings.length) {
+        setHtml(listEl, '<span class="hint-text">Nenhum anúncio próprio ativo encontrado.</span>');
+        return;
+    }
+
+    const html = listings.map((l) => {
+        const cur = l.currency === 'orb' ? 'orb' : 'gold';
+        const curLbl = cur === 'orb' ? 'gemas' : 'gold';
+        const net = l.currentNet ?? calcNetSale(l.price, cur, l.kind);
+        const floorTxt = l.floorPrice != null ? ` · Piso: ${fmtNum(l.floorPrice)} ${curLbl}` : '';
+        const defNewPrice = l.undercut && l.suggestedPrice ? l.suggestedPrice : l.price;
+        const title = l.name || `${l.kind === 'pokemon' ? 'Pokémon' : 'Item'} #${l.id ?? '?'}`;
+        return `<div class="own-listing-row${l.undercut ? ' undercut' : ''}">` +
+            `<div class="own-listing-main">` +
+            `<div class="own-listing-head"><b>${escapeHtml(title)}</b>${l.undercut ? `<span class="undercut-pill">Undercut (+${fmtNum(l.diff || 0)})</span>` : ''}</div>` +
+            `<div class="hint-text">${fmtNum(l.price)} ${curLbl} (líq. ${fmtNum(net)})${escapeHtml(floorTxt)}</div>` +
+            `</div>` +
+            `<div class="own-listing-acts">` +
+            `<input type="number" min="1" value="${Math.max(1, Number(defNewPrice) || 1)}" data-mk-price-for="${escapeHtml(l.id)}" aria-label="Novo preço" />` +
+            `<button type="button" class="btn sm primary" data-mk-edit="${escapeHtml(l.id)}">Reajustar</button>` +
+            `<button type="button" class="btn sm danger" data-mk-cancel="${escapeHtml(l.id)}">Cancelar</button>` +
+            `</div></div>`;
+    }).join('');
+    setHtml(listEl, html);
 }
 
 function renderAutomationExtras(data) {
@@ -4737,12 +5212,37 @@ function renderAutomationExtras(data) {
         if (applyBtn) applyBtn.disabled = count < 2;
     }
 
+    // Auto-Colecao state hydration
+    const acState = gi.autoColecaoState;
+    if (acState) {
+        const acRule = acState.regra && typeof acState.regra === 'object' ? acState.regra : acState;
+        const autoVenda = acState.autoVendaDepot ?? acState.autoVenda ?? acState.ativo;
+        const acIds = ['acLendario', 'acShiny', 'acAutoVendaDepot', 'acPotencia', 'acQualidade', 'acIvMin', 'acNotaMin'];
+        const isEditingAc = acIds.some((id) => document.activeElement === $(id)) || Boolean(autoColUserDirtyByAcc[activeAccount]);
+        const acSig = `${activeAccount}|${JSON.stringify(acRule)}|${Boolean(autoVenda)}`;
+        if (!isEditingAc && acSig !== lastAutoColSig) {
+            lastAutoColSig = acSig;
+            if ($('acLendario') && acRule.lendario != null) $('acLendario').checked = Boolean(acRule.lendario);
+            if ($('acShiny') && acRule.shiny != null) $('acShiny').checked = Boolean(acRule.shiny);
+            if ($('acAutoVendaDepot') && autoVenda != null) $('acAutoVendaDepot').checked = Boolean(autoVenda);
+            if ($('acPotencia') && acRule.potenciaMin != null) $('acPotencia').value = String(acRule.potenciaMin);
+            if ($('acQualidade') && acRule.qualidadeMin != null) $('acQualidade').value = String(acRule.qualidadeMin);
+            if ($('acIvMin') && acRule.ivMin != null) $('acIvMin').value = String(acRule.ivMin);
+            if ($('acNotaMin') && acRule.notaMin != null) $('acNotaMin').value = String(acRule.notaMin);
+        }
+    }
+
     // Bikes & Houses
     const bh = gi.bikesAndHouses;
     const bhEl = $('bikeHouseSummary');
     if (bhEl) {
         if (bh) {
-            const bestTxt = typeof bh.bestBikeUpgrade === 'object' ? (bh.bestBikeUpgrade?.name || `#${bh.bestBikeUpgrade?.id}`) : (bh.bestBikeUpgrade || 'nenhum upgrade');
+            const bestObj = bh.bestBikeUpgrade !== null && typeof bh.bestBikeUpgrade === 'object' ? bh.bestBikeUpgrade : null;
+            const bestInner = bestObj?.upgrade && typeof bestObj.upgrade === 'object' ? bestObj.upgrade : bestObj;
+            const bestId = bh.bestBikeId ?? bestInner?.id ?? bestInner?.bicicletaId ?? null;
+            const bestTxt = bh.bestBikeUpgrade !== null && (bh.bestBikeName || bestInner?.nome || bestInner?.name || bestId != null)
+                ? (bh.bestBikeName ?? bestInner?.nome ?? bestInner?.name ?? `#${bestId}`)
+                : 'nenhum upgrade';
             setText(bhEl, `Bike equipada: ${bh.equippedBikeId || '-'} · Melhor upgrade: ${bestTxt} · Bikes: ${bh.bikesCount || 0} (craft: ${bh.craftableBikes || 0}) · Casas: ${bh.housesUsed || 0}/${bh.maxHouses || 5} (total ${bh.housesTotal || 0}, craft: ${bh.craftableHouses || 0})`);
         } else {
             setText(bhEl, 'Conecte a conta para ver bicicletas e casas.');
@@ -4768,24 +5268,114 @@ function renderAutomationExtras(data) {
     const chosenPoke = team.find((p) => String(p.id) === String(chosenId)) || team[0];
     const asm = gi.activeStatsMeta;
     const chosenStat = statSel?.value || 'hp';
-    const curRefMap = (asm && String(asm.id) === String(chosenPoke?.id) && typeof asm.refino === 'object')
+    let curRefRaw = (asm && String(asm.id) === String(chosenPoke?.id) && asm.refino != null)
         ? asm.refino
         : (chosenPoke?.refino || {});
-    const curLvl = Number(curRefMap?.[chosenStat] ?? (typeof asm?.refino === 'number' ? asm.refino : 0)) || 0;
+    if (typeof curRefRaw === 'string') {
+        try { curRefRaw = JSON.parse(curRefRaw); } catch { curRefRaw = {}; }
+    }
+    const curRefMap = curRefRaw && typeof curRefRaw === 'object' ? curRefRaw : {};
+    const curLvl = Number(curRefMap[chosenStat] ?? (typeof curRefRaw === 'number' ? curRefRaw : 0)) || 0;
     const nextCost = calcCubicRefineCost(curLvl);
-    const sugTxt = asm?.nextRefine ? ` · Sugestão ótima: ${typeof asm.nextRefine === 'object' ? `${asm.nextRefine.stat} (${fmtNum(asm.nextRefine.cost || calcCubicRefineCost(asm.nextRefine.level || 0))} gold)` : asm.nextRefine}` : '';
+    const sugTxt = asm?.nextRefine
+        ? ` · Sugestão ótima: ${typeof asm.nextRefine === 'object' ? `${asm.nextRefine.stat} (${fmtNum(asm.nextRefine.cost || calcCubicRefineCost(asm.nextRefine.currentLevel ?? asm.nextRefine.level ?? 0))} gold)` : asm.nextRefine}`
+        : '';
     setText($('refinePreview'), chosenPoke
         ? `${chosenPoke.name} · ${chosenStat} Nv ${curLvl} -> ${curLvl + 1}: ${fmtNum(nextCost)} gold${sugTxt}`
         : 'Conecte a conta para calcular o próximo refino ótimo.');
+
+    renderOwnListings(data);
+}
+
+function renderProbGuideModal(data = snapshots[activeAccount]) {
+    const modal = $('probGuideModal');
+    if (!modal || modal.classList.contains('hidden')) return;
+    const gi = data?.gameIntel || {};
+    const pg = gi.probGuide || {};
+    const sr = gi.sessionRolls || {};
+    const t = data?.trainer || {};
+    const nick = t.nick && t.nick !== '-' ? t.nick : `Conta ${activeAccount}`;
+
+    setText($('probGuideMeta'), `${nick} · Hunt: ${t.huntName || '-'} (Nv ${fmtNum(pg.huntLevel || 0)}) · ${fmtNum(pg.killsPerHour || 0)} abates/h`);
+
+    const stepTxt = pg.isOutland ? 'Outland (sem Ovo Shiny)' : `${pg.step || 0}/${pg.maxSteps || 32}`;
+    const hEggTxt = pg.hoursPerEgg != null ? `${String(pg.hoursPerEgg).replace('.', ',')}h` : '-';
+    const hNextTxt = pg.hoursPerEggNextStep != null ? `${String(pg.hoursPerEggNextStep).replace('.', ',')}h (Degrau ${pg.nextStep} / Nv ${fmtNum(pg.nextLevel)})` : '-';
+    const tables = pg.tables || {};
+    const qTbl = tables.quality || { q180: { pct: 0.288, oneIn: 347 }, q170Plus: { pct: 0.962, oneIn: 104 }, q150Plus: { pct: 5.962, oneIn: 17 } };
+    const bossRows = Array.isArray(tables.boss) ? tables.boss : [];
+    const stone = tables.stoneDrops || { stage0Pct: 20, stage1Pct: 35, finalOrOutlandPct: 50 };
+
+    const exp = sr.expected || {};
+    const rp = sr.ratesPct || {};
+    const fmtP = (v, d = 2) => `${Number(v || 0).toFixed(d).replace('.', ',')}%`;
+
+    const html = `
+      <div class="pg-sec">
+        <h4>EV Personalizado (Ovo Shiny &amp; Eventos)</h4>
+        <div class="pg-grid">
+          <div class="pg-stat"><span>Degrau Ovo Shiny</span><b>${escapeHtml(stepTxt)}</b></div>
+          <div class="pg-stat"><span>Horas / Ovo Shiny (atual)</span><b>${escapeHtml(hEggTxt)}</b></div>
+          <div class="pg-stat"><span>Próx. Degrau</span><b>${escapeHtml(hNextTxt)}</b></div>
+          <div class="pg-stat"><span>Mult. Shiny ativo</span><b>${Number(pg.shinyMult || 1).toFixed(2).replace('.', ',')}x</b></div>
+          <div class="pg-stat"><span>Arena Mística (Beast)</span><b>${fmtP(pg.mysticBeastPct ?? 0.5, 1)} (base 0,5% / boost 1,0%)</b></div>
+          <div class="pg-stat"><span>Safari máx.</span><b>${Number(tables.safari?.maxMult ?? 3.04).toFixed(2).replace('.', ',')}x Shiny</b></div>
+        </div>
+      </div>
+
+      <div class="pg-sec">
+        <h4>Placar de Rolagens da Sessão (${fmtNum(sr.total || 0)} capturas)</h4>
+        <div class="pg-grid">
+          <div class="pg-stat"><span>Potência P4 / P5</span><b>${fmtNum(sr.p4 || 0)} P4 · ${fmtNum(sr.p5 || 0)} P5</b></div>
+          <div class="pg-stat"><span>Q &gt;= 1.50 (esp. 5,962%)</span><b>${fmtNum(sr.q150 || 0)} / ${String(exp.q150 ?? 0).replace('.', ',')} (${fmtP(rp.q150?.real, 2)})</b></div>
+          <div class="pg-stat"><span>Q &gt;= 1.70 (esp. 0,962%)</span><b>${fmtNum(sr.q170 || 0)} / ${String(exp.q170 ?? 0).replace('.', ',')} (${fmtP(rp.q170?.real, 2)})</b></div>
+          <div class="pg-stat"><span>Q &gt;= 1.80 (esp. 0,288%)</span><b>${fmtNum(sr.q180 || 0)} / ${String(exp.q180 ?? 0).replace('.', ',')} (${fmtP(rp.q180?.real, 2)})</b></div>
+        </div>
+      </div>
+
+      <div class="pg-sec">
+        <h4>Tabelas Oficiais de Probabilidade</h4>
+        <div class="pg-grid" style="margin-bottom:8px;">
+          <div class="pg-stat"><span>Qualidade 1.80 / 1.70+ / 1.50+</span><b>1/${qTbl.q180?.oneIn || 347} · 1/${qTbl.q170Plus?.oneIn || 104} · 1/${qTbl.q150Plus?.oneIn || 17}</b></div>
+          <div class="pg-stat"><span>Prey 5 Estrelas</span><b>1/${tables.prey?.oneIn || 200} (${fmtP(tables.prey?.star5Pct ?? 0.5, 1)}) · cat. ${tables.prey?.categoryPct ?? 25}%</b></div>
+          <div class="pg-stat"><span>Bike / Casa Lendária</span><b>1/${fmtNum(tables.craft?.legendaryOneIn || 20000)} (${fmtP(tables.craft?.legendaryPct ?? 0.005, 3)}) · Mítico ${fmtP(tables.craft?.mythicPct ?? 0.5, 1)}</b></div>
+          <div class="pg-stat"><span>Drop Pedras (Estágio 0 / 1 / Final)</span><b>${stone.stage0Pct}% / ${stone.stage1Pct}% / ${stone.finalOrOutlandPct}%</b></div>
+        </div>
+        ${bossRows.length ? `<table class="pg-table"><thead><tr><th>Região</th><th>Par</th><th>TM</th><th>Mega</th><th>Tickets</th></tr></thead><tbody>` +
+            bossRows.map((b) => `<tr><td>${escapeHtml(String(b.region || '').toUpperCase())}</td><td>${fmtNum(b.par)}x</td><td>${fmtP((b.tm || 0) * 100, 1)}</td><td>${fmtP((b.mega || 0) * 100, 1)}</td><td>${fmtP((b.tickets || 0) * 100, 1)}</td></tr>`).join('') +
+            `</tbody></table>` : ''}
+      </div>`;
+    setHtml($('probGuideBody'), html);
+}
+
+function openProbGuideModal() {
+    const modal = $('probGuideModal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    renderProbGuideModal(snapshots[activeAccount]);
+}
+
+function closeProbGuideModal() {
+    $('probGuideModal')?.classList.add('hidden');
 }
 
 function renderGameIntel(data) {
     if (!data) return;
+    const csvExp = data?.gameIntel?.lastCsvExport;
+    if (csvExp && (csvExp.csv || csvExp.content)) {
+        const csvSig = `${activeAccount}|${csvExp.ts || csvExp.at || ''}|${csvExp.tipo || csvExp.type || ''}|${String(csvExp.csv || csvExp.content).length}`;
+        if (csvSig !== lastCsvDownloadSig) {
+            lastCsvDownloadSig = csvSig;
+            const fname = csvExp.filename || `nexo-${csvExp.tipo || csvExp.type || 'pokemon'}-conta${activeAccount}.csv`;
+            triggerCsvDownload(fname, String(csvExp.csv || csvExp.content));
+        }
+    }
     renderTopIntelBar(data);
     renderPokeAndHuntIntel(data);
     renderEvolutionDexReady(data);
     renderEventsMetaCard(data);
     renderAutomationExtras(data);
+    renderProbGuideModal(data);
 }
 
 function formatBytesMb(bytes) {
@@ -5714,6 +6304,25 @@ function wireEvents() {
             void runGameAction('craft-shiny-egg', {}, 'Fabricar Ovo Shiny');
         }
     });
+    $('incubatorBox')?.addEventListener('click', (ev) => {
+        if (ev.target.closest('button[data-intel-act="incubator-run"], #btnIncubatorRun')) {
+            void runGameAction('incubator-run', {}, 'Chocadeira');
+        }
+    });
+    $('huntRankingList')?.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('button[data-rank-hunt]');
+        if (!btn) return;
+        const slug = btn.dataset.rankHunt;
+        if (slug) void runGameAction('set-hunt', { slug }, `Trocar hunt (${slug})`);
+    });
+    $('btnProbGuide')?.addEventListener('click', () => openProbGuideModal());
+    $('btnCloseProbGuide')?.addEventListener('click', () => closeProbGuideModal());
+    $('probGuideModal')?.addEventListener('click', (ev) => {
+        if (ev.target === $('probGuideModal')) closeProbGuideModal();
+    });
+    document.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Escape') closeProbGuideModal();
+    });
     $('evolutionDexBox')?.addEventListener('click', (ev) => {
         const btn = ev.target.closest('button[data-evo-poke]');
         if (!btn) return;
@@ -5743,6 +6352,8 @@ function wireEvents() {
         if (actBtn) {
             const act = actBtn.dataset.intelAct;
             if (act === 'raid-enroll') void runGameAction('raid-enroll', {}, 'Inscrição Raid');
+            else if (act === 'raid-team-auto') void runGameAction('raid-team-auto', {}, 'Equipe Raid');
+            else if (act === 'guild-boss-raid') void runGameAction('guild-boss-raid', {}, 'Raid da Guilda');
             else if (act === 'showdown-enroll') void runGameAction('showdown-enroll', {}, 'Inscrição Showdown');
             else if (act === 'camp-enroll') void runGameAction('camp-enroll', {}, 'Inscrição Campeonato');
             else if (act === 'mistico-enter') void runGameAction('mistico-enter', {}, 'Místico');
@@ -5755,9 +6366,61 @@ function wireEvents() {
             } else if (act === 'pvp-save-formation') {
                 const pvp = snapshots[activeAccount]?.gameIntel?.pvpMeta || {};
                 const pokemonIds = (pvp.team || []).map((m) => m.id).filter(Boolean);
-                const casas = Array.isArray(pvp.casas) ? pvp.casas : [];
+                const casas = pvp.casas && typeof pvp.casas === 'object' && !Array.isArray(pvp.casas) ? pvp.casas : {};
                 void runGameAction('pvp-save-formation', { pokemonIds, casas }, 'Formação PvP');
+            } else if (act === 'pvp-apply-mode') {
+                const mode = $('pvpModeSel')?.value || pvpSelectedMode || 'padrao';
+                const pvp = snapshots[activeAccount]?.gameIntel?.pvpMeta || {};
+                const mf = pvp.modeFormations?.[mode];
+                if (mf && Array.isArray(mf.pokemonIds) && mf.pokemonIds.length > 0) {
+                    void runGameAction('pvp-save-formation', { pokemonIds: mf.pokemonIds, casas: mf.casas || {}, mode }, `Formação PvP (${mode})`);
+                } else {
+                    showToast({ kind: 'warn', title: 'Formação PvP', text: `Formação para o modo ${mode} indisponível agora.` });
+                }
+            } else if (act === 'pvp-save-slot') {
+                const slot = Number($('pvpSlotSel')?.value || pvpSelectedSlot || 1);
+                const pvp = snapshots[activeAccount]?.gameIntel?.pvpMeta || {};
+                const mode = $('pvpModeSel')?.value || pvpSelectedMode || 'padrao';
+                const mf = pvp.modeFormations?.[mode];
+                const pokemonIds = (mf?.pokemonIds?.length ? mf.pokemonIds : (pvp.team || []).map((m) => m.id)).filter(Boolean);
+                const casas = (mf?.casas && typeof mf.casas === 'object' && !Array.isArray(mf.casas))
+                    ? mf.casas
+                    : (pvp.casas && typeof pvp.casas === 'object' && !Array.isArray(pvp.casas) ? pvp.casas : {});
+                if (!pokemonIds.length) return;
+                const all = loadPvpFormations();
+                all[String(activeAccount)] = all[String(activeAccount)] || {};
+                all[String(activeAccount)][String(slot)] = {
+                    pokemonIds,
+                    casas,
+                    mode,
+                    label: `${mode} (${pokemonIds.length})`,
+                    savedAt: Date.now(),
+                };
+                savePvpFormations(all);
+                showToast({ kind: 'ok', title: 'Formações PvP', text: `Formação salva no Slot ${slot}.`, account: activeAccount });
+                if (snapshots[activeAccount]) renderEventsMetaCard(snapshots[activeAccount]);
+            } else if (act === 'pvp-load-slot') {
+                const slot = Number($('pvpSlotSel')?.value || pvpSelectedSlot || 1);
+                const all = loadPvpFormations();
+                const saved = all[String(activeAccount)]?.[String(slot)];
+                if (!saved || !Array.isArray(saved.pokemonIds) || !saved.pokemonIds.length) {
+                    showToast({ kind: 'warn', title: 'Formações PvP', text: `Slot ${slot} está vazio.` });
+                    return;
+                }
+                void runGameAction('pvp-save-formation', { pokemonIds: saved.pokemonIds, casas: saved.casas || {} }, `Carregar Slot ${slot}`);
             }
+            return;
+        }
+        if (ev.target.closest('#btnTreinoLutar')) {
+            const pA = $('treinoPokeA')?.value || treinoPickA;
+            const pB = $('treinoPokeB')?.value || treinoPickB;
+            if (!pA || !pB) {
+                showToast({ kind: 'warn', title: 'Simulador de Treino', text: 'Selecione dois Pokémon da equipe.' });
+                return;
+            }
+            const pokemonAId = Number.isFinite(Number(pA)) ? Number(pA) : pA;
+            const pokemonBId = Number.isFinite(Number(pB)) ? Number(pB) : pB;
+            void runGameAction('treino-lutar', { a: pokemonAId, b: pokemonBId, pokemonAId, pokemonBId }, 'Simular Treino');
             return;
         }
         const bossEnter = ev.target.closest('button[data-boss-enter]');
@@ -5786,7 +6449,12 @@ function wireEvents() {
         }
     });
     $('eventsMetaCard')?.addEventListener('change', (ev) => {
-        const chk = ev.target.closest('input[data-boss-auto]');
+        const t = ev.target;
+        if (t?.id === 'pvpModeSel') { pvpSelectedMode = t.value || 'padrao'; return; }
+        if (t?.id === 'pvpSlotSel') { pvpSelectedSlot = Number(t.value) || 1; return; }
+        if (t?.id === 'treinoPokeA') { treinoPickA = t.value || ''; return; }
+        if (t?.id === 'treinoPokeB') { treinoPickB = t.value || ''; return; }
+        const chk = t?.closest?.('input[data-boss-auto]');
         if (!chk) return;
         void runGameAction('boss-auto', { ativo: chk.checked, key: chk.dataset.bossAuto }, 'Boss Auto');
     });
@@ -5815,9 +6483,13 @@ function wireEvents() {
             showToast({ kind: 'warn', title: 'Prey por Região', text: 'Escolha pelo menos 2 regiões.' });
             return;
         }
-        void runGameAction('prey-regions', { cartela: preyCartelaActive, regioes }, `Prey Cartela ${preyCartelaActive}`);
+        void runGameAction('prey-regions', { cartela: preyCartelaActive - 1, regioes }, `Prey Cartela ${preyCartelaActive}`);
     });
 
+    for (const id of ['acLendario', 'acShiny', 'acAutoVendaDepot', 'acPotencia', 'acQualidade', 'acIvMin', 'acNotaMin']) {
+        $(id)?.addEventListener('change', () => { autoColUserDirtyByAcc[activeAccount] = true; });
+        $(id)?.addEventListener('input', () => { autoColUserDirtyByAcc[activeAccount] = true; });
+    }
     const readAutoColRule = () => ({
         lendario: Boolean($('acLendario')?.checked),
         shiny: Boolean($('acShiny')?.checked),
@@ -5827,12 +6499,14 @@ function wireEvents() {
         notaMin: Math.max(0, Number($('acNotaMin')?.value || 0)),
     });
     $('btnApplyAutoCol')?.addEventListener('click', async () => {
+        autoColUserDirtyByAcc[activeAccount] = false;
         const regra = readAutoColRule();
         const ativo = Boolean($('acAutoVendaDepot')?.checked);
         await runGameAction('auto-colecao', { regra }, 'Auto-Coleção');
         await sendAction('auto-venda-depot', { ativo });
     });
     $('btnApplyAutoColAll')?.addEventListener('click', async () => {
+        for (const a of ACCOUNTS) autoColUserDirtyByAcc[a] = false;
         const regra = readAutoColRule();
         const ativo = Boolean($('acAutoVendaDepot')?.checked);
         const results = await Promise.all(ACCOUNTS.map(async (acc) => {
@@ -5853,12 +6527,35 @@ function wireEvents() {
         const monoTypeOnly = Boolean($('chkOferendaMono')?.checked);
         void runGameAction('oferenda-run', { monoTypeOnly }, 'Oferenda 5/5');
     });
+    $('btnOferendaAll')?.addEventListener('click', () => {
+        const monoTypeOnly = Boolean($('chkOferendaMono')?.checked);
+        void runGameAction('oferenda-all', { monoTypeOnly }, 'Oferenda Tudo');
+    });
+    $('btnOferendaProtected')?.addEventListener('click', () => {
+        void runGameAction('oferenda-protected', {}, 'Oferenda Protegidos');
+    });
+    $('btnEscapeRope')?.addEventListener('click', () => {
+        const cat = snapshots[activeAccount]?.sniper?.marketItems || [];
+        const rope = cat.find((it) => /escape\s*rope|corda\s*de\s*fuga/i.test(String(it?.name || '')));
+        void runGameAction('use-item', rope?.id ? { itemId: Number(rope.id), name: rope.name } : { name: 'Escape Rope' }, 'Escape Rope');
+    });
+    $('btnBagDiscard')?.addEventListener('click', () => {
+        const rawId = String($('bagDiscardId')?.value || '').trim();
+        const qtd = Math.max(1, Math.floor(Number($('bagDiscardQty')?.value || 1) || 1));
+        if (!rawId) {
+            showToast({ kind: 'warn', title: 'Descartar Item', text: 'Informe o ID do item.' });
+            return;
+        }
+        const itemId = Number.isFinite(Number(rawId)) ? Number(rawId) : rawId;
+        void runGameAction('bag-discard', { tipo: 'item', id: itemId, itemId, qtd }, `Descartar Item (${rawId} x${qtd})`);
+    });
     $('btnBikeEquipBest')?.addEventListener('click', () => {
         const bh = snapshots[activeAccount]?.gameIntel?.bikesAndHouses;
-        const bicicletaId = typeof bh?.bestBikeUpgrade === 'object'
-            ? (bh.bestBikeUpgrade?.id ?? bh.bestBikeUpgrade?.bicicletaId)
-            : (bh?.bestBikeUpgrade ?? bh?.equippedBikeId);
-        if (!bicicletaId) {
+        const bestInner = bh?.bestBikeUpgrade !== null && typeof bh?.bestBikeUpgrade === 'object'
+            ? (bh.bestBikeUpgrade.upgrade || bh.bestBikeUpgrade)
+            : null;
+        const bicicletaId = bh?.bestBikeId ?? bestInner?.id ?? bestInner?.bicicletaId ?? null;
+        if (bicicletaId == null) {
             showToast({ kind: 'warn', title: 'Bicicletas', text: 'Nenhuma bicicleta melhor disponível para equipar.' });
             return;
         }
@@ -5869,7 +6566,11 @@ function wireEvents() {
     $('btnHouseFill')?.addEventListener('click', () => {
         const bh = snapshots[activeAccount]?.gameIntel?.bikesAndHouses;
         const casaId = bh?.bestHouseId ?? bh?.nextHouseId ?? null;
-        void runGameAction('house-use', { ...(casaId != null ? { casaId } : {}), usar: true }, 'Preencher Casas');
+        if (casaId == null || !Number.isFinite(Number(casaId)) || Number(casaId) <= 0) {
+            showToast({ kind: 'warn', title: 'Casas', text: 'Nenhuma casa disponível para preencher.' });
+            return;
+        }
+        void runGameAction('house-use', { casaId: Number(casaId), usar: true }, 'Preencher Casas');
     });
     $('btnHouseCraft')?.addEventListener('click', () => void runGameAction('house-craft', {}, 'Craftar Casa'));
 
@@ -5886,6 +6587,25 @@ function wireEvents() {
         const pokemonId = Number.isFinite(Number(pRaw)) ? Number(pRaw) : pRaw;
         void runGameAction('refine-pokemon', { pokemonId, stat }, `Refino (${stat})`);
     });
+    $('btnPokemonMega')?.addEventListener('click', () => {
+        const pRaw = $('refinePokeSel')?.value;
+        if (!pRaw) {
+            showToast({ kind: 'warn', title: 'Ativar Mega', text: 'Selecione um Pokémon.' });
+            return;
+        }
+        const pokemonId = Number.isFinite(Number(pRaw)) ? Number(pRaw) : pRaw;
+        void runGameAction('pokemon-mega', { pokemonId }, 'Ativar Mega');
+    });
+    $('btnApplyTm')?.addEventListener('click', () => {
+        const pRaw = $('refinePokeSel')?.value;
+        const itemId = Math.floor(Number($('tmItemIdInput')?.value || 0));
+        if (!pRaw || !Number.isFinite(itemId) || itemId < 1) {
+            showToast({ kind: 'warn', title: 'Aplicar TM', text: 'Selecione um Pokémon e informe o ID do TM.' });
+            return;
+        }
+        const pokemonId = Number.isFinite(Number(pRaw)) ? Number(pRaw) : pRaw;
+        void runGameAction('tm-apply', { pokemonId, itemId }, `Aplicar TM #${itemId}`);
+    });
     $('btnReduceLevel')?.addEventListener('click', () => {
         const pRaw = $('refinePokeSel')?.value;
         const nivelAlvo = Math.floor(Number($('reduceLvlInput')?.value || 0));
@@ -5898,7 +6618,56 @@ function wireEvents() {
     });
     $('btnCsvExport')?.addEventListener('click', () => {
         const tipo = $('csvExportType')?.value || 'drops';
-        void runGameAction('csv-export', { tipo }, `Exportar CSV (${tipo})`);
+        if (tipo === 'pokemon' || tipo === 'csv') {
+            void runGameAction('csv-export', { tipo: 'pokemon' }, 'Exportar CSV (Servidor)');
+            return;
+        }
+        const snap = snapshots[activeAccount];
+        const csv = buildSnapshotCsv(tipo, snap, activeAccount);
+        if (!csv) {
+            showToast({ kind: 'warn', title: 'Exportar CSV', text: 'Sem dados disponíveis para exportar.' });
+            return;
+        }
+        const stamp = new Date().toISOString().slice(0, 10);
+        triggerCsvDownload(`nexo-${tipo}-conta${activeAccount}-${stamp}.csv`, csv);
+        showToast({ kind: 'ok', title: 'CSV Exportado', text: `Arquivo nexo-${tipo}-conta${activeAccount}-${stamp}.csv baixado.`, account: activeAccount });
+    });
+    $('ownListingsAcc')?.addEventListener('click', (ev) => {
+        const editBtn = ev.target.closest('button[data-mk-edit]');
+        if (editBtn) {
+            const idRaw = editBtn.dataset.mkEdit;
+            const id = Number.isFinite(Number(idRaw)) ? Number(idRaw) : idRaw;
+            const inp = document.querySelector(`input[data-mk-price-for="${CSS.escape(String(idRaw))}"]`);
+            const price = Math.floor(Number(inp?.value || 0));
+            if (!Number.isFinite(price) || price < 1) {
+                showToast({ kind: 'warn', title: 'Reajustar Anúncio', text: 'Informe um preço válido (>= 1).' });
+                return;
+            }
+            void runGameAction('market-edit', { id, preco: price, price }, `Reajustar anúncio #${id}`);
+            return;
+        }
+        const cancelBtn = ev.target.closest('button[data-mk-cancel]');
+        if (cancelBtn) {
+            const idRaw = cancelBtn.dataset.mkCancel;
+            const id = Number.isFinite(Number(idRaw)) ? Number(idRaw) : idRaw;
+            void runGameAction('market-cancel', { id }, `Cancelar anúncio #${id}`);
+            return;
+        }
+        if (ev.target.closest('#btnMarketCancelUndercuts')) {
+            const ol = snapshots[activeAccount]?.gameIntel?.ownListings;
+            const undercuts = (ol?.undercutListings || (ol?.listings || []).filter((l) => l.undercut)).map((l) => l.id).filter((v) => v != null);
+            if (!undercuts.length) return;
+            void runGameAction('market-cancel-batch', { ids: undercuts }, `Cancelar ${undercuts.length} undercuts`);
+            return;
+        }
+        if (ev.target.closest('#btnMarketQuoteBatch')) {
+            const ol = snapshots[activeAccount]?.gameIntel?.ownListings;
+            void runGameAction('market-quote-batch', { listings: ol?.listings || [] }, 'Cotar Lote');
+            return;
+        }
+        if (ev.target.closest('#btnWikiEconomy')) {
+            void runGameAction('wiki-economy', {}, 'Wiki Economia');
+        }
     });
     $('btnOpenBox')?.addEventListener('click', () => {
         const id = Math.floor(Number($('openBoxId')?.value || 0));

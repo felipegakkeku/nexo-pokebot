@@ -759,7 +759,7 @@
       fill.style.background = pct > 55 ? '#22c55e' : pct > 25 ? '#f59e0b' : '#ef4444';
       document.getElementById('huntLine').textContent = `Hunt: ${t.huntName || '-'} ${t.noCentro ? '(Centro Pokemon)' : ''} · Eco: ${t.economyActive ? 'ON' : 'OFF'}`;
       document.getElementById('huntGuideLine').textContent = data.config?.huntGuideMode && data.config.huntGuideMode !== 'off'
-        ? data.huntGuide?.note ?? 'Use Jogar com o bot em um perfil com a extensão /hunt.'
+        ? data.huntGuide?.note ?? 'Aguardando ranking /hunt nativo.'
         : '';
 
       const spDex = Number(pk?.spriteDex) || (() => {

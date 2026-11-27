@@ -27,11 +27,7 @@ const DEFENSIVE_PASSIVE_IDS = new Set([
     'iron_defense',
     'rocky_helmet',
     'recover',
-    'blindagem',
-    'rocha_solida',
-    'casco_telurico',
-    'mare_constante',
-    'adaptavel',
+    'intimidate',
 ]);
 
 function normalizeSpeciesMap(speciesById) {
@@ -195,6 +191,9 @@ function isDefensivePassive(passive) {
         (Number(passive.reducaoDanoPct) || 0) > 0
         || (Number(passive.bonusDefPct) || 0) > 0
         || (Number(passive.regenHpPct) || 0) > 0
+        || (Number(passive.curaHpPct) || 0) > 0
+        || (Number(passive.reducaoDanoInimigoPct) || 0) > 0
+        || (Number(passive.reflexoPct) || 0) > 0
         || (Number(passive.reducaoSuperEfetivoPct) || 0) > 0
     );
 }

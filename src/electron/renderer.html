@@ -269,6 +269,7 @@
                 <button type="button" class="btn sm icon-btn" data-split-dock="right" title="Sidebar à direita">Dir</button>
                 <button type="button" class="btn sm icon-btn" data-split-dock="hidden" title="Remover sidebar no modo Painel + Jogo">×</button>
               </div>
+              <button type="button" class="btn sm" id="btnProbGuide" title="Guia de probabilidades da conta e placar de rolagens">Probabilidades</button>
               <button type="button" class="btn sm" id="btnOpenWeb">Painel Web</button>
             </div>
           </div>
@@ -315,6 +316,10 @@
                   <div class="hp-track"><div class="hp-fill" id="pokeHpFill" style="width:0%"></div></div>
                   <div class="hunt-note" id="huntLine">Hunt atual: -</div>
                   <div class="hunt-guide-badge" id="huntGuideLine"></div>
+                  <details class="hunt-rank-acc hidden" id="huntRankAcc">
+                    <summary>Ranking /hunt nativo</summary>
+                    <div class="hunt-rank-list" id="huntRankingList"></div>
+                  </details>
                 </div>
               </div>
               <div class="active-stats-row hidden" id="activeStatsRow">
@@ -338,6 +343,7 @@
                 </div>
                 <div class="bestiary-box hidden" id="bestiaryBox"></div>
               </div>
+              <div class="incubator-box hidden" id="incubatorBox"></div>
             </div>
 
             <div class="card" data-card="buffs" id="ovBuffsCard">
@@ -401,6 +407,7 @@
                 <div class="eff-chip"><span>Bolas / captura</span><b id="eBallCap">-</b><small id="eBallCapSub">0% acerto</small></div>
                 <div class="eff-chip"><span>Sobrevivência</span><b id="eSurv">0 poções · 0 revives</b><small id="eSurvSub">0 mortes</small></div>
               </div>
+              <div class="session-rolls-strip hidden" id="sessionRollsStrip"></div>
               <div class="records-strip hidden" id="recordsStrip"></div>
             </div>
 
@@ -513,7 +520,12 @@
                 <label class="toggle-item"><input type="checkbox" id="cRestock" /> Repor itens no mercado</label>
                 <label class="toggle-item"><input type="checkbox" id="cPass" /> Resgatar o passe diário</label>
                 <label class="toggle-item"><input type="checkbox" id="cPrey" /> Rolar o Prey diário</label>
-                <label class="toggle-item"><input type="checkbox" id="cIncubator" /> Chocar ovos da mochila automaticamente</label>
+                <label class="toggle-item with-sub"><input type="checkbox" id="cIncubator" /><span class="toggle-copy"><span>Auto-Chocadeira (chocar ovos da mochila automaticamente)</span><span class="toggle-sub">Coloca ovos nos slots livres (prioridade: Shiny &gt; P4 &gt; P3 &gt; P2).</span></span></label>
+                <label class="toggle-item"><input type="checkbox" id="cAutoSeasonalSwap" /> Auto-troca para Pokémon do Dia Sazonal (Mapa)</label>
+                <label class="toggle-item"><input type="checkbox" id="cAutoTeamManage" /> Auto-gestão da equipe (teto Nv+5 exceto Starter / HP baixo / fraqueza)</label>
+                <label class="toggle-item"><input type="checkbox" id="cRevivePotionCombo" checked /> Usar Poção logo após Revive normal (205 = 10% HP)</label>
+                <label class="toggle-item"><input type="checkbox" id="cAutoPokedexEvolve" /> Auto-evoluir espécies pendentes na Pokédex</label>
+                <label class="toggle-item"><input type="checkbox" id="cTopCatchPreferEasyStage" checked /> Priorizar estágios iniciais fáceis no Top Catch</label>
                 <label class="toggle-item with-sub"><input type="checkbox" id="cPvpQueue" /><span class="toggle-copy"><span>Ficar na fila do PvP ranqueado</span><span class="toggle-sub">Entra na fila e volta depois de cada partida, respeitando a espera do jogo. Funciona sem VIP; o resultado de cada partida vai para o registro.</span></span></label>
                 <label class="toggle-item with-sub"><input type="checkbox" id="cBallEconomy" /><span class="toggle-copy"><span>Economizar Pokébolas</span><span class="toggle-sub warn">Pode deixar escapar shiny: o shiny é sorteado no arremesso e bola mais fraca segura menos. Desligado, todo Pokémon de nível alto recebe Ultra Ball.</span></span></label>
                 <div class="cfg-group-title">Otimização e Economia</div>
@@ -524,8 +536,18 @@
                 <label class="toggle-item"><input type="checkbox" id="cAutoExtendListings" /> Renovar anúncios do mercado antes de expirar</label>
                 <div class="cfg-group-title">Eventos automáticos</div>
                 <label class="toggle-item"><input type="checkbox" id="cAutoRaidEnroll" /> Inscrever automaticamente na Raid (segunda 16h)</label>
+                <label class="toggle-item"><input type="checkbox" id="cAutoRaidTeam" /> Enviar melhor equipe na Raid automaticamente (segunda)</label>
                 <label class="toggle-item"><input type="checkbox" id="cAutoShowdownEnroll" /> Inscrever automaticamente no Showdown (quarta 20h)</label>
                 <label class="toggle-item"><input type="checkbox" id="cAutoMisticoEnter" /> Entrar no Místico automaticamente quando disponível</label>
+                <div class="toggle-item toggle-with-select">
+                  <label class="toggle-inline-chk"><input type="checkbox" id="cAutoBossEnabled" /> <span>Auto-Boss na rotação das 18h BRT</span></label>
+                  <select id="cAutoBossPrize" aria-label="Prêmio do Auto-Boss">
+                    <option value="mega">Fragmento Mega</option>
+                    <option value="tm">TM</option>
+                    <option value="tickets">Tickets</option>
+                  </select>
+                </div>
+                <label class="toggle-item"><input type="checkbox" id="cAutoSafariSmart" /> Auto-Safari inteligente (6x tickets com Lure + Twitch + Kick)</label>
                 <div class="cfg-group-title">Lives</div>
                 <label class="toggle-item"><input type="checkbox" id="cLives" /> Coletar recompensas de lives</label>
                 <label class="toggle-item with-sub"><input type="checkbox" id="cLiveStreak" /><span class="toggle-copy"><span>Contar a sequência de lives (Twitch)</span><span class="toggle-sub">Assiste os primeiros 15 min de cada live no player real da Twitch, invisível, em 160p e sem som</span></span></label>
@@ -712,9 +734,9 @@
                   <div class="field"><label for="acPotencia">Potência mín.</label>
                     <select id="acPotencia">
                       <option value="0">Qualquer</option>
-                      <option value="2">P2 (+25%)</option>
-                      <option value="3">P3 (+50%)</option>
-                      <option value="4">P4 (+75%)</option>
+                      <option value="2">P2 (+5%)</option>
+                      <option value="3">P3 (+10%)</option>
+                      <option value="4">P4 (+25%)</option>
                       <option value="5">P5 (+100%)</option>
                     </select>
                   </div>
@@ -785,15 +807,39 @@
                         <option value="def">Defesa</option>
                         <option value="spAtk">Sp. Atk</option>
                         <option value="spDef">Sp. Def</option>
-                        <option value="speed">Speed</option>
                       </select>
                     </div>
                   </div>
                   <div class="util-act-row">
                     <button type="button" class="btn sm primary" id="btnRefineNow">Refinar</button>
+                    <button type="button" class="btn sm teal" id="btnPokemonMega">Ativar Mega</button>
                     <div class="util-inline-grp">
                       <input type="number" id="reduceLvlInput" min="1" max="10000" placeholder="Nv alvo" aria-label="Nível alvo para reduzir" />
                       <button type="button" class="btn sm" id="btnReduceLevel">Reduzir nível</button>
+                    </div>
+                  </div>
+                  <div class="util-act-row" style="margin-top:6px;">
+                    <div class="util-inline-grp">
+                      <input type="number" id="tmItemIdInput" min="1" placeholder="ID do TM" aria-label="ID do item TM" />
+                      <button type="button" class="btn sm" id="btnApplyTm">Aplicar TM</button>
+                    </div>
+                  </div>
+                </div>
+              </details>
+
+              <details class="util-acc" id="emergencyCleanupAcc">
+                <summary>Limpeza Rápida de Emergência</summary>
+                <div class="util-acc-body">
+                  <div class="util-btn-row">
+                    <button type="button" class="btn sm teal" id="btnOferendaAll">Oferenda Tudo</button>
+                    <button type="button" class="btn sm" id="btnOferendaProtected">Oferenda Protegidos</button>
+                    <button type="button" class="btn sm" id="btnEscapeRope">Escape Rope</button>
+                  </div>
+                  <div class="util-act-row" style="margin-top:6px;">
+                    <div class="util-inline-grp">
+                      <input type="text" id="bagDiscardId" placeholder="ID do item" aria-label="ID do item para descartar" />
+                      <input type="number" id="bagDiscardQty" min="1" value="1" placeholder="Qtd" aria-label="Quantidade para descartar" />
+                      <button type="button" class="btn sm danger" id="btnBagDiscard">Descartar Item</button>
                     </div>
                   </div>
                 </div>
@@ -809,6 +855,7 @@
                         <option value="session">CSV: Sessão</option>
                         <option value="shinies">CSV: Shinies</option>
                         <option value="market">CSV: Mercado</option>
+                        <option value="pokemon">CSV: Pokémon (Servidor)</option>
                       </select>
                       <button type="button" class="btn sm" id="btnCsvExport">Exportar CSV</button>
                     </div>
@@ -918,6 +965,18 @@
               </div>
               <ul class="sniper-rules" id="sniperRulesList"></ul>
               <ul class="sniper-hits" id="sniperHitsList"></ul>
+              <details class="util-acc" id="ownListingsAcc" style="margin-top:8px;">
+                <summary>Meus Anúncios &amp; Wiki Economia <span class="own-listings-badge" id="ownListingsCount"></span></summary>
+                <div class="util-acc-body">
+                  <div class="util-btn-row">
+                    <button type="button" class="btn sm danger" id="btnMarketCancelUndercuts" disabled>Cancelar Undercuts</button>
+                    <button type="button" class="btn sm" id="btnMarketQuoteBatch">Cotar Lote</button>
+                    <button type="button" class="btn sm teal" id="btnWikiEconomy">Wiki Economia</button>
+                  </div>
+                  <div class="wiki-economy-box hidden" id="wikiEconomyBox"></div>
+                  <div class="own-listings-list" id="ownListingsList"><span class="hint-text">Conecte a conta para ver seus anúncios no mercado.</span></div>
+                </div>
+              </details>
             </div>
 
             <div class="card" id="advisorCard" data-card="advisor">
@@ -1223,9 +1282,9 @@
             <div class="card live-overview" data-card="liveStats">
               <h3>Recompensas da conta</h3>
               <div class="live-metrics">
-                <div><strong id="liveMinutes">—</strong><span>Minutos assistidos</span></div>
-                <div><strong id="liveChests">—</strong><span>Baús +50</span></div>
-                <div><strong id="liveRedeemed">—</strong><span>Resgates</span></div>
+                <div><strong id="liveMinutes">-</strong><span>Minutos assistidos</span></div>
+                <div><strong id="liveChests">-</strong><span>Baús +50</span></div>
+                <div><strong id="liveRedeemed">-</strong><span>Resgates</span></div>
               </div>
               <div class="hunt-note" id="livesHead"></div>
               <div class="bview-row"><div class="bview-seg" role="radiogroup" aria-label="Como mostrar os buffs"><button type="button" data-bview-pick="flat" role="radio">Flat</button><button type="button" data-bview-pick="detalhe" role="radio">Detalhado</button></div></div>
@@ -1453,6 +1512,16 @@
       </div>
       <div class="shiny-modal-meta" id="shinyInspectMeta"></div>
       <div class="shiny-modal-body" id="shinyInspectBody"></div>
+    </div>
+  </div>
+  <div class="shiny-modal-backdrop hidden" id="probGuideModal" role="dialog" aria-modal="true" aria-labelledby="probGuideTitle">
+    <div class="shiny-modal-card prob-guide-card">
+      <div class="shiny-modal-head">
+        <span class="shiny-modal-title" id="probGuideTitle">Guia &amp; Probabilidades</span>
+        <button type="button" class="icon-btn sm" id="btnCloseProbGuide" aria-label="Fechar guia">×</button>
+      </div>
+      <div class="shiny-modal-meta" id="probGuideMeta"></div>
+      <div class="prob-guide-body" id="probGuideBody"></div>
     </div>
   </div>
   <div class="toast-stack" id="toastStack" aria-live="polite"></div>

@@ -44,6 +44,8 @@ import {
     getHuntMissingSpecies,
     computeCollectionSummary,
     selectObjectiveHunt,
+    INCUBATOR_EGGS,
+    computeIncubatorStatus,
 } from './protocol-engine.mjs';
 import {
     getSeasonalTypeWindow,
@@ -80,6 +82,16 @@ import {
     BLACK_FRIDAY,
     BICICLETA_VELOCIDADE,
     CASA_XP_SHARE,
+    evaluateLureFractionRisk,
+    recommendBestGymForTeam,
+    computePvpRankIntel,
+    computeLootLeverageInfo,
+    computeGuildRaidIntel,
+    computeAccountProbGuide,
+    summarizeSessionRolls,
+    selectBestRaidTeam,
+    buildPvpFormationForMode,
+    analyzeOwnListingsUndercut,
 } from './pvp-meta.mjs';
 import { buildRecommendedPvpTeam } from './team-builder.mjs';
 import {
@@ -201,6 +213,15 @@ const EDITABLE_CONFIG_KEYS = new Set([
     'autoMisticoEnter',
     'autoExtendListings',
     'autoOptimizeGear',
+    'autoSeasonalSwap',
+    'autoTeamManage',
+    'revivePotionCombo',
+    'autoPokedexEvolve',
+    'autoBossEnabled',
+    'autoBossPrize',
+    'topCatchPreferEasyStage',
+    'autoSafariSmart',
+    'autoRaidTeam',
     'ensureNativeAutoHeal',
     'targetHuntSlug',
     'huntGuideMode',
@@ -430,6 +451,15 @@ function buildConfig(prefs = {}, saved = {}, overrides = {}, isolatedAccount = f
         autoMisticoEnter: Boolean(p.autoMisticoEnter ?? false),
         autoExtendListings: Boolean(p.autoExtendListings ?? false),
         autoOptimizeGear: Boolean(p.autoOptimizeGear ?? false),
+        autoSeasonalSwap: Boolean(p.autoSeasonalSwap ?? false),
+        autoTeamManage: Boolean(p.autoTeamManage ?? false),
+        revivePotionCombo: p.revivePotionCombo ?? true,
+        autoPokedexEvolve: Boolean(p.autoPokedexEvolve ?? false),
+        autoBossEnabled: Boolean(p.autoBossEnabled ?? false),
+        autoBossPrize: ['mega', 'tm', 'tickets', 'any'].includes(p.autoBossPrize) ? p.autoBossPrize : 'mega',
+        topCatchPreferEasyStage: p.topCatchPreferEasyStage ?? true,
+        autoSafariSmart: Boolean(p.autoSafariSmart ?? false),
+        autoRaidTeam: Boolean(p.autoRaidTeam ?? false),
         targetHuntSlug: null,
         huntGuideMode: 'off',
         huntGuideMetric: 'xp',
@@ -583,6 +613,18 @@ function normalizeConfigPatch(current, patch = {}) {
     if (patch.autoMisticoEnter !== undefined) next.autoMisticoEnter = Boolean(patch.autoMisticoEnter);
     if (patch.autoExtendListings !== undefined) next.autoExtendListings = Boolean(patch.autoExtendListings);
     if (patch.autoOptimizeGear !== undefined) next.autoOptimizeGear = Boolean(patch.autoOptimizeGear);
+    if (patch.autoSeasonalSwap !== undefined) next.autoSeasonalSwap = Boolean(patch.autoSeasonalSwap);
+    if (patch.autoTeamManage !== undefined) next.autoTeamManage = Boolean(patch.autoTeamManage);
+    if (patch.revivePotionCombo !== undefined) next.revivePotionCombo = Boolean(patch.revivePotionCombo);
+    if (patch.autoPokedexEvolve !== undefined) next.autoPokedexEvolve = Boolean(patch.autoPokedexEvolve);
+    if (patch.autoBossEnabled !== undefined) next.autoBossEnabled = Boolean(patch.autoBossEnabled);
+    if (typeof patch.autoBossPrize === 'string') {
+        const cleanPrize = patch.autoBossPrize.trim().toLowerCase();
+        if (['mega', 'tm', 'tickets', 'any'].includes(cleanPrize)) next.autoBossPrize = cleanPrize;
+    }
+    if (patch.topCatchPreferEasyStage !== undefined) next.topCatchPreferEasyStage = Boolean(patch.topCatchPreferEasyStage);
+    if (patch.autoSafariSmart !== undefined) next.autoSafariSmart = Boolean(patch.autoSafariSmart);
+    if (patch.autoRaidTeam !== undefined) next.autoRaidTeam = Boolean(patch.autoRaidTeam);
     if (patch.ensureNativeAutoHeal !== undefined) next.ensureNativeAutoHeal = Boolean(patch.ensureNativeAutoHeal);
     if (patch.targetHuntSlug !== undefined) {
         next.targetHuntSlug = typeof patch.targetHuntSlug === 'string' && patch.targetHuntSlug.trim()
@@ -3519,6 +3561,128 @@ export function createHeadlessController(options = {}) {
     let gymState = null;
     let eventStatus = { raid: null, showdown: null, camp: null };
     let ownListings = [];
+    let raidDetailState = null;
+    let lastTreinoResult = null;
+    let wikiEconomyState = null;
+    let guildRaidState = null;
+    let lastCsvExport = null;
+    const sessionCapturedRolls = [];
+    let prevGymPodiumCount = 0;
+    let prevGymBuffPct = 0;
+    let gymLastLostAt = 0;
+
+    const recordCapturedRoll = (pk) => {
+        if (!pk || typeof pk !== 'object') return;
+        sessionCapturedRolls.push({
+            potencia: pk.potencia ?? pk.pot ?? 1,
+            qualidade: pk.qualidade ?? pk.quality ?? 1,
+            speciesId: pk.speciesId ?? pk.pokeId ?? null,
+        });
+        if (sessionCapturedRolls.length > 5000) {
+            sessionCapturedRolls.splice(0, sessionCapturedRolls.length - 5000);
+        }
+    };
+
+    const getGymMetrics = (st) => {
+        const rawPodiums = gymState?.podios ?? gymState?.podiums ?? st?.ginasiosPodio ?? st?.podio ?? st?.ginasios ?? [];
+        const podiumCount = Array.isArray(rawPodiums)
+            ? rawPodiums.length
+            : (rawPodiums && typeof rawPodiums === 'object' ? Object.keys(rawPodiums).length : 0);
+        const buffPct = Number(gymState?.bonusPct ?? gymState?.buffPct ?? st?.ginasioBonusPct ?? 0) || 0;
+        return { podiumCount, buffPct };
+    };
+
+    const checkGymPodiumLoss = (st, ts) => {
+        const { podiumCount, buffPct } = getGymMetrics(st);
+        if ((prevGymPodiumCount > 0 && podiumCount < prevGymPodiumCount) || (prevGymBuffPct > 0 && buffPct < prevGymBuffPct)) {
+            gymLastLostAt = ts;
+            pushLog('warn', `Ginasio: podio perdido (${prevGymPodiumCount} -> ${podiumCount} podios, buff ${prevGymBuffPct}% -> ${buffPct}%).`);
+        } else if (podiumCount > prevGymPodiumCount || buffPct > prevGymBuffPct) {
+            gymLastLostAt = 0;
+        }
+        if (podiumCount > 0 || prevGymPodiumCount > 0) prevGymPodiumCount = podiumCount;
+        if (buffPct > 0 || prevGymBuffPct > 0) prevGymBuffPct = buffPct;
+    };
+
+    const buildBossRotation = (st, nowMs) => {
+        const seasonalWin = getSeasonalTypeWindow(nowMs);
+        const lv = Number(st?.level || 0);
+        const rawBosses = lastWelcome?.bosses ?? st?.bosses ?? null;
+        const bossList = Array.isArray(rawBosses)
+            ? rawBosses
+            : (rawBosses && typeof rawBosses === 'object'
+                ? Object.entries(rawBosses).map(([k, v]) => (v && typeof v === 'object' ? { key: k, ...v } : null)).filter(Boolean)
+                : []);
+        const regions = REGIOES_BOSS.map((reg, idx) => {
+            const nivelMin = 300 + 350 * (idx ** 3);
+            const par = idx + 1;
+            const prize = premioDoBossNoInstante(reg, nowMs);
+            const chances = chancesBossPorPar(par);
+            const matched = bossList
+                .filter((b) => {
+                    const bReg = String(b?.regiao ?? b?.region ?? '').toLowerCase();
+                    const bPar = Number(b?.par || 0);
+                    const bKey = String(b?.key ?? b?.id ?? '').toLowerCase();
+                    return bReg === reg || bPar === par || bKey === reg || bKey.startsWith(`${reg}_`) || bKey.startsWith(`${reg}-`);
+                })
+                .map((b) => {
+                    const bKey = String(b.key ?? b.id ?? reg);
+                    const bPremio = b.premio ?? b.prize ?? prize;
+                    return {
+                        key: bKey,
+                        nome: String(b.nome ?? b.name ?? `${reg.toUpperCase()} (${bPremio})`),
+                        premio: bPremio,
+                        auto: Boolean(st?.boss?.auto && (st?.boss?.key === bKey || st?.boss?.autoKey === bKey)),
+                    };
+                });
+            const bosses = matched.length > 0
+                ? matched
+                : [{
+                    key: reg,
+                    nome: `${reg.toUpperCase()} (${prize})`,
+                    premio: prize,
+                    auto: Boolean(st?.boss?.auto && (st?.boss?.key === reg || st?.boss?.autoKey === reg)),
+                }];
+            return {
+                region: reg,
+                index: idx,
+                key: bosses[0]?.key ?? reg,
+                unlocked: lv >= nivelMin,
+                nivelMin,
+                par,
+                chances,
+                chancesMaxMult: par,
+                prize,
+                bosses,
+            };
+        });
+        return {
+            dayKey: seasonalWin.key,
+            nextAt: seasonalWin.endsAt,
+            regions,
+        };
+    };
+
+    const buildEvolutionReadyList = (st) => {
+        const dexCapturedSet = getPokedexCapturedSet(st?.pokedex, optimisticPokedexKeys);
+        return findPokedexEvolutions(
+            st?.pokemons || [],
+            dexCapturedSet,
+            advisorSpecies,
+            st?.items || {},
+            { pedras: lastWelcome?.pedrasEvolucao || null }
+        );
+    };
+
+    const getLiveBuffsSnapshot = () => {
+        const liveSnap = liveBridge.getLivesSnapshot?.() || null;
+        if (!liveSnap) return null;
+        return {
+            ...liveSnap,
+            twitchShiny: Boolean(liveSnap.twitch?.shiny || Number(liveSnap.activeBonuses?.twitch?.shiny || 0) > 0),
+            kickShiny: Boolean(liveSnap.kick?.shiny || Number(liveSnap.activeBonuses?.kick?.shiny || 0) > 0),
+        };
+    };
 
     const recentShinies = [];
     const ownShinies = []; // ficha dos shinies capturados por esta conta (para o cartao na HUD)
@@ -3830,6 +3994,15 @@ export function createHeadlessController(options = {}) {
         objectiveStaySinceAt = 0;
         objectiveStaleUntilBySlug.clear();
         huntGuideRanking = null;
+        raidDetailState = null;
+        lastTreinoResult = null;
+        wikiEconomyState = null;
+        guildRaidState = null;
+        lastCsvExport = null;
+        sessionCapturedRolls.length = 0;
+        prevGymPodiumCount = 0;
+        prevGymBuffPct = 0;
+        gymLastLostAt = 0;
     };
 
     const getDesiredMissingKeysForTick = (state) => {
@@ -3874,7 +4047,7 @@ export function createHeadlessController(options = {}) {
             if (nowFn() - lastCenterEscapeAt >= 3000) {
                 lastCenterEscapeAt = nowFn();
                 if (sendFrame({ t: 'centro.ir' })) {
-                    pushLog('info', `${reasonLabel}: pokémons caídos no chão — voltando ao Centro Médico para trocar para ${huntLabel}.`);
+                    pushLog('info', `${reasonLabel}: pokémons caídos no chão, voltando ao Centro Médico para trocar para ${huntLabel}.`);
                 }
             }
             schedulePendingHuntFlush(1300);
@@ -4026,6 +4199,8 @@ export function createHeadlessController(options = {}) {
             capturedSet,
             huntRanking: matchingRanking,
             bestiaryMap: mode === 'bestiary' ? (state.bestiario || null) : null,
+            speciesCatalog: advisorSpecies?.byId || null,
+            preferEasyStage: config.topCatchPreferEasyStage !== false,
         });
         const modeLabel = mode === 'pokedex' ? 'Pokédex' : (mode === 'bestiary' ? 'Bestiário' : 'Top Catch');
         const focusLabel = { xp: 'XP/h', ouro: 'Ouro/h', shiny: 'Shiny/h', fast: 'Mais rápido' }[focus] || 'XP/h';
@@ -4106,7 +4281,7 @@ export function createHeadlessController(options = {}) {
         const canUseHeadless = Boolean(headlessHuntGuide?.evaluate && lastWelcome && merger.getState());
         if (!canUseBridge && !canUseHeadless) {
             if (activeStatus === 'connected' && headlessHuntGuide && !headlessHuntGuide.isAvailable?.()) {
-                huntGuideStatus = { note: 'Instale a extensão /hunt for PokeIdle no Chrome para ranking automático.' };
+                huntGuideStatus = { note: 'Ranking /hunt nativo aguardando dados do Pokémon ativo.' };
             }
             if (isObjActive) {
                 evaluateFarmObjective({ triggerSwap: true });
@@ -4137,8 +4312,8 @@ export function createHeadlessController(options = {}) {
                         note: activeStatus === 'connected'
                             ? (headlessHuntGuide?.isAvailable?.()
                                 ? 'Aguardando dados do Pokémon ativo para calcular /hunt.'
-                                : 'Instale a extensão /hunt for PokeIdle no Chrome para /hunt automático.')
-                            : 'Aguardando o ranking da extensão /hunt no jogo.',
+                                : 'Ranking /hunt nativo aguardando dados do Pokémon ativo.')
+                            : 'Aguardando o ranking /hunt no jogo.',
                     };
                 }
                 if (isObjActive) {
@@ -4215,6 +4390,7 @@ export function createHeadlessController(options = {}) {
             [ITEM_IDS.ULTRA_POTION]: 'Ultra Potion',
             [ITEM_IDS.HYPER_POTION]: 'Hyper Potion',
             [ITEM_IDS.ULTIMATE_POTION]: 'Ultimate Potion',
+            [ITEM_IDS.GOLDEN_POTION]: 'Golden Potion',
             [ITEM_IDS.REVIVE]: 'Revive',
             [ITEM_IDS.MAX_REVIVE]: 'Max Revive',
         };
@@ -4258,11 +4434,17 @@ export function createHeadlessController(options = {}) {
         const evalCatalog = {
             ...catalog,
             huntSpeciesId: catalog.huntSpeciesBySlug?.[state?.huntSlug] ?? null,
+            speciesById: advisorSpecies?.byId || null,
+            typeChart: lastWelcome?.tabelaTipos || null,
+            diaSazonal: seasonalDayState || state?.diaSazonal || null,
         };
         const effectiveTargetSlug = (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch' || config.farmObjective === 'bestiary' || config.farmObjective === 'team-pvp') && objectiveTargetSlug
             ? objectiveTargetSlug
             : (config.huntGuideMode === 'auto' && huntGuideTarget ? huntGuideTarget : config.targetHuntSlug);
         const syncedNow = getSyncedNowMs();
+        const evolutionReadyList = config.autoPokedexEvolve === true ? buildEvolutionReadyList(state) : null;
+        const bossRotation = config.autoBossEnabled === true ? buildBossRotation(state, syncedNow) : null;
+        const liveBuffs = getLiveBuffsSnapshot();
         const actions = evaluateHeadlessTick({
             state,
             field,
@@ -4274,8 +4456,25 @@ export function createHeadlessController(options = {}) {
             nowMs: syncedNow,
             forceRestock,
             desiredMissingKeys: getDesiredMissingKeysForTick(state),
+            evolutionReadyList,
+            bossRotation,
+            liveBuffs,
         });
         sendActions(actions);
+        if (config.autoRaidTeam === true && state) {
+            const brtNow = new Date(Number(syncedNow) - 3 * 3600_000);
+            const raidEnrolled = Boolean((eventStatus.raid || state?.raid)?.inscrito);
+            const seasonalWin = getSeasonalTypeWindow(syncedNow);
+            if (brtNow.getUTCDay() === 1 && brtNow.getUTCHours() < 16 && raidEnrolled && tracker.lastRaidTeamSentDay !== seasonalWin.key) {
+                const bestRaid = selectBestRaidTeam(state?.pokemons || [], advisorSpecies?.byId);
+                if (bestRaid.pokemonIds.length > 0) {
+                    tracker.lastRaidTeamSentDay = seasonalWin.key;
+                    if (sendFrame({ t: 'raid.equipe', pokemonIds: bestRaid.pokemonIds })) {
+                        pushLog('ok', `Auto-Raid: time escalado automaticamente (${bestRaid.pokemonIds.length} Pokemons).`);
+                    }
+                }
+            }
+        }
         if (actions.some((a) => a.t === 'ball.throw') &&
             field.getFallenCorpses(syncedNow, config.prioritizeExpiring !== false).length > 1) {
             clearCampoDrainTimer();
@@ -4400,6 +4599,9 @@ export function createHeadlessController(options = {}) {
             } else if (kind === 'revive') {
                 stats.revivesUsed += 1;
                 const revId = Number(e.itemId || ITEM_IDS.REVIVE);
+                if (revId === ITEM_IDS.REVIVE) {
+                    tracker.lastNormalReviveAt = syncedTs;
+                }
                 stats.spentGold += Number(catalog.itemPrices?.[revId] ?? DEFAULT_ITEM_PRICES[revId] ?? DEFAULT_ITEM_PRICES[ITEM_IDS.REVIVE] ?? 0);
             } else if (kind === 'morte' && e.quem === 'jogador') {
                 stats.playerDeaths += 1;
@@ -4447,6 +4649,7 @@ export function createHeadlessController(options = {}) {
                 }
             } else if (kind === 'capturado') {
                 stats.captures += 1;
+                if (e.pokemon) recordCapturedRoll(e.pokemon);
                 const isShiny = Boolean(e.pokemon?.shiny);
                 if (isShiny) {
                     resolveShinyCapture(e.pokemon?.nome || e.pokemon?.name || '', e.slot ?? null);
@@ -4642,12 +4845,81 @@ export function createHeadlessController(options = {}) {
 
         if (m.t === 'ginasio') {
             gymState = { ...m, updatedAt: lastMsgAt };
+            checkGymPodiumLoss(merger.getState(), lastMsgAt);
             return;
         }
 
         if (m.t === 'raid' || m.t === 'showdown' || m.t === 'campeonato') {
             const evKey = m.t === 'campeonato' ? 'camp' : m.t;
             eventStatus = { ...eventStatus, [evKey]: { ...m, updatedAt: lastMsgAt } };
+            return;
+        }
+
+        if (m.t === 'raid.info' || m.t === 'raid.fichas') {
+            const prev = raidDetailState && typeof raidDetailState === 'object' ? raidDetailState : {};
+            const next = { ...prev, updatedAt: lastMsgAt };
+            if (m.t === 'raid.info') {
+                next.info = m.info ?? m;
+                if (m.equipe !== undefined) next.equipe = m.equipe;
+            }
+            if (m.t === 'raid.fichas') {
+                next.fichas = m.fichas ?? m.jogadores ?? m.linhas ?? m;
+                if (m.equipe !== undefined) next.equipe = m.equipe;
+            }
+            raidDetailState = next;
+            return;
+        }
+
+        if (m.t === 'treino' || m.t === 'treino.resultado') {
+            const winner = m.vencedor ?? m.winner ?? m.ganhador ?? null;
+            const rounds = m.rounds ?? m.turnos ?? m.rodadas ?? null;
+            const summary = m.resumo || m.summary || (winner ? `Vencedor: ${winner}${rounds != null ? ` (${rounds} rounds)` : ''}` : 'Resultado de treino recebido.');
+            lastTreinoResult = {
+                ts: lastMsgAt,
+                summary,
+                winner,
+                rounds,
+                raw: m,
+            };
+            pushLog('info', `Treino: ${summary}`);
+            return;
+        }
+
+        if (m.t === 'wiki.economia') {
+            wikiEconomyState = { ...m, updatedAt: lastMsgAt };
+            return;
+        }
+
+        if (m.t === 'guild.bossRaid' || m.t === 'guild') {
+            guildRaidState = { ...(guildRaidState || {}), ...m, updatedAt: lastMsgAt };
+            return;
+        }
+
+        if (m.t === 'csv' || m.t === 'csv.dados' || m.t === 'csv.pronto') {
+            const filename = m.arquivo || m.filename || 'pokeidle-export.csv';
+            const content = String(m.csv ?? m.conteudo ?? m.dados ?? '');
+            lastCsvExport = {
+                tipo: m.tipo || 'export',
+                filename,
+                content,
+                receivedAt: lastMsgAt,
+            };
+            pushLog('reward', `Exportacao CSV pronta: ${filename} (${content.length} bytes).`);
+            return;
+        }
+
+        if (m.t === 'pokemon.evoluir' || m.t === 'pokemon.mega' || m.t === 'tm.aplicar' || m.t === 'pokemon.refinar' || m.t === 'pokemon.reduzirNivel') {
+            if (!m.erro && !m.error) {
+                const labels = {
+                    'pokemon.evoluir': 'Evolucao concluida',
+                    'pokemon.mega': 'Mega evolucao concluida',
+                    'tm.aplicar': 'TM aplicado',
+                    'pokemon.refinar': 'Refino aplicado',
+                    'pokemon.reduzirNivel': 'Nivel reduzido',
+                };
+                const pkName = m.nome || m.pokemon?.nome || '';
+                pushLog('ok', `${labels[m.t]}${pkName ? `: ${pkName}` : '.'}`);
+            }
             return;
         }
 
@@ -4712,6 +4984,7 @@ export function createHeadlessController(options = {}) {
                     resolveShinyCapture(m.pokemon.nome, null);
                     stats.shiniesCaptured += 1;
                     if (stats.shiniesSeen < stats.shiniesCaptured) stats.shiniesSeen = stats.shiniesCaptured;
+                    recordCapturedRoll(m.pokemon);
                     pushLog('shiny', `${m.ovo ? 'Chocado SHINY' : 'Capturado SHINY'}: ${m.pokemon.nome} (Nv ${level})`);
                     ownShinies.unshift({
                         ts: lastMsgAt,
@@ -4852,6 +5125,7 @@ export function createHeadlessController(options = {}) {
             if (state?.noCentro === true) field.reset();
             syncCombatTimersFromState(m.estado, state);
             syncTopCatchFromState(state);
+            checkGymPodiumLoss(state, lastMsgAt);
             tracker.lastHuntSlug = state?.huntSlug || tracker.lastHuntSlug;
             pushLog(
                 'ok',
@@ -4927,6 +5201,7 @@ export function createHeadlessController(options = {}) {
             if (state?.noCentro === true) field.reset();
             syncCombatTimersFromState(m.estado, state);
             syncTopCatchFromState(state);
+            checkGymPodiumLoss(state, lastMsgAt);
             if (pendingHuntSlug && state?.huntSlug === pendingHuntSlug) {
                 pendingHuntSlug = null;
                 clearHuntFlushTimer();
@@ -6045,7 +6320,9 @@ export function createHeadlessController(options = {}) {
         }
         const guideChanged = prevGuideMode !== config.huntGuideMode || prevGuideMetric !== config.huntGuideMetric;
         const objectiveChanged = prevFarmObjective !== config.farmObjective || prevFarmObjectiveFocus !== config.farmObjectiveFocus;
-        if (guideChanged || objectiveChanged) {
+        const prevEasyStage = config.topCatchPreferEasyStage;
+        const easyStageChanged = patch.topCatchPreferEasyStage !== undefined && Boolean(patch.topCatchPreferEasyStage) !== prevEasyStage;
+        if (guideChanged || objectiveChanged || (easyStageChanged && config.farmObjective === 'topcatch')) {
             if (guideChanged) {
                 huntGuideStatus = null;
                 huntGuideTarget = null;
@@ -6261,6 +6538,7 @@ export function createHeadlessController(options = {}) {
             recentRareDrops.length = 0;
             seenShinySlots.clear();
             pendingShinies.clear();
+            sessionCapturedRolls.length = 0;
             pushLog('info', 'Estatísticas e drops da sessão zerados.');
             return true;
         }
@@ -6293,7 +6571,7 @@ export function createHeadlessController(options = {}) {
                 pushLog('warn', 'Prey: selecione pelo menos 2 regiões.');
                 return false;
             }
-            return sendFrame({ t: 'prey.regioes', cartela: Number(payload?.cartela || 0), regioes });
+            return sendFrame({ t: 'prey.regioes', cartela: Math.max(0, Math.min(1, Number(payload?.cartela ?? 0) || 0)), regioes });
         }
         if (name === 'craft-shiny-egg') {
             return sendFrame({ t: 'ovoShiny.fabricar' });
@@ -6478,7 +6756,33 @@ export function createHeadlessController(options = {}) {
             return sendFrame({ t: 'bicicleta.equipar', bicicletaId: payload?.bicicletaId ?? null });
         }
         if (name === 'bike-craft') {
-            return sendFrame({ t: 'bicicleta.craftar', bicicletaIds: payload?.bicicletaIds });
+            let ids = Array.isArray(payload?.bicicletaIds) ? payload.bicicletaIds : null;
+            if (!ids && state) {
+                const bikes = Array.isArray(state.bicicletas?.lista)
+                    ? state.bicicletas.lista
+                    : (Array.isArray(state.bicicletas) ? state.bicicletas : []);
+                const equippedId = state.bicicletas?.equipadaId ?? state.bicicleta?.id ?? state.bicicletaId ?? null;
+                const byRar = new Map();
+                for (const b of bikes) {
+                    if (!b || b.id == null || String(b.id) === String(equippedId) || b.anunciada) continue;
+                    const rar = String(b.rar ?? b.raridade ?? b.rarity ?? 'comum').toLowerCase();
+                    if (rar === 'lendaria' || rar === 'legendary') continue;
+                    const arr = byRar.get(rar) || [];
+                    arr.push(b.id);
+                    byRar.set(rar, arr);
+                }
+                for (const arr of byRar.values()) {
+                    if (arr.length >= 5) {
+                        ids = arr.slice(0, 5);
+                        break;
+                    }
+                }
+            }
+            if (!ids || ids.length < 5) {
+                pushLog('warn', 'Bicicletas: faltam 5 exemplares livres da mesma raridade para craftar.');
+                return false;
+            }
+            return sendFrame({ t: 'bicicleta.craftar', bicicletaIds: ids });
         }
         if (name === 'bike-fabricar') {
             return sendFrame({ t: 'bicicleta.fabricar' });
@@ -6487,7 +6791,30 @@ export function createHeadlessController(options = {}) {
             return sendFrame({ t: 'casa.usar', casaId: Number(payload?.casaId), usar: true });
         }
         if (name === 'house-craft') {
-            return sendFrame({ t: 'casa.craftar', casaIds: payload?.casaIds });
+            let ids = Array.isArray(payload?.casaIds) ? payload.casaIds : null;
+            if (!ids && state) {
+                const houses = Array.isArray(state.casa?.lista) ? state.casa.lista : [];
+                const byRar = new Map();
+                for (const h of houses) {
+                    if (!h || h.id == null || h.anunciada || h.emUso) continue;
+                    const rar = String(h.rar ?? h.raridade ?? h.rarity ?? 'comum').toLowerCase();
+                    if (rar === 'lendaria' || rar === 'legendary') continue;
+                    const arr = byRar.get(rar) || [];
+                    arr.push(h.id);
+                    byRar.set(rar, arr);
+                }
+                for (const arr of byRar.values()) {
+                    if (arr.length >= 5) {
+                        ids = arr.slice(0, 5);
+                        break;
+                    }
+                }
+            }
+            if (!ids || ids.length < 5) {
+                pushLog('warn', 'Casas: faltam 5 casas livres da mesma raridade para craftar.');
+                return false;
+            }
+            return sendFrame({ t: 'casa.craftar', casaIds: ids });
         }
         if (name === 'house-fabricar') {
             return sendFrame({ t: 'casa.fabricar' });
@@ -6526,6 +6853,115 @@ export function createHeadlessController(options = {}) {
         }
         if (name === 'csv-export') {
             return sendFrame({ t: 'csv.pedir', tipo: String(payload?.tipo || 'pokemon') });
+        }
+        if (name === 'incubator-run') {
+            if (!isOnline || !state) {
+                pushLog('warn', 'Chocadeira requer o farm conectado ou acoplado.');
+                return false;
+            }
+            const inc = computeIncubatorStatus(state, getSyncedNowMs());
+            const freeSlot = inc.slots.find((s) => !s.occupied);
+            if (!freeSlot) {
+                pushLog('warn', 'Chocadeira: nenhum slot livre no momento.');
+                return false;
+            }
+            const bestEgg = INCUBATOR_EGGS.find((e) => Number(inc.eggsInBag?.[e.id] || 0) > 0);
+            if (!bestEgg) {
+                pushLog('warn', 'Chocadeira: nenhum ovo disponivel na mochila.');
+                return false;
+            }
+            if (sendFrame({ t: 'chocadeira.colocar', slot: freeSlot.slot, ovo: bestEgg.id })) {
+                pushLog('reward', `Chocadeira: colocando ${bestEgg.nome} no slot ${freeSlot.slot + 1}.`);
+                return true;
+            }
+            return false;
+        }
+        if (name === 'pokemon-mega') {
+            return sendFrame({ t: 'pokemon.mega', pokemonId: payload?.pokemonId });
+        }
+        if (name === 'tm-apply') {
+            return sendFrame({ t: 'tm.aplicar', pokemonId: payload?.pokemonId, itemId: Number(payload?.itemId) });
+        }
+        if (name === 'team-move') {
+            return sendFrame({ t: 'team.move', pokemonId: payload?.pokemonId, slot: Number(payload?.slot) });
+        }
+        if (name === 'raid-team-auto') {
+            if (!isOnline || !state) return false;
+            const best = selectBestRaidTeam(state.pokemons || [], advisorSpecies?.byId);
+            if (!best.pokemonIds.length) {
+                pushLog('warn', 'Raid: nenhum Pokemon disponivel para escalar.');
+                return false;
+            }
+            if (sendFrame({ t: 'raid.equipe', pokemonIds: best.pokemonIds })) {
+                pushLog('ok', `Raid: time automatico escalado (${best.pokemonIds.length} Pokemons).`);
+                return true;
+            }
+            return false;
+        }
+        if (name === 'raid-team-save') {
+            return sendFrame({ t: 'raid.equipe', pokemonIds: payload?.pokemonIds });
+        }
+        if (name === 'raid-refresh') {
+            const a = sendFrame({ t: 'raid.info' });
+            const b = sendFrame({ t: 'raid.fichas' });
+            return Boolean(a || b);
+        }
+        if (name === 'treino-lutar') {
+            const a = payload?.a ?? payload?.pokemonAId ?? payload?.pokemonIds?.[0];
+            const b = payload?.b ?? payload?.pokemonBId ?? payload?.pokemonIds?.[1];
+            return sendFrame({ t: 'treino.lutar', a, b });
+        }
+        if (name === 'market-edit') {
+            return sendFrame({ t: 'market.editar', id: payload?.id, preco: Number(payload?.preco), moeda: payload?.moeda || 'gold' });
+        }
+        if (name === 'market-cancel') {
+            return sendFrame({ t: 'market.cancelar', id: payload?.id });
+        }
+        if (name === 'market-cancel-batch') {
+            const ids = Array.isArray(payload?.ids) ? payload.ids.slice(0, 50) : [];
+            if (ids.length === 0) return false;
+            let sentAny = false;
+            for (const id of ids) {
+                if (sendFrame({ t: 'market.cancelar', id })) sentAny = true;
+            }
+            return sentAny;
+        }
+        if (name === 'market-quote-batch') {
+            if (Array.isArray(payload?.listings) && payload.listings.length > 0 && payload?.itemId == null) {
+                const first = payload.listings[0];
+                const frame = {
+                    t: 'market.cotarLote',
+                    moeda: first.currency || first.moeda || 'gold',
+                    qtd: Math.max(1, Number(first.qty || 1)),
+                    seq: Date.now(),
+                    ...(first.itemId != null ? { itemId: Number(first.itemId), tipo: 'item' } : {}),
+                    ...(first.speciesId != null ? { speciesId: Number(first.speciesId), tipo: 'pokemon' } : {}),
+                };
+                return sendFrame(frame);
+            }
+            const rest = { ...(payload && typeof payload === 'object' ? payload : {}) };
+            delete rest.action;
+            return sendFrame({ t: 'market.cotarLote', ...rest });
+        }
+        if (name === 'wiki-economy') {
+            return sendFrame({ t: 'wiki.economia' });
+        }
+        if (name === 'oferenda-all') {
+            return sendFrame({ t: 'oferenda.tudo' });
+        }
+        if (name === 'oferenda-protected') {
+            return sendFrame({ t: 'oferenda.protegidos' });
+        }
+        if (name === 'bag-discard') {
+            const id = Number(payload?.id ?? payload?.itemId);
+            if (!Number.isFinite(id) || id <= 0) return false;
+            return sendFrame({ t: 'bolsa.descartar', tipo: payload?.tipo || 'item', id, qtd: Math.max(1, Number(payload?.qtd) || 1) });
+        }
+        if (name === 'use-item') {
+            return sendFrame({ t: 'item.use', itemId: Number(payload?.itemId) });
+        }
+        if (name === 'guild-boss-raid') {
+            return sendFrame({ t: 'guild.bossRaid', pagina: Number(payload?.pagina || 1) });
         }
         return false;
     };
@@ -6798,14 +7234,7 @@ export function createHeadlessController(options = {}) {
             return (aRem - bRem) || (b.kills - a.kills);
         });
 
-        const bossPairIdx = Number(state?.boss?.par ?? state?.bossPar ?? 1) || 1;
-        const bossChances = chancesBossPorPar(bossPairIdx);
-        const bossRegions = REGIOES_BOSS.map((reg, idx) => ({
-            region: reg,
-            index: idx,
-            prize: premioDoBossNoInstante(reg, serverNowSnap),
-            chances: bossChances,
-        }));
+        const bossRotation = buildBossRotation(state, serverNowSnap);
 
         const upcomingList = getUpcomingEvents(serverNowSnap);
         const nextRaid = upcomingList.find((e) => e.type === 'raid') || null;
@@ -6813,6 +7242,29 @@ export function createHeadlessController(options = {}) {
         const raidRaw = eventStatus.raid || state?.raid || null;
         const showdownRaw = eventStatus.showdown || state?.showdown || null;
         const campRaw = eventStatus.camp || state?.campeonato || null;
+        const enrichUpcoming = (ev, type, raw) => {
+            if (!ev && !raw) return null;
+            const base = ev ? { ...ev } : { type, hourBrt: null, startsAt: null, endsAt: null, active: false, inMs: null };
+            const nowBrtDay = new Date(serverNowSnap - 3 * 3600_000).toISOString().slice(0, 10);
+            const evBrtDay = base.startsAt ? new Date(base.startsAt - 3 * 3600_000).toISOString().slice(0, 10) : nowBrtDay;
+            const dayWord = evBrtDay > nowBrtDay ? 'Amanhã' : 'Hoje';
+            return {
+                ...base,
+                ...(type === 'showdown' ? { abertoId: raw?.abertoId ?? null } : {}),
+                ...(type === 'raid' ? { fichas: raidDetailState?.fichas ?? null } : {}),
+                dayLabel: base.hourBrt != null ? `${dayWord} ${base.hourBrt}h BRT` : dayWord,
+                closesAt: base.startsAt ?? null,
+                unlocked: type === 'showdown' ? trainerLevel >= 100 : true,
+                hasToken: type === 'raid' ? Number(state?.items?.[70000] || 0) >= 1 : true,
+                inscrito: Boolean(raw?.inscrito),
+                status: raw ?? null,
+            };
+        };
+        const upcomingEvents = {
+            raid: enrichUpcoming(nextRaid, 'raid', raidRaw),
+            showdown: enrichUpcoming(nextShowdown, 'showdown', showdownRaw),
+            camp: campRaw ? { ...campRaw, inscrito: Boolean(campRaw.inscrito) } : null,
+        };
 
         const safariTickets = Number(state?.items?.[70095] || 0);
         const safariOptimal = optimalSafariTickets(safariTickets);
@@ -6833,36 +7285,102 @@ export function createHeadlessController(options = {}) {
         const bestBikeUpgrade = findBestBikeUpgrade(bikeList, equippedBikeId);
         const houseList = Array.isArray(state?.casa?.lista) ? state.casa.lista : [];
         const housesUsed = houseList.filter((c) => c && !c.anunciada && c.emUso !== false).length;
+        const bestHouseAvailable = houseList.find((c) => c && !c.anunciada && c.emUso === false) || null;
+        const bestBikeName = bestBikeUpgrade?.upgrade
+            ? (bestBikeUpgrade.upgrade.nome || bestBikeUpgrade.upgrade.name || bestBikeUpgrade.upgrade.raridade || bestBikeUpgrade.upgrade.rarity || `Bicicleta #${bestBikeUpgrade.upgrade.id}`)
+            : null;
+        const bestHouseName = bestHouseAvailable
+            ? (bestHouseAvailable.nome || bestHouseAvailable.name || bestHouseAvailable.rar || bestHouseAvailable.raridade || bestHouseAvailable.rarity || `Casa #${bestHouseAvailable.id}`)
+            : null;
         const craftableSets = findCraftableSets(state?.items || {}, 5);
         const bikeFragCount = Number(state?.items?.[70013] || 0);
         const houseFragCount = Number(state?.items?.[70019] || state?.items?.fragCasa || 0);
 
-        const dexCapturedSet = getPokedexCapturedSet(state?.pokedex, optimisticPokedexKeys);
-        const evolutionDexReady = findPokedexEvolutions(
-            state?.pokemons || [],
-            dexCapturedSet,
-            advisorSpecies,
-            state?.items || {},
-            { pedras: lastWelcome?.pedrasEvolucao || null }
-        );
+        const evolutionDexReady = buildEvolutionReadyList(state);
 
         const teamPokes = (state?.pokemons || []).filter((p) => p && p.slot != null);
+        const gymSource = {
+            podiums: Array.isArray(gymPodiums) ? gymPodiums : [],
+            nextCooldownAt: gymCooldownAt,
+            lastChallengeAt: Number(gymState?.lastChallengeAt ?? gymState?.ultimoDesafioEm ?? state?.ginasioUltimoDesafioEm ?? 0) || 0,
+        };
+        const gymRec = recommendBestGymForTeam(teamPokes, gymSource, advisorSpecies?.byId, serverNowSnap);
+
         const pvpTeam = teamPokes.map((pk) => {
             const esp = advisorSpecies?.byId?.get(Number(pk.speciesId)) || null;
             const lv = Number(pk.level ?? pk.nivel ?? 1) || 1;
+            const bstRaw = Number(esp?.bst ?? pk.bst);
+            const bst = Number.isFinite(bstRaw) && bstRaw > 0
+                ? bstRaw
+                : ((Number(esp?.baseHp) || 0) + (Number(esp?.baseAtk) || 0) + (Number(esp?.baseDef) || 0)
+                    + (Number(esp?.baseSpAtk) || 0) + (Number(esp?.baseSpDef) || 0) + (Number(esp?.baseSpeed) || 0));
             return {
                 id: pk.id,
                 name: pk.apelido || pk.nome || pk.name || esp?.name || `#${pk.speciesId ?? pk.id}`,
                 level: lv,
+                bst,
+                refino: pk.refino || null,
+                tmElemental: Boolean(pk.tmElemental || pk.zmove || pk.zMove),
+                tmFisico: Boolean(pk.tmFisico ?? pk.fisico),
                 arenaLevel: effectiveArenaLevel(lv, 'ginasio'),
                 warLevel: effectiveArenaLevel(lv, 'guerra'),
                 passive: passivaParaEspecie(esp || pk),
             };
         });
+        const pvpRankIntel = computePvpRankIntel({ ...(state?.pvp || {}), ...(tracker.pvp || {}) }, serverNowSnap);
         const guildBoostUntil = Number(state?.guild?.boostAte || 0) || null;
         const guildBoostPct = guildBoostUntil && guildBoostUntil > serverNowSnap
             ? 10
             : (Number(state?.guildBonusPct || 0) || 0);
+        const lootLeverage = computeLootLeverageInfo(huntLevel, Number(state?.bonusLootPct || 0) + guildBoostPct);
+
+        const rawOwnListings = ownListings.length > 0
+            ? ownListings
+            : (Array.isArray(state?.meusAnuncios) ? state.meusAnuncios : []);
+        const marketFloorFn = (listing) => {
+            if (!listing) return null;
+            if (listing.floorPrice != null || listing.piso != null) {
+                return Number(listing.floorPrice ?? listing.piso);
+            }
+            const cur = String(listing.moeda ?? listing.currency ?? 'gold').toLowerCase() === 'orb' ? 'orb' : 'gold';
+            const itemId = listing.itemId ?? listing.idItem ?? null;
+            if (itemId != null) {
+                const sum = marketSummary?.[itemId] || marketSummary?.[String(itemId)] || null;
+                if (sum) {
+                    const floor = cur === 'orb' ? sum.minOrb : sum.minGold;
+                    if (Number.isFinite(Number(floor)) && Number(floor) > 0) return Number(floor);
+                }
+            }
+            return null;
+        };
+        const ownListingsAnalysis = analyzeOwnListingsUndercut(rawOwnListings, marketFloorFn);
+        const enrichedOwnListings = ownListingsAnalysis.listings.map((analyzed, idx) => {
+            const orig = rawOwnListings[idx] || {};
+            return {
+                ...analyzed,
+                name: orig.nome ?? orig.name ?? orig.descricao ?? (orig.itemId != null ? (catalog.itemNames?.[orig.itemId] || advisorItemNames?.[orig.itemId] || `Item #${orig.itemId}`) : (orig.speciesId != null ? (catalog.pokemonNames?.[orig.speciesId] || `#${orig.speciesId}`) : `Anuncio #${analyzed.id ?? idx}`)),
+                speciesId: orig.speciesId ?? orig.pokeId ?? null,
+                itemId: orig.itemId ?? orig.idItem ?? null,
+                qty: Number(orig.qtd ?? orig.qty ?? 1) || 1,
+                expiresAt: orig.expiraEm ?? orig.expiresAt ?? orig.ate ?? null,
+            };
+        });
+        const ownListingsIntel = {
+            ...ownListingsAnalysis,
+            listings: enrichedOwnListings,
+            undercutListings: enrichedOwnListings.filter((l) => l.undercut),
+        };
+
+        const liveSnap = liveBridge.getLivesSnapshot?.() || null;
+        const probGuide = computeAccountProbGuide({
+            killsPerHour: hours > 0 ? Math.round(stats.kills / hours) : 0,
+            huntLevel,
+            isOutland: inOutland,
+            captureBoost: Boolean(state?.loja?.captureBoost),
+            lureActive: Boolean(state?.loja?.lure || pityIntel?.ativo),
+            twitchShiny: Boolean(liveSnap?.twitch?.shiny || (Number(liveSnap?.activeBonuses?.twitch?.shiny || 0) > 0) || state?.twitch?.shiny),
+            kickShiny: Boolean(liveSnap?.kick?.shiny || (Number(liveSnap?.activeBonuses?.kick?.shiny || 0) > 0) || state?.kick?.shiny),
+        });
 
         const baseSpeed = active ? (Number(activeEsp?.baseSpeed ?? active.stats?.speed ?? 0) || 0) : 0;
         const ivSpeed = active ? (Number(active.ivs?.speed ?? active.ivSpeed ?? 1) || 1) : 1;
@@ -6881,6 +7399,15 @@ export function createHeadlessController(options = {}) {
                 level: 'good',
                 title: 'Garantia Lure quase pronta',
                 detail: '+50 Beast Balls ao fechar esta hora sem Shiny',
+            });
+        }
+        const lureRisk = evaluateLureFractionRisk(pityRaw, serverNowSnap);
+        if (lureRisk.atRisk) {
+            probAlerts.push({
+                id: 'lure-fraction-risk',
+                level: 'warn',
+                title: 'Risco de perda de fracao do Shiny Lure',
+                detail: lureRisk.message,
             });
         }
         if (!inOutland && nextEggInfo && Number(nextEggInfo.deltaLevel) > 0 && Number(nextEggInfo.deltaLevel) <= 500) {
@@ -6907,6 +7434,76 @@ export function createHeadlessController(options = {}) {
                 detail: '2x dano e 1/4 de dano recebido nas hunts do Mapa',
             });
         }
+        const bossTurnMs = Number(bossRotation.nextAt || 0) - serverNowSnap;
+        if (trainerLevel >= 300 && bossTurnMs > 0 && bossTurnMs <= 3_600_000) {
+            const minsLeft = Math.max(1, Math.round(bossTurnMs / 60_000));
+            probAlerts.push({
+                id: 'boss-rotation',
+                level: 'info',
+                title: 'Rotacao de Boss vira em breve',
+                detail: `Faltam ${minsLeft} min para a virada diaria das 18h BRT.`,
+            });
+        }
+        if (gymRec.cooldownReady && gymRec.recommendedType && (gymState != null || state?.ginasioCooldownAte != null || state?.ginasiosPodio != null || state?.ginasios != null)) {
+            probAlerts.push({
+                id: 'gym-cooldown-ready',
+                level: 'good',
+                title: `Ginasio ${gymRec.recommendedType} liberado`,
+                detail: gymRec.recommendedSummary,
+            });
+        }
+        if (gymLastLostAt > 0 && now - gymLastLostAt <= 3_600_000) {
+            probAlerts.push({
+                id: 'gym-lost',
+                level: 'warn',
+                title: 'Podio de Ginasio perdido',
+                detail: 'Seu buff ou quantidade de podios de ginasio caiu nesta sessao.',
+            });
+        }
+        if (pvpRankIntel.decayWarning) {
+            probAlerts.push({
+                id: 'pvp-decay',
+                level: pvpRankIntel.decayActive ? 'danger' : 'warn',
+                title: pvpRankIntel.decayActive ? 'Decaimento de PR PvP ativo' : 'Decaimento de PR PvP proximo',
+                detail: pvpRankIntel.decayActive
+                    ? 'Mais de 24h sem partida ranqueada.'
+                    : `Faltam ${Math.ceil((pvpRankIntel.decayRemainingMs || 0) / 60_000)} min para o decaimento de 24h.`,
+            });
+        }
+        if (lootLeverage.active) {
+            probAlerts.push({
+                id: 'loot-leverage-25k',
+                level: 'info',
+                title: 'Alavancagem de Loot acima do Nv 25.000',
+                detail: lootLeverage.summary,
+            });
+        }
+        const closingCandidates = [
+            upcomingEvents.raid && !upcomingEvents.raid.inscrito && upcomingEvents.raid.unlocked && Number.isFinite(upcomingEvents.raid.inMs) && upcomingEvents.raid.inMs > 0 && upcomingEvents.raid.inMs <= 1_800_000
+                ? { label: 'Raid Gigantamax', inMs: upcomingEvents.raid.inMs }
+                : null,
+            upcomingEvents.showdown && !upcomingEvents.showdown.inscrito && upcomingEvents.showdown.unlocked && Number.isFinite(upcomingEvents.showdown.inMs) && upcomingEvents.showdown.inMs > 0 && upcomingEvents.showdown.inMs <= 1_800_000
+                ? { label: 'Showdown', inMs: upcomingEvents.showdown.inMs }
+                : null,
+        ].filter(Boolean);
+        if (closingCandidates.length > 0) {
+            const ev0 = closingCandidates[0];
+            probAlerts.push({
+                id: 'event-closing',
+                level: 'warn',
+                title: `${ev0.label} comeca em ${Math.max(1, Math.ceil(ev0.inMs / 60_000))} min`,
+                detail: 'Inscricao aberta e voce ainda nao esta inscrito.',
+            });
+        }
+        if (capIntel.depot.pct >= 90) {
+            probAlerts.push({
+                id: 'depot-cap',
+                level: capIntel.depot.danger ? 'danger' : 'warn',
+                title: `Depot em ${capIntel.depot.pct}% (${capIntel.depot.count}/${capIntel.depot.cap})`,
+                detail: 'Capacidade proxima do teto de 3.000 Pokemons. Limpe excedentes.',
+                action: 'quick-clean',
+            });
+        }
 
         const gameIntel = {
             serverHealth: {
@@ -6928,6 +7525,11 @@ export function createHeadlessController(options = {}) {
             },
             pityShiny: pityIntel,
             cap: capIntel,
+            incubator: computeIncubatorStatus(state, serverNowSnap),
+            autoColecaoState: {
+                regra: state?.automation?.autoColecao ?? state?.autoColecao ?? null,
+                autoVendaDepot: Boolean(state?.automation?.autoVendaDepot),
+            },
             outlandTier: {
                 current: curOutland ? curOutland.tier : rawOutlandTier,
                 label: curOutland ? curOutland.rotulo : (rawOutlandTier ? `Outland ${rawOutlandTier - 100}` : null),
@@ -6958,24 +7560,14 @@ export function createHeadlessController(options = {}) {
                 species: bestiarySpecies.slice(0, 50),
                 nextPctTotal: Math.round(bestiaryPctTotal * 100) / 100,
             },
-            bossRotation: {
-                dayKey: seasonalWin.key,
-                nextAt: seasonalWin.endsAt,
-                regions: bossRegions,
-            },
-            upcomingEvents: {
-                raid: nextRaid
-                    ? { ...nextRaid, inscrito: Boolean(raidRaw?.inscrito), status: raidRaw }
-                    : (raidRaw ? { type: 'raid', inscrito: Boolean(raidRaw.inscrito), status: raidRaw } : null),
-                showdown: nextShowdown
-                    ? { ...nextShowdown, abertoId: showdownRaw?.abertoId ?? null, inscrito: Boolean(showdownRaw?.inscrito), status: showdownRaw }
-                    : (showdownRaw ? { type: 'showdown', abertoId: showdownRaw.abertoId ?? null, inscrito: Boolean(showdownRaw.inscrito), status: showdownRaw } : null),
-                camp: campRaw ? { ...campRaw, inscrito: Boolean(campRaw.inscrito) } : null,
-            },
+            bossRotation,
+            upcomingEvents,
             safari: {
                 tickets: safariTickets,
                 optimalBatch: safariOptimal,
                 bonusMin: Math.round((safariOptimal.durationMs || 0) / 60_000),
+                bonusAddedMin: (safariOptimal.bonusTickets || 0) * 30,
+                totalDurationMin: Math.round((safariOptimal.durationMs || 0) / 60_000),
                 multShiny: MULT_SHINY_TUDO_NO_SAFARI,
                 activeUntil: safariActiveUntil,
             },
@@ -6983,14 +7575,19 @@ export function createHeadlessController(options = {}) {
                 podiums: Array.isArray(gymPodiums) ? gymPodiums : [],
                 activeBuffPct: gymBuffPct,
                 nextCooldownAt: gymCooldownAt,
+                ...gymRec,
             },
             bikesAndHouses: {
                 equippedBikeId,
                 bestBikeUpgrade,
+                bestBikeId: bestBikeUpgrade?.upgrade?.id ?? null,
+                bestBikeName,
                 bikesCount: bikeList.length,
                 housesUsed,
                 maxHouses: MAX_CASAS_EM_USO,
                 housesTotal: houseList.length,
+                bestHouseId: bestHouseAvailable?.id ?? null,
+                bestHouseName,
                 craftableBikes: Math.floor(bikeFragCount / 5),
                 craftableHouses: Math.floor(houseFragCount / 5),
                 craftableSets,
@@ -7002,9 +7599,31 @@ export function createHeadlessController(options = {}) {
                 passivesActive: serverNowSnap >= PASSIVAS_DESDE_MS,
                 passivesSince: PASSIVAS_DESDE_MS,
                 team: pvpTeam,
+                casas: state?.pvp?.casas ?? state?.pvpFormacao?.casas ?? {},
+                rankIntel: pvpRankIntel,
+                modeFormations: {
+                    ginasio: buildPvpFormationForMode(state, 'ginasio', advisorSpecies?.byId),
+                    guerra: buildPvpFormationForMode(state, 'guerra', advisorSpecies?.byId),
+                    padrao: buildPvpFormationForMode(state, 'padrao', advisorSpecies?.byId),
+                },
+                lastTreinoResult,
                 guildBoostPct,
                 guildBoostUntil,
             },
+            raidDetail: {
+                enrolled: Boolean(raidRaw?.inscrito),
+                hasToken: Number(state?.items?.[70000] || 0) >= 1,
+                fichas: raidDetailState?.fichas ?? null,
+                info: raidDetailState?.info ?? null,
+                suggestedTeam: selectBestRaidTeam(state?.pokemons || [], advisorSpecies?.byId),
+            },
+            guildRaid: computeGuildRaidIntel((guildRaidState || state?.guild) ? { ...(state?.guild || {}), ...(guildRaidState || {}) } : null, serverNowSnap),
+            ownListings: ownListingsIntel,
+            wikiEconomy: wikiEconomyState,
+            probGuide,
+            sessionRolls: summarizeSessionRolls(sessionCapturedRolls),
+            lastCsvExport,
+            lootLeverage,
             teamBuilder: teamBuilderSnap,
             probAlerts,
             activeStatsMeta: active ? {
@@ -7030,6 +7649,11 @@ export function createHeadlessController(options = {}) {
             },
         };
 
+        const rankedGuideSlice = Array.isArray(huntGuideRanking?.ranked) ? huntGuideRanking.ranked.slice(0, 15) : [];
+        const huntGuideOut = huntGuideStatus
+            ? { ...huntGuideStatus, ranked: rankedGuideSlice }
+            : (rankedGuideSlice.length > 0 ? { ranked: rankedGuideSlice } : null);
+
         return {
             version: APP_VERSION,
             status,
@@ -7041,7 +7665,7 @@ export function createHeadlessController(options = {}) {
             browserProfile: activeExistingProfile?.name || null,
             browserProfileSetting: normalizedProfileSetting,
             browserProfiles: buildBrowserProfileOptions(),
-            huntGuide: huntGuideStatus,
+            huntGuide: huntGuideOut,
             collection: collectionSnap,
             gameIntel,
             xpTrainer: {

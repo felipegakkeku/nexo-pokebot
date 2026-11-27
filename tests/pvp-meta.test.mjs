@@ -51,21 +51,47 @@ import {
     isBlackFridayActive,
 } from '../src/headless/pvp-meta.mjs';
 
-test('passivas PvP: 18 tipos completos e filtro por BST <= 500', () => {
+test('passivas PvP: 18 tipos reais v1.492.0 e filtro por BST <= 500', () => {
     assert.equal(PASSIVAS_DESDE_MS, Date.UTC(2026, 10, 29, 3, 0, 0));
     assert.equal(BST_MAX_PASSIVA, 500);
     assert.equal(PVP_PASSIVAS.length, 18);
     const tipos = new Set(PVP_PASSIVAS.map((p) => p.tipo));
     assert.equal(tipos.size, 18);
     for (const p of PVP_PASSIVAS) {
-        assert.ok(p.id && p.nome && p.tipo && p.gatilho && p.icone);
+        assert.ok(p.id && p.nome && p.tipo && p.gatilho && p.resumo && p.icone);
+    }
+
+    const expectedByType = {
+        NORMAL: { nome: 'Recover', gatilho: 'cura' },
+        FIRE: { nome: 'Burn', gatilho: 'ciclo' },
+        WATER: { nome: 'Rain Dance', gatilho: 'inicio' },
+        GRASS: { nome: 'Leech Seed', gatilho: 'ciclo' },
+        ELECTRIC: { nome: 'Paralyze', gatilho: 'ciclo' },
+        ICE: { nome: 'Freeze', gatilho: 'ciclo' },
+        FIGHTING: { nome: 'Rock Smash', gatilho: 'ciclo' },
+        POISON: { nome: 'Poison', gatilho: 'ciclo' },
+        GROUND: { nome: 'Dig', gatilho: 'ciclo' },
+        FLYING: { nome: 'Whirlwind', gatilho: 'ciclo' },
+        PSYCHIC: { nome: 'Confusion', gatilho: 'ciclo' },
+        BUG: { nome: 'Swarm', gatilho: 'inicio' },
+        ROCK: { nome: 'Rocky Helmet', gatilho: 'inicio' },
+        GHOST: { nome: 'Fear', gatilho: 'ciclo' },
+        DRAGON: { nome: 'Intimidate', gatilho: 'inicio' },
+        DARK: { nome: 'Assurance', gatilho: 'ciclo' },
+        STEEL: { nome: 'Iron Defense', gatilho: 'inicio' },
+        FAIRY: { nome: 'Charm', gatilho: 'ciclo' },
+    };
+    for (const [tipo, exp] of Object.entries(expectedByType)) {
+        const found = PVP_PASSIVAS.find((p) => p.tipo === tipo);
+        assert.equal(found?.nome, exp.nome);
+        assert.equal(found?.gatilho, exp.gatilho);
     }
 
     const raticate = { pokeId: 20, type1: 'NORMAL', baseHp: 55, baseAtk: 81, baseDef: 60, baseSpAtk: 50, baseSpDef: 70, baseSpeed: 97 };
     const charizard = { pokeId: 6, type1: 'FIRE', type2: 'FLYING', baseHp: 78, baseAtk: 84, baseDef: 78, baseSpAtk: 109, baseSpDef: 85, baseSpeed: 100 };
-    assert.equal(passivaParaEspecie(raticate)?.tipo, 'NORMAL');
+    assert.equal(passivaParaEspecie(raticate)?.nome, 'Recover');
     assert.equal(passivaParaEspecie(charizard), null);
-    assert.equal(passivaParaEspecie({ type1: 'DRAGON', bst: 500 })?.tipo, 'DRAGON');
+    assert.equal(passivaParaEspecie({ type1: 'DRAGON', bst: 500 })?.nome, 'Intimidate');
     assert.equal(passivaParaEspecie({ type1: 'DRAGON', bst: 501 }), null);
 });
 

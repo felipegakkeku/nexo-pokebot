@@ -1,3 +1,5 @@
+import { selectBestAutoBoss } from './pvp-meta.mjs';
+
 export const DEFAULT_WS_URL = 'wss://pokeidle.io';
 export const DEFAULT_ORIGIN = 'https://pokeidle.io';
 
@@ -868,6 +870,9 @@ export function evaluateHeadlessTick({
     nowMs = Date.now(),
     forceRestock = false,
     desiredMissingKeys = null,
+    evolutionReadyList = null,
+    bossRotation = null,
+    liveBuffs = null,
 }) {
     if (!state) return [];
     tracker.slotThrownAt ??= {};
@@ -1233,7 +1238,460 @@ export function evaluateHeadlessTick({
         actions.push({ t: 'mistico.entrar' });
     }
 
+    // Combo pos-revive (205 devolve apenas 10% HP)
+    actions.push(...evaluatePostReviveHeal(state, config, tracker, nowMs));
+
+    // Troca sazonal automatica / autogerenciamento de equipe
+    const seasonalActions = evaluateSeasonalTeamSwap(state, catalog, config, tracker, nowMs);
+    if (seasonalActions.length > 0) {
+        actions.push(...seasonalActions);
+    } else {
+        actions.push(...evaluateTeamAutoManage(state, catalog, config, tracker, nowMs));
+    }
+
+    // Auto-evolucao de Pokedex, Auto-Boss e Safari Inteligente
+    if (Array.isArray(evolutionReadyList)) {
+        actions.push(...evaluateAutoPokedexEvolve(state, evolutionReadyList, config, tracker, nowMs));
+    }
+    if (bossRotation) {
+        actions.push(...evaluateAutoBossRotation(state, bossRotation, config, tracker, nowMs));
+    }
+    actions.push(...evaluateAutoSafariSmart(state, liveBuffs, config, tracker, nowMs));
+
     return actions;
+}
+
+const HEALING_POTION_ORDER = Object.freeze([
+    ITEM_IDS.ULTIMATE_POTION,
+    ITEM_IDS.HYPER_POTION,
+    ITEM_IDS.ULTRA_POTION,
+    ITEM_IDS.GREAT_POTION,
+    ITEM_IDS.SMALL_POTION,
+    ITEM_IDS.GOLDEN_POTION,
+]);
+
+function lookupCatalogSpecies(catalog, speciesId) {
+    const id = Number(speciesId);
+    if (!catalog || !Number.isFinite(id) || id <= 0) return null;
+    if (catalog instanceof Map) return catalog.get(id) ?? null;
+    const sources = [catalog.speciesById, catalog.byId, catalog.pokemonById];
+    for (const src of sources) {
+        if (!src) continue;
+        if (src instanceof Map && src.has(id)) return src.get(id);
+        if (typeof src === 'object') {
+            const hit = src[id] ?? src[String(id)];
+            if (hit) return hit;
+        }
+    }
+    if (typeof catalog === 'object' && !catalog.huntsBySlug && !catalog.speciesById && !catalog.byId) {
+        return catalog[id] ?? catalog[String(id)] ?? null;
+    }
+    return null;
+}
+
+function resolvePokemonTypesForSwap(pk, catalog) {
+    const esp = lookupCatalogSpecies(catalog, pk?.speciesId ?? pk?.pokeId);
+    const raw = [];
+    if (Array.isArray(pk?.tipos) && pk.tipos.length > 0) raw.push(...pk.tipos);
+    if (pk?.type1) raw.push(pk.type1);
+    if (pk?.type2) raw.push(pk.type2);
+    if (esp?.type1) raw.push(esp.type1);
+    if (esp?.type2) raw.push(esp.type2);
+    if (Array.isArray(esp?.tipos)) raw.push(...esp.tipos);
+    return [...new Set(raw.filter(Boolean).map((t) => String(t).toUpperCase()))];
+}
+
+function pokemonHpRatio(pk) {
+    if (!pk || pk.morto) return 0;
+    const maxHp = Number(pk.maxHp ?? pk.hpMax ?? 0);
+    if (maxHp <= 0) return pk.hp === 0 ? 0 : 1;
+    const hp = Number(pk.hp ?? maxHp);
+    return Math.max(0, Math.min(1, hp / maxHp));
+}
+
+function isPokemonHealthy(pk) {
+    if (!pk || pk.morto) return false;
+    const hp = Number(pk.hp);
+    if (Number.isFinite(hp) && hp <= 0) return false;
+    return pokemonHpRatio(pk) > 0.25;
+}
+
+function isOutlandContext(state, catalog) {
+    const slug = String(state?.huntSlug || '').toLowerCase();
+    if (state?.outland?.dentro) return true;
+    if (slug.startsWith('outland')) return true;
+    const huntInfo = catalog?.huntsBySlug?.[state?.huntSlug];
+    return huntInfo?.area === 'outland';
+}
+
+function getTypeEffectiveness(atk, def1, def2, typeChart) {
+    if (!typeChart || !atk || !def1) return 1;
+    const a = String(atk).toUpperCase();
+    const row = typeChart[a] ?? typeChart[atk] ?? {};
+    const step = (def) => {
+        if (!def) return 1;
+        const d = String(def).toUpperCase();
+        return Number(row[d] ?? row[def] ?? 1) || 1;
+    };
+    let mult = step(def1);
+    if (def2 && String(def2).toUpperCase() !== String(def1).toUpperCase()) {
+        mult *= step(def2);
+    }
+    return mult;
+}
+
+/**
+ * Consolida o status da chocadeira (slots ocupados/livres/prontos e ovos na mochila).
+ * @param {object|null} state Estado do jogador.
+ * @param {number} [nowMs=Date.now()] Timestamp atual em ms.
+ * @returns {{ totalSlots: number, usedSlots: number, freeSlots: number, readyCount: number, slots: Array<object>, eggsInBag: { shiny: number, p4: number, p3: number, p2: number, total: number } }}
+ */
+export function computeIncubatorStatus(state, nowMs = Date.now()) {
+    const now = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+    const rawChc = state?.chocadeira ?? state?.incubadora ?? state?.automation?.chocadeira ?? null;
+    const chc = rawChc && typeof rawChc === 'object' ? rawChc : null;
+    const totalSlots = Math.max(1, Math.min(6, Math.floor(Number(chc?.total ?? chc?.totalSlots ?? 1)) || 1));
+    const ovosRaw = Array.isArray(chc?.ovos) ? chc.ovos : (Array.isArray(chc?.slots) ? chc.slots : []);
+
+    const slotsByIdx = new Map();
+    for (const o of ovosRaw) {
+        if (!o || typeof o !== 'object') continue;
+        const slotIdx = Number(o.slot);
+        if (!Number.isInteger(slotIdx) || slotIdx < 0 || slotIdx >= totalSlots) continue;
+        const finishesAt = Number(o.terminaEm ?? o.ate ?? o.fim ?? o.prontoEm ?? 0) || null;
+        const ready = Boolean(o.pronto || o.ready || (finishesAt != null && now >= finishesAt));
+        slotsByIdx.set(slotIdx, {
+            slot: slotIdx,
+            occupied: true,
+            ovo: o.ovo ?? o.tipo ?? o.id ?? null,
+            ready,
+            finishesAt,
+            remainingMs: finishesAt != null ? Math.max(0, finishesAt - now) : 0,
+        });
+    }
+
+    const slots = [];
+    let usedSlots = 0;
+    let readyCount = 0;
+    for (let s = 0; s < totalSlots; s++) {
+        const occupied = slotsByIdx.get(s);
+        if (occupied) {
+            usedSlots++;
+            if (occupied.ready) readyCount++;
+            slots.push(occupied);
+        } else {
+            slots.push({ slot: s, occupied: false, ovo: null, ready: false, finishesAt: null, remainingMs: 0 });
+        }
+    }
+
+    const items = state?.items && typeof state.items === 'object' ? state.items : {};
+    const shiny = Math.max(0, Math.floor(Number(items[70094] ?? items['70094'] ?? 0) || 0));
+    const p4 = Math.max(0, Math.floor(Number(items[70093] ?? items['70093'] ?? 0) || 0));
+    const p3 = Math.max(0, Math.floor(Number(items[70092] ?? items['70092'] ?? 0) || 0));
+    const p2 = Math.max(0, Math.floor(Number(items[70091] ?? items['70091'] ?? 0) || 0));
+
+    return {
+        totalSlots,
+        usedSlots,
+        freeSlots: Math.max(0, totalSlots - usedSlots),
+        readyCount,
+        slots,
+        eggsInBag: {
+            shiny,
+            p4,
+            p3,
+            p2,
+            total: shiny + p4 + p3 + p2,
+        },
+    };
+}
+
+/**
+ * Avalia troca de Pokemon ativo para aproveitar o tipo do Dia Sazonal (2x dano e 1/4 recebido)
+ * em hunts do Mapa (nao Outland), respeitando teto trainerLevel + 5 (exceto starter) e cooldown de 3s.
+ * @param {object} state Estado do jogador.
+ * @param {object} [catalog={}] Catalogo de hunts e especies.
+ * @param {object} [config={}] Configuracao headless (autoSeasonalSwap).
+ * @param {object} [tracker={}] Rastreador mutavel de cooldowns.
+ * @param {number} [nowMs=Date.now()] Timestamp atual em ms.
+ * @returns {Array<object>} Acoes WS (`team.active`).
+ */
+export function evaluateSeasonalTeamSwap(state, catalog = {}, config = {}, tracker = {}, nowMs = Date.now()) {
+    if (config?.autoSeasonalSwap !== true || !state || !Array.isArray(state.pokemons)) return [];
+    if (!state.huntSlug || state.noCentro || state.casa?.dentro || state.safari?.dentro) return [];
+    if (isOutlandContext(state, catalog)) return [];
+
+    const tipoDiaRaw = state.diaSazonal?.tipo ?? catalog?.diaSazonal?.tipo ?? catalog?.seasonalType ?? null;
+    if (!tipoDiaRaw) return [];
+    const tipoDia = String(tipoDiaRaw).toUpperCase();
+
+    const lastSwap = Math.max(Number(tracker?.lastTeamSwapAt || 0), Number(tracker?.lastSeasonalSwapAt || 0));
+    if (nowMs - lastSwap < 3000) return [];
+
+    const active = state.pokemons.find((p) => p && String(p.id) === String(state.activeId));
+    if (active) {
+        const activeTypes = resolvePokemonTypesForSwap(active, catalog);
+        if (activeTypes.includes(tipoDia)) return [];
+    }
+
+    const trainerLv = Number(state.level || 0);
+    const candidates = state.pokemons.filter((p) => {
+        if (!p || p.id == null || p.slot == null) return false;
+        if (String(p.id) === String(state.activeId)) return false;
+        if (!isPokemonHealthy(p)) return false;
+        const pkLv = Number(p.level ?? p.nivel ?? 1);
+        if (trainerLv > 0 && p.starter !== true && pkLv > trainerLv + 5) return false;
+        return resolvePokemonTypesForSwap(p, catalog).includes(tipoDia);
+    });
+
+    if (candidates.length === 0) return [];
+    candidates.sort((a, b) => {
+        const lvDiff = (Number(b.level ?? b.nivel ?? 1) || 1) - (Number(a.level ?? a.nivel ?? 1) || 1);
+        if (lvDiff !== 0) return lvDiff;
+        const potDiff = (Number(b.potencia || 1) || 1) - (Number(a.potencia || 1) || 1);
+        if (potDiff !== 0) return potDiff;
+        return (Number(b.quality ?? b.qualidade ?? 1) || 1) - (Number(a.quality ?? a.qualidade ?? 1) || 1);
+    });
+
+    const chosen = candidates[0];
+    if (tracker) {
+        tracker.lastTeamSwapAt = nowMs;
+        tracker.lastSeasonalSwapAt = nowMs;
+    }
+    return [{ t: 'team.active', pokemonId: chosen.id }];
+}
+
+/**
+ * Gerencia troca automatica do Pokemon ativo ao atingir teto trainerLevel + 5 (exceto starter),
+ * em HP <= 25% sem pocao nativa disponivel ou em desvantagem elemental forte quando ha substituto saudavel.
+ * @param {object} state Estado do jogador.
+ * @param {object} [catalog={}] Catalogo de hunts, especies e tabela de tipos.
+ * @param {object} [config={}] Configuracao headless (autoTeamManage).
+ * @param {object} [tracker={}] Rastreador mutavel de cooldowns.
+ * @param {number} [nowMs=Date.now()] Timestamp atual em ms.
+ * @returns {Array<object>} Acoes WS (`team.active`).
+ */
+export function evaluateTeamAutoManage(state, catalog = {}, config = {}, tracker = {}, nowMs = Date.now()) {
+    if (config?.autoTeamManage !== true || !state || !Array.isArray(state.pokemons)) return [];
+    if (nowMs - Number(tracker?.lastTeamSwapAt || 0) < 3000) return [];
+
+    const active = state.pokemons.find((p) => p && String(p.id) === String(state.activeId));
+    if (!active) return [];
+
+    const trainerLv = Number(state.level || 0);
+    const activeLv = Number(active.level ?? active.nivel ?? 1);
+    const hitLevelCap = trainerLv > 0 && active.starter !== true && activeLv >= trainerLv + 5;
+
+    const items = state.items && typeof state.items === 'object' ? state.items : {};
+    const hasAnyPotion = HEALING_POTION_ORDER.some((id) => Number(items[id] ?? items[String(id)] ?? 0) > 0);
+    const nativePotionReady = Boolean(state.automation?.autoPotion && hasAnyPotion);
+    const lowHpNoPotion = pokemonHpRatio(active) <= 0.25 && !nativePotionReady;
+
+    const huntInfo = catalog?.huntsBySlug?.[state.huntSlug];
+    const typeChart = catalog?.typeChart || null;
+    const activeTypes = resolvePokemonTypesForSwap(active, catalog);
+    let strongDisadvantage = false;
+    const huntMobTypes = [];
+    if (typeChart && huntInfo && Array.isArray(huntInfo.especies) && activeTypes.length > 0) {
+        for (const sp of huntInfo.especies) {
+            const esp = lookupCatalogSpecies(catalog, sp?.pokeId ?? sp?.speciesId);
+            const tList = resolvePokemonTypesForSwap(esp || sp, catalog);
+            for (const t of tList) {
+                if (!huntMobTypes.includes(t)) huntMobTypes.push(t);
+                if (getTypeEffectiveness(t, activeTypes[0], activeTypes[1], typeChart) >= 2) {
+                    strongDisadvantage = true;
+                }
+            }
+        }
+    }
+
+    if (!hitLevelCap && !lowHpNoPotion && !strongDisadvantage) return [];
+
+    const candidates = state.pokemons.filter((p) => {
+        if (!p || p.id == null || p.slot == null) return false;
+        if (String(p.id) === String(active.id)) return false;
+        if (!isPokemonHealthy(p)) return false;
+        const lv = Number(p.level ?? p.nivel ?? 1);
+        if (trainerLv > 0 && p.starter !== true) {
+            if (hitLevelCap && lv >= trainerLv + 5) return false;
+            if (!hitLevelCap && lv > trainerLv + 5) return false;
+        }
+        return true;
+    });
+
+    if (candidates.length === 0) return [];
+
+    const scoreCandidate = (p) => {
+        const lv = Number(p.level ?? p.nivel ?? 1);
+        let effBonus = 0;
+        if (typeChart && huntMobTypes.length > 0) {
+            const pTypes = resolvePokemonTypesForSwap(p, catalog);
+            if (pTypes.length > 0) {
+                const worstTaken = Math.max(...huntMobTypes.map((mt) => getTypeEffectiveness(mt, pTypes[0], pTypes[1], typeChart)));
+                if (worstTaken <= 0.5) effBonus += 1000;
+                else if (worstTaken < 2) effBonus += 400;
+                else effBonus -= 500;
+            }
+        }
+        const hpScore = pokemonHpRatio(p) * 100;
+        if (hitLevelCap && !lowHpNoPotion && !strongDisadvantage) {
+            // Para treino, prioriza menor nivel abaixo do teto (ou melhor matchup)
+            return effBonus + hpScore - lv;
+        }
+        return effBonus + hpScore + lv + (Number(p.potencia || 1) * 10);
+    };
+
+    candidates.sort((a, b) => scoreCandidate(b) - scoreCandidate(a));
+    const best = candidates[0];
+    if (strongDisadvantage && !hitLevelCap && !lowHpNoPotion && typeChart && huntMobTypes.length > 0) {
+        const bestTypes = resolvePokemonTypesForSwap(best, catalog);
+        const bestWorst = bestTypes.length > 0
+            ? Math.max(...huntMobTypes.map((mt) => getTypeEffectiveness(mt, bestTypes[0], bestTypes[1], typeChart)))
+            : 2;
+        if (bestWorst >= 2) return [];
+    }
+
+    if (tracker) tracker.lastTeamSwapAt = nowMs;
+    return [{ t: 'team.active', pokemonId: best.id }];
+}
+
+/**
+ * Usa uma pocao imediatamente apos um Revive normal (que devolve apenas 10% do HP),
+ * quando HP ativo < 40% e ha pocao disponivel na mochila (1 vez por revive, cooldown 3s).
+ * @param {object} state Estado do jogador.
+ * @param {object} [config={}] Configuracao headless (revivePotionCombo).
+ * @param {object} [tracker={}] Rastreador com lastNormalReviveAt.
+ * @param {number} [nowMs=Date.now()] Timestamp atual em ms.
+ * @returns {Array<object>} Acoes WS (`item.use`).
+ */
+export function evaluatePostReviveHeal(state, config = {}, tracker = {}, nowMs = Date.now()) {
+    if (config?.revivePotionCombo === false || !state || !tracker) return [];
+    const reviveAt = Number(tracker.lastNormalReviveAt || 0);
+    if (!(reviveAt > 0) || nowMs - reviveAt > 15_000) return [];
+    if (tracker.lastPostReviveHealedForAt === reviveAt) return [];
+    if (nowMs - Number(tracker.lastPostReviveHealAt || 0) < 3000) return [];
+
+    const active = (state.pokemons || []).find((p) => p && String(p.id) === String(state.activeId));
+    if (!active) return [];
+    const maxHp = Number(active.maxHp ?? active.hpMax ?? 0);
+    if (!(maxHp > 0)) return [];
+    const hp = Number(active.hp ?? 0);
+    if (hp / maxHp >= 0.40) return [];
+
+    const items = state.items && typeof state.items === 'object' ? state.items : {};
+    const potionId = HEALING_POTION_ORDER.find((id) => Number(items[id] ?? items[String(id)] ?? 0) > 0);
+    if (potionId == null) return [];
+
+    tracker.lastPostReviveHealAt = nowMs;
+    tracker.lastPostReviveHealedForAt = reviveAt;
+    return [{ t: 'item.use', itemId: potionId }];
+}
+
+/**
+ * Emite evolucao automatica para registrar especie faltante na Pokedex (cooldown 10s).
+ * @param {object} state Estado do jogador.
+ * @param {Array<object>} [evolutionReadyList=[]] Lista produzida por findPokedexEvolutions.
+ * @param {object} [config={}] Configuracao headless (autoPokedexEvolve).
+ * @param {object} [tracker={}] Rastreador mutavel de cooldowns.
+ * @param {number} [nowMs=Date.now()] Timestamp atual em ms.
+ * @returns {Array<object>} Acoes WS (`pokemon.evoluir`).
+ */
+export function evaluateAutoPokedexEvolve(state, evolutionReadyList = [], config = {}, tracker = {}, nowMs = Date.now()) {
+    if (config?.autoPokedexEvolve !== true || !state) return [];
+    if (!Array.isArray(evolutionReadyList) || evolutionReadyList.length === 0) return [];
+    if (tracker && nowMs - Number(tracker.lastAutoEvolveAt || 0) < 10_000) return [];
+
+    const candidate = evolutionReadyList.find(
+        (ev) => ev && ev.ready !== false && ev.pokemonId != null && ev.alvoId != null
+    );
+    if (!candidate) return [];
+
+    if (tracker) tracker.lastAutoEvolveAt = nowMs;
+    return [{ t: 'pokemon.evoluir', pokemonId: candidate.pokemonId, alvoId: Number(candidate.alvoId) }];
+}
+
+/**
+ * Seleciona e ativa automaticamente o melhor boss lendario desbloqueado conforme premio desejado
+ * (cooldown de 60s por key).
+ * @param {object} state Estado do jogador.
+ * @param {object|Array<object>|null} bossRotation Rotacao de bosses.
+ * @param {object} [config={}] Configuracao headless (autoBossEnabled, autoBossPrize).
+ * @param {object} [tracker={}] Rastreador mutavel de cooldowns.
+ * @param {number} [nowMs=Date.now()] Timestamp atual em ms.
+ * @returns {Array<object>} Acoes WS (`boss.auto`).
+ */
+export function evaluateAutoBossRotation(state, bossRotation, config = {}, tracker = {}, nowMs = Date.now()) {
+    if (config?.autoBossEnabled !== true || !state || !bossRotation) return [];
+    const best = selectBestAutoBoss(bossRotation, state.level ?? 0, config.autoBossPrize || 'mega');
+    if (!best || !best.key) return [];
+
+    const activeKey = state.boss?.auto ? (state.boss?.key ?? state.boss?.autoKey) : state.automation?.bossAuto;
+    if (activeKey && String(activeKey) === String(best.key)) return [];
+
+    if (tracker) {
+        tracker.lastBossAutoByKey ??= {};
+        if (nowMs - Number(tracker.lastBossAutoByKey[best.key] || 0) < 60_000) return [];
+        tracker.lastBossAutoByKey[best.key] = nowMs;
+    }
+
+    return [{ t: 'boss.auto', ativo: true, key: best.key }];
+}
+
+function isLiveShinyBuffActive(liveBuffs, state, platform, nowMs) {
+    const cap = platform === 'twitch' ? 'twitchShiny' : 'kickShiny';
+    if (liveBuffs && typeof liveBuffs === 'object') {
+        if (liveBuffs[cap] === true) return true;
+        const plat = liveBuffs[platform];
+        if (plat && typeof plat === 'object') {
+            if (plat.shiny === true) return true;
+            if ((Number(plat.bonus?.shiny ?? plat.shinyAte ?? plat.ate ?? 0) || 0) > nowMs) return true;
+        }
+    }
+    const stPlat = state?.[platform];
+    if (stPlat && typeof stPlat === 'object') {
+        if (stPlat.shiny === true) return true;
+        if ((Number(stPlat.bonus?.shiny ?? stPlat.shinyAte ?? 0) || 0) > nowMs) return true;
+    }
+    return false;
+}
+
+/**
+ * Entra automaticamente no Safari em multiplos de 6 tickets (ate 24) quando Lure + Twitch Shiny + Kick Shiny estao ativos
+ * (cooldown de 5 min).
+ * @param {object} state Estado do jogador.
+ * @param {object|null} [liveBuffs=null] Status dos buffs de Twitch e Kick.
+ * @param {object} [config={}] Configuracao headless (autoSafariSmart).
+ * @param {object} [tracker={}] Rastreador mutavel de cooldowns.
+ * @param {number} [nowMs=Date.now()] Timestamp atual em ms.
+ * @returns {Array<object>} Acoes WS (`safari.entrar`).
+ */
+export function evaluateAutoSafariSmart(state, liveBuffs = null, config = {}, tracker = {}, nowMs = Date.now()) {
+    if (config?.autoSafariSmart !== true || !state) return [];
+    if (tracker && nowMs - Number(tracker.lastAutoSafariAt || 0) < 300_000) return [];
+
+    const safariActive = Boolean(
+        state.safari?.dentro ||
+        (Number(state.safari?.ate ?? state.safari?.fim ?? state.safari?.prazo ?? 0) || 0) > nowMs
+    );
+    if (safariActive) return [];
+
+    const tickets = Math.max(0, Math.floor(Number(state.items?.[70095] ?? state.items?.['70095'] ?? 0) || 0));
+    if (tickets < 6) return [];
+
+    const lureActive = Boolean(
+        state.loja?.lure ||
+        (Number(state.loja?.boosts?.shiny ?? state.loja?.lureAte ?? 0) || 0) > nowMs ||
+        (Number(state.loja?.pityShiny?.expiraEm ?? state.pityShiny?.expiraEm ?? 0) || 0) > nowMs
+    );
+    if (!lureActive) return [];
+
+    const twitchOn = isLiveShinyBuffActive(liveBuffs, state, 'twitch', nowMs);
+    const kickOn = isLiveShinyBuffActive(liveBuffs, state, 'kick', nowMs);
+    if (!twitchOn || !kickOn) return [];
+
+    const batch = Math.min(24, Math.floor(tickets / 6) * 6);
+    if (tracker) tracker.lastAutoSafariAt = nowMs;
+    return [{ t: 'safari.entrar', tickets: batch }];
 }
 
 // ===== Pokedex & Top Catch (protocolo oficial PokeIdle) =====
@@ -1524,6 +1982,53 @@ function readBestiaryKills(source, sp) {
     return Math.max(0, Number(raw) || 0);
 }
 
+const EASY_STAGE_CEILING = Object.freeze({ 20: 2.87, 40: 3.57, 100: 4.47 });
+
+function buildCatalogParentSet(speciesCatalog) {
+    const hasParent = new Set();
+    if (!speciesCatalog) return hasParent;
+    const entries = speciesCatalog instanceof Map
+        ? speciesCatalog.values()
+        : (speciesCatalog.byId instanceof Map
+            ? speciesCatalog.byId.values()
+            : Object.values(speciesCatalog));
+    for (const esp of entries) {
+        const from = Number(esp?.pokeId);
+        const to = Number(esp?.evolvesToId);
+        if (from > 0 && to > 0 && from !== to) {
+            hasParent.add(to);
+        }
+    }
+    return hasParent;
+}
+
+function resolveSpeciesCaptureCeiling(sp, speciesCatalog, hasParentSet) {
+    if (!sp) return Infinity;
+    const pid = Number(sp.pokeId ?? sp.key);
+    const esp = lookupCatalogSpecies(speciesCatalog, pid) ?? lookupCatalogSpecies(speciesCatalog, sp.key);
+    const rawTeto = Number(esp?.tetoCaptura ?? esp?.captureCeiling ?? esp?.teto ?? sp?.tetoCaptura);
+    if (Number.isFinite(rawTeto) && rawTeto > 0) {
+        if (rawTeto <= 20) return EASY_STAGE_CEILING[20];
+        if (rawTeto <= 40) return EASY_STAGE_CEILING[40];
+        if (rawTeto <= 100) return EASY_STAGE_CEILING[100];
+        return rawTeto;
+    }
+    const rawStage = esp?.estagio ?? esp?.stage ?? sp?.estagio ?? sp?.stage;
+    if (rawStage != null && Number.isFinite(Number(rawStage))) {
+        const st = Number(rawStage);
+        if (st <= 0) return EASY_STAGE_CEILING[20];
+        if (st === 1) return EASY_STAGE_CEILING[40];
+        return EASY_STAGE_CEILING[100];
+    }
+    if (!esp) return Infinity;
+    if (pid >= 2001 && pid < 2059) return EASY_STAGE_CEILING[100];
+    const hasEvo = Number(esp.evolvesToId) > 0;
+    const hasParent = hasParentSet.has(pid);
+    if (!hasParent && hasEvo) return EASY_STAGE_CEILING[20];
+    if (hasParent && hasEvo) return EASY_STAGE_CEILING[40];
+    return EASY_STAGE_CEILING[100];
+}
+
 /**
  * Seleciona a melhor hunt alvo para o modo Completar Pokedex, Top Catch ou Bestiario,
  * combinando especies faltantes com o ranking real do /hunt (xp, ouro, shiny) ou modo rapido (fast).
@@ -1544,6 +2049,8 @@ export function selectObjectiveHunt({
     huntRanking = null,
     bestiaryMap = null,
     bestiaryCounts = null,
+    speciesCatalog = null,
+    preferEasyStage = true,
 } = {}) {
     if (mode !== 'pokedex' && mode !== 'topcatch' && mode !== 'bestiary') {
         return { active: false, targetSlug: null, completed: false };
@@ -1559,6 +2066,8 @@ export function selectObjectiveHunt({
     const hasRank = rankMap.size > 0;
     const metricKey = focus === 'ouro' ? 'goldH' : (focus === 'shiny' ? 'shinyH' : 'xpH');
     const bestiarySource = bestiaryMap ?? bestiaryCounts ?? null;
+    const useEasyStage = mode === 'topcatch' && preferEasyStage !== false && speciesCatalog != null;
+    const hasParentSet = useEasyStage ? buildCatalogParentSet(speciesCatalog) : new Set();
 
     const candidates = [];
     let currentCandidate = null;
@@ -1588,6 +2097,14 @@ export function selectObjectiveHunt({
         if (missing.length === 0) continue;
         for (const sp of missing) missingSpeciesAll.add(sp.key);
 
+        let easyStageCeiling = Infinity;
+        if (useEasyStage) {
+            for (const sp of missing) {
+                const c = resolveSpeciesCaptureCeiling(sp, speciesCatalog, hasParentSet);
+                if (c < easyStageCeiling) easyStageCeiling = c;
+            }
+        }
+
         const r = rankMap.get(h.slug) || null;
         const metricValue = r ? Number(r[metricKey] ?? r.value ?? 0) : 0;
         const unsafe = r
@@ -1600,6 +2117,7 @@ export function selectObjectiveHunt({
             level: Number(h.nivel || 0),
             missing,
             bestiaryClosestRemaining,
+            easyStageCeiling,
             rankRow: r,
             metricValue,
             unsafe,
@@ -1637,6 +2155,13 @@ export function selectObjectiveHunt({
         : [];
     const pool = alternatives.length ? alternatives : basePool;
 
+    const easyCmp = (a, b) => {
+        if (!useEasyStage) return 0;
+        const ca = Number.isFinite(a.easyStageCeiling) ? a.easyStageCeiling : 999;
+        const cb = Number.isFinite(b.easyStageCeiling) ? b.easyStageCeiling : 999;
+        return ca - cb;
+    };
+
     if (mode === 'bestiary') {
         pool.sort((a, b) =>
             (a.bestiaryClosestRemaining - b.bestiaryClosestRemaining) ||
@@ -1647,6 +2172,7 @@ export function selectObjectiveHunt({
         );
     } else if (focus === 'fast') {
         pool.sort((a, b) =>
+            easyCmp(a, b) ||
             (a.level - b.level) ||
             (b.missing.length - a.missing.length) ||
             (b.metricValue - a.metricValue) ||
@@ -1654,6 +2180,7 @@ export function selectObjectiveHunt({
         );
     } else if (hasRank) {
         pool.sort((a, b) =>
+            easyCmp(a, b) ||
             (Number(Boolean(b.rankRow)) - Number(Boolean(a.rankRow))) ||
             (b.metricValue - a.metricValue) ||
             (b.missing.length - a.missing.length) ||
@@ -1662,6 +2189,7 @@ export function selectObjectiveHunt({
     } else {
         // Sem /hunt instalado: prioriza nivel mais alto seguro (melhor XP/ouro) ate o nivel do Pokemon ativo
         pool.sort((a, b) =>
+            easyCmp(a, b) ||
             (b.level - a.level) ||
             (b.missing.length - a.missing.length) ||
             a.name.localeCompare(b.name)
@@ -1698,5 +2226,6 @@ export function selectObjectiveHunt({
         metricValue: chosen.metricValue,
         unsafe: chosen.unsafe,
         ...(mode === 'bestiary' ? { bestiaryClosestRemaining: chosen.bestiaryClosestRemaining } : {}),
+        ...(mode === 'topcatch' ? { easyStageCeiling: Number.isFinite(chosen.easyStageCeiling) ? chosen.easyStageCeiling : null } : {}),
     };
 }

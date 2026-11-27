@@ -6,165 +6,179 @@ export const BST_MAX_PASSIVA = 500;
 
 export const PVP_PASSIVAS = Object.freeze([
     Object.freeze({
-        id: 'adaptavel',
-        nome: 'Adaptável',
+        id: 'recover',
+        nome: 'Recover',
         tipo: 'NORMAL',
-        gatilho: 'sempre',
+        gatilho: 'cura',
         icone: '/img/tipos/normal.svg',
-        reducaoDanoPct: 12,
-        bonusStabPct: 15,
-    }),
-    Object.freeze({
-        id: 'brasa_viva',
-        nome: 'Brasa Viva',
-        tipo: 'FIRE',
-        gatilho: 'ao_atacar',
-        icone: '/img/tipos/fire.svg',
-        queimaduraPct: 8,
-        duracaoMs: 3000,
-        bonusDanoPct: 10,
-    }),
-    Object.freeze({
-        id: 'mare_constante',
-        nome: 'Maré Constante',
-        tipo: 'WATER',
-        gatilho: 'por_segundo',
-        icone: '/img/tipos/water.svg',
-        regenHpPct: 2.5,
-        reducaoFogoPct: 15,
-    }),
-    Object.freeze({
-        id: 'raizes_vitais',
-        nome: 'Raízes Vitais',
-        tipo: 'GRASS',
-        gatilho: 'ao_atacar',
-        icone: '/img/tipos/grass.svg',
-        rouboVidaPct: 15,
-    }),
-    Object.freeze({
-        id: 'sobrecarga',
-        nome: 'Sobrecarga',
-        tipo: 'ELECTRIC',
-        gatilho: 'sempre',
-        icone: '/img/tipos/electric.svg',
-        reducaoCdPct: 12,
-        bonusSpeedPct: 10,
-    }),
-    Object.freeze({
-        id: 'geada_cortante',
-        nome: 'Geada Cortante',
-        tipo: 'ICE',
-        gatilho: 'ao_atacar',
-        icone: '/img/tipos/ice.svg',
-        lentidaoPct: 15,
-        duracaoMs: 2500,
-    }),
-    Object.freeze({
-        id: 'espirito_luta',
-        nome: 'Espírito de Luta',
-        tipo: 'FIGHTING',
-        gatilho: 'abaixo_hp',
-        icone: '/img/tipos/fighting.svg',
+        resumo: 'Cura 20% HP ao atingir 50% HP',
+        curaHpPct: 20,
         limiarHpPct: 50,
-        bonusDanoPct: 25,
     }),
     Object.freeze({
-        id: 'toxina_persistente',
-        nome: 'Toxina Persistente',
-        tipo: 'POISON',
-        gatilho: 'ao_atacar',
-        icone: '/img/tipos/poison.svg',
-        venenoPct: 6,
-        maxStacks: 3,
+        id: 'burn',
+        nome: 'Burn',
+        tipo: 'FIRE',
+        gatilho: 'ciclo',
+        icone: '/img/tipos/fire.svg',
+        resumo: '4%/s por 5s = 20% de dano',
+        queimaduraPctPorSeg: 4,
+        duracaoSeg: 5,
+        danoTotalPct: 20,
     }),
     Object.freeze({
-        id: 'casco_telurico',
-        nome: 'Casco Telúrico',
-        tipo: 'GROUND',
-        gatilho: 'ao_receber_dano',
-        icone: '/img/tipos/ground.svg',
-        reducaoDanoPct: 15,
-        imunidadeEletrico: true,
-    }),
-    Object.freeze({
-        id: 'ventania',
-        nome: 'Ventania',
-        tipo: 'FLYING',
-        gatilho: 'sempre',
-        icone: '/img/tipos/flying.svg',
-        esquivaPct: 12,
-        reducaoCdPct: 8,
-    }),
-    Object.freeze({
-        id: 'barreira_mental',
-        nome: 'Barreira Mental',
-        tipo: 'PSYCHIC',
-        gatilho: 'ao_entrar',
-        icone: '/img/tipos/psychic.svg',
-        escudoHpPct: 15,
-        bonusSpAtkPct: 10,
-    }),
-    Object.freeze({
-        id: 'enxame_veloz',
-        nome: 'Enxame Veloz',
-        tipo: 'BUG',
-        gatilho: 'primeiro_golpe',
-        icone: '/img/tipos/bug.svg',
-        bonusPrimeiroGolpePct: 30,
+        id: 'rain_dance',
+        nome: 'Rain Dance',
+        tipo: 'WATER',
+        gatilho: 'inicio',
+        icone: '/img/tipos/water.svg',
+        resumo: '+20% dano e -10% recarga',
+        bonusDanoPct: 20,
         reducaoCdPct: 10,
     }),
     Object.freeze({
-        id: 'rocha_solida',
-        nome: 'Rocha Sólida',
+        id: 'leech_seed',
+        nome: 'Leech Seed',
+        tipo: 'GRASS',
+        gatilho: 'ciclo',
+        icone: '/img/tipos/grass.svg',
+        resumo: '1.5%/s por 10s + ate 15% cura',
+        drenoPctPorSeg: 1.5,
+        duracaoSeg: 10,
+        rouboVidaPct: 15,
+    }),
+    Object.freeze({
+        id: 'paralyze',
+        nome: 'Paralyze',
+        tipo: 'ELECTRIC',
+        gatilho: 'ciclo',
+        icone: '/img/tipos/electric.svg',
+        resumo: '12s, +30% recarga + 25% falha',
+        duracaoSeg: 12,
+        penalidadeCdPct: 30,
+        chanceFalhaPct: 25,
+    }),
+    Object.freeze({
+        id: 'freeze',
+        nome: 'Freeze',
+        tipo: 'ICE',
+        gatilho: 'ciclo',
+        icone: '/img/tipos/ice.svg',
+        resumo: '2.5s + +20% dano recebido',
+        duracaoSeg: 2.5,
+        aumentoDanoRecebidoPct: 20,
+    }),
+    Object.freeze({
+        id: 'rock_smash',
+        nome: 'Rock Smash',
+        tipo: 'FIGHTING',
+        gatilho: 'ciclo',
+        icone: '/img/tipos/fighting.svg',
+        resumo: '-20% defesa por 15s',
+        reducaoDefInimigaPct: 20,
+        duracaoSeg: 15,
+    }),
+    Object.freeze({
+        id: 'poison',
+        nome: 'Poison',
+        tipo: 'POISON',
+        gatilho: 'ciclo',
+        icone: '/img/tipos/poison.svg',
+        resumo: '1.5%/s por 12s = 18%',
+        venenoPctPorSeg: 1.5,
+        duracaoSeg: 12,
+        danoTotalPct: 18,
+    }),
+    Object.freeze({
+        id: 'dig',
+        nome: 'Dig',
+        tipo: 'GROUND',
+        gatilho: 'ciclo',
+        icone: '/img/tipos/ground.svg',
+        resumo: 'Escava no ciclo para evitar dano',
+    }),
+    Object.freeze({
+        id: 'whirlwind',
+        nome: 'Whirlwind',
+        tipo: 'FLYING',
+        gatilho: 'ciclo',
+        icone: '/img/tipos/flying.svg',
+        resumo: '+15% dano',
+        bonusDanoPct: 15,
+    }),
+    Object.freeze({
+        id: 'confusion',
+        nome: 'Confusion',
+        tipo: 'PSYCHIC',
+        gatilho: 'ciclo',
+        icone: '/img/tipos/psychic.svg',
+        resumo: 'Aplica confusao no ciclo',
+    }),
+    Object.freeze({
+        id: 'swarm',
+        nome: 'Swarm',
+        tipo: 'BUG',
+        gatilho: 'inicio',
+        icone: '/img/tipos/bug.svg',
+        resumo: '+35% dano, +5% por inseto ate +50%',
+        bonusDanoPct: 35,
+        bonusPorInsetoPct: 5,
+        maxBonusDanoPct: 50,
+    }),
+    Object.freeze({
+        id: 'rocky_helmet',
+        nome: 'Rocky Helmet',
         tipo: 'ROCK',
-        gatilho: 'ao_receber_dano',
+        gatilho: 'inicio',
         icone: '/img/tipos/rock.svg',
-        reducaoSuperEfetivoPct: 25,
-        bonusDefPct: 12,
+        resumo: 'Devolve 20% dano',
+        reflexoPct: 20,
     }),
     Object.freeze({
-        id: 'intangivel',
-        nome: 'Intangível',
+        id: 'fear',
+        nome: 'Fear',
         tipo: 'GHOST',
-        gatilho: 'ao_receber_dano',
+        gatilho: 'ciclo',
         icone: '/img/tipos/ghost.svg',
-        esquivaPct: 15,
-        reflexoPct: 10,
+        resumo: 'Medo por 4s',
+        duracaoSeg: 4,
     }),
     Object.freeze({
-        id: 'furia_ancestral',
-        nome: 'Fúria Ancestral',
+        id: 'intimidate',
+        nome: 'Intimidate',
         tipo: 'DRAGON',
-        gatilho: 'ao_abater',
+        gatilho: 'inicio',
         icone: '/img/tipos/dragon.svg',
-        bonusDanoPorAbatePct: 12,
-        maxStacks: 3,
+        resumo: '-20% dano inimigo',
+        reducaoDanoInimigoPct: 20,
+        reducaoDanoPct: 20,
     }),
     Object.freeze({
-        id: 'golpe_baixo',
-        nome: 'Golpe Baixo',
+        id: 'assurance',
+        nome: 'Assurance',
         tipo: 'DARK',
-        gatilho: 'ao_atacar',
+        gatilho: 'ciclo',
         icone: '/img/tipos/dark.svg',
-        chanceCritPct: 20,
-        multCrit: 1.5,
+        resumo: '+25% dano escalando com HP faltando',
+        bonusDanoPct: 25,
     }),
     Object.freeze({
-        id: 'blindagem',
-        nome: 'Blindagem',
+        id: 'iron_defense',
+        nome: 'Iron Defense',
         tipo: 'STEEL',
-        gatilho: 'sempre',
+        gatilho: 'inicio',
         icone: '/img/tipos/steel.svg',
-        reducaoDanoPct: 18,
+        resumo: '+35% defesa',
+        bonusDefPct: 35,
     }),
     Object.freeze({
-        id: 'aura_feerica',
-        nome: 'Aura Feérica',
+        id: 'charm',
+        nome: 'Charm',
         tipo: 'FAIRY',
-        gatilho: 'ao_entrar',
+        gatilho: 'ciclo',
         icone: '/img/tipos/fairy.svg',
-        reducaoDanoDragaoPct: 30,
-        curaAliadoPct: 10,
+        resumo: '+10% dano',
+        bonusDanoPct: 10,
     }),
 ]);
 
@@ -886,4 +900,895 @@ export const BLACK_FRIDAY = Object.freeze({
 export function isBlackFridayActive(nowMs = Date.now()) {
     const t = Number(nowMs);
     return Number.isFinite(t) && t >= BLACK_FRIDAY.inicio && t < BLACK_FRIDAY.fim;
+}
+
+// ---------- Helpers internos de catalogo ----------
+function lookupSpecies(speciesCatalog, speciesId) {
+    if (!speciesCatalog || speciesId == null) return null;
+    const id = Number(speciesId);
+    if (!Number.isFinite(id) || id <= 0) return null;
+    if (speciesCatalog instanceof Map) return speciesCatalog.get(id) ?? null;
+    if (speciesCatalog.byId instanceof Map) return speciesCatalog.byId.get(id) ?? null;
+    if (typeof speciesCatalog === 'object') return speciesCatalog[id] ?? speciesCatalog[String(id)] ?? null;
+    return null;
+}
+
+function extractPokemonTypes(pk, speciesCatalog = null) {
+    const esp = lookupSpecies(speciesCatalog, pk?.speciesId ?? pk?.pokeId);
+    const raw = [];
+    if (Array.isArray(pk?.tipos) && pk.tipos.length > 0) raw.push(...pk.tipos);
+    if (pk?.type1) raw.push(pk.type1);
+    if (pk?.type2) raw.push(pk.type2);
+    if (esp?.type1) raw.push(esp.type1);
+    if (esp?.type2) raw.push(esp.type2);
+    if (Array.isArray(esp?.tipos)) raw.push(...esp.tipos);
+    return [...new Set(raw.filter(Boolean).map((t) => String(t).toUpperCase()))];
+}
+
+function ivTotalOf(pk) {
+    if (pk?.iv != null && Number.isFinite(Number(pk.iv))) return Number(pk.iv);
+    if (pk?.ivTotal != null && Number.isFinite(Number(pk.ivTotal))) return Number(pk.ivTotal);
+    if (pk?.ivs && typeof pk.ivs === 'object') {
+        return Object.values(pk.ivs).reduce((s, v) => s + (Number(v) || 0), 0);
+    }
+    return null;
+}
+
+// ---------- Risco de fracao do Pity Shiny no Lure ----------
+/**
+ * Avalia se o Shiny Lure comprado possui fracao restante menor que 60 minutos
+ * que sera descartada ao fim do boost (cortarGarantiaNoFim), colocando +50 Beast Balls em risco.
+ * @param {object|null} pityShiny Estado do pityShiny (remainingMs, restanteMs, expiraEm, horas, bolas, seg).
+ * @param {number} [nowMs=Date.now()] Timestamp atual em ms.
+ * @returns {{ atRisk: boolean, minutesLost: number, nextHourShortByMin: number, remainingMs: number, wholeHours: number, bolasAtRisk: number, message: string }}
+ */
+export function evaluateLureFractionRisk(pityShiny, nowMs = Date.now()) {
+    const now = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+    if (!pityShiny || typeof pityShiny !== 'object') {
+        return {
+            atRisk: false,
+            minutesLost: 0,
+            nextHourShortByMin: 0,
+            remainingMs: 0,
+            wholeHours: 0,
+            bolasAtRisk: 0,
+            message: '',
+        };
+    }
+
+    const explicitRem = pityShiny.remainingMs ?? pityShiny.restanteMs;
+    const explicitExp = Number(pityShiny.expiraEm ?? pityShiny.ate ?? pityShiny.fim);
+    const lureExp = Number(pityShiny.lureExpiraEm ?? pityShiny.lureAte ?? NaN);
+    const horasRaw = Number(pityShiny.horas);
+    const segRaw = Number(pityShiny.seg);
+    const bolas = Math.max(0, Math.floor(Number(pityShiny.bolas ?? pityShiny.count ?? 0) || 0));
+
+    let remainingMs = 0;
+    if (explicitRem != null && Number.isFinite(Number(explicitRem))) {
+        remainingMs = Math.max(0, Number(explicitRem));
+    } else if (Number.isFinite(lureExp) && lureExp > 0) {
+        remainingMs = Math.max(0, lureExp - now);
+    } else if (Number.isFinite(explicitExp) && explicitExp > 0) {
+        remainingMs = Math.max(0, explicitExp - now);
+    } else if (Number.isFinite(segRaw) && segRaw > 0) {
+        remainingMs = segRaw * 1000;
+    } else if (Number.isFinite(horasRaw) && horasRaw > 0) {
+        remainingMs = horasRaw * PITY_SHINY_HORA_MS;
+    }
+
+    // Se lureExpiraEm termina antes do fim da hora do pity, usa a fracao real disponivel do lure.
+    if (Number.isFinite(lureExp) && lureExp > now && Number.isFinite(explicitExp) && explicitExp > lureExp) {
+        remainingMs = Math.max(0, lureExp - now);
+    }
+
+    const wholeHours = Math.floor(remainingMs / PITY_SHINY_HORA_MS);
+    let trailingMs = remainingMs % PITY_SHINY_HORA_MS;
+
+    // Caso horas seja fracionario e remainingMs nao tenha refletido a fracao
+    if (trailingMs === 0 && Number.isFinite(horasRaw) && horasRaw > 0) {
+        const fracHoras = horasRaw - Math.floor(horasRaw);
+        if (fracHoras > 1e-6 && fracHoras < 1 - 1e-6) {
+            trailingMs = Math.round(fracHoras * PITY_SHINY_HORA_MS);
+        }
+    }
+
+    const shinyCaughtThisHour = Boolean(pityShiny.shiny);
+    const hasTrailingFraction = trailingMs > 0 && trailingMs < PITY_SHINY_HORA_MS;
+    const activeWindow = remainingMs > 0 || bolas > 0 || (Number.isFinite(horasRaw) && horasRaw > 0);
+    const atRisk = Boolean(activeWindow && hasTrailingFraction && !(shinyCaughtThisHour && wholeHours === 0));
+
+    if (!atRisk) {
+        return {
+            atRisk: false,
+            minutesLost: 0,
+            nextHourShortByMin: 0,
+            remainingMs,
+            wholeHours,
+            bolasAtRisk: 0,
+            message: '',
+        };
+    }
+
+    const minutesLost = Math.max(1, Math.round(trailingMs / 60_000));
+    const nextHourShortByMin = Math.max(1, Math.round((PITY_SHINY_HORA_MS - trailingMs) / 60_000));
+    const message = `Fracao de Lure de ${minutesLost} min sera descartada por cortarGarantiaNoFim (faltam ${nextHourShortByMin} min para fechar 1h; +50 Beast Balls em risco).`;
+
+    return {
+        atRisk: true,
+        minutesLost,
+        nextHourShortByMin,
+        remainingMs,
+        wholeHours,
+        bolasAtRisk: PITY_SHINY_BOLAS,
+        message,
+    };
+}
+
+// ---------- Selecao de Auto-Boss ----------
+/**
+ * Seleciona o boss da regiao mais alta desbloqueada pelo treinador que oferece o premio desejado.
+ * @param {object|Array<object>|null} bossRotation Rotacao de bosses ({ regions } ou lista de regioes).
+ * @param {number} [trainerLevel=0] Nivel atual do treinador.
+ * @param {'mega'|'tm'|'tickets'|string} [desiredPrize='mega'] Premio desejado.
+ * @returns {{ key: string, region: string, par: number, chances: object, prize: string, nivelMin: number }|null}
+ */
+export function selectBestAutoBoss(bossRotation, trainerLevel = 0, desiredPrize = 'mega') {
+    const regions = Array.isArray(bossRotation)
+        ? bossRotation
+        : (Array.isArray(bossRotation?.regions) ? bossRotation.regions : []);
+    if (regions.length === 0) return null;
+
+    const lv = Math.max(0, Number(trainerLevel) || 0);
+    const targetPrize = String(desiredPrize || 'mega').trim().toLowerCase();
+
+    let best = null;
+    for (let i = 0; i < regions.length; i++) {
+        const entry = regions[i];
+        if (!entry || typeof entry !== 'object') continue;
+        const region = String(entry.region ?? entry.regiao ?? '').trim().toLowerCase();
+        const regIdx = region ? REGIOES_BOSS.indexOf(region) : -1;
+        const par0 = Number.isFinite(Number(entry.index))
+            ? Math.max(0, Math.floor(Number(entry.index)))
+            : (regIdx >= 0 ? regIdx : (Number.isFinite(Number(entry.par)) ? Math.max(0, Math.floor(Number(entry.par)) - 1) : i));
+        const nivelMin = Number.isFinite(Number(entry.nivelMin))
+            ? Number(entry.nivelMin)
+            : 300 + 350 * (par0 ** 3);
+        if (lv < nivelMin) continue;
+
+        const prize = String(entry.prize ?? entry.premio ?? '').trim().toLowerCase();
+        if (targetPrize !== 'any' && targetPrize !== 'qualquer' && prize !== targetPrize) continue;
+
+        const par1 = par0 + 1;
+        const chances = entry.chances || chancesBossPorPar(par1);
+        const key = String(entry.key ?? (region || `boss_${par0}`));
+        if (!best || par0 > best._par0) {
+            best = {
+                key,
+                region: region || REGIOES_BOSS[par0] || key,
+                par: Number(entry.par ?? par1),
+                chances,
+                prize,
+                nivelMin,
+                _par0: par0,
+            };
+        }
+    }
+
+    if (!best) return null;
+    const result = { ...best };
+    delete result._par0;
+    return result;
+}
+
+// ---------- Recomendacao de Ginasio ----------
+const PODIO_BONUS_POR_POS = Object.freeze({ 1: 25, 2: 10, 3: 5 });
+const GYM_COOLDOWN_MS = 24 * 3_600_000;
+
+function parseGymPodiumsMap(gyms) {
+    const map = new Map();
+    const raw = gyms?.podiums ?? gyms?.podios ?? gyms?.podiumsByType ?? gyms;
+    if (Array.isArray(raw)) {
+        for (const p of raw) {
+            if (!p || typeof p !== 'object') continue;
+            const tipo = String(p.tipo ?? p.type ?? '').trim().toUpperCase();
+            if (!tipo) continue;
+            const pos = Number(p.pos ?? p.posicao ?? p.rank ?? 0) || null;
+            const bonusPct = Number(p.bonusPct ?? p.buffPct ?? (pos ? PODIO_BONUS_POR_POS[pos] : 0)) || 0;
+            map.set(tipo, { pos, bonusPct });
+        }
+    } else if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+        for (const [k, v] of Object.entries(raw)) {
+            const tipo = String(k || '').trim().toUpperCase();
+            if (!PASSIVA_POR_TIPO.has(tipo)) continue;
+            if (typeof v === 'number') {
+                const pos = v > 0 ? v : null;
+                map.set(tipo, { pos, bonusPct: pos ? (PODIO_BONUS_POR_POS[pos] || 0) : 0 });
+            } else if (v && typeof v === 'object') {
+                const pos = Number(v.pos ?? v.posicao ?? v.rank ?? 0) || null;
+                const bonusPct = Number(v.bonusPct ?? v.buffPct ?? (pos ? PODIO_BONUS_POR_POS[pos] : 0)) || 0;
+                map.set(tipo, { pos, bonusPct });
+            }
+        }
+    }
+    return map;
+}
+
+/**
+ * Avalia o cooldown de 24h dos ginasios e pontua os 18 tipos conforme a composicao da equipe
+ * (respeitando que Pokemon dual-type herda o melhor podio entre seus 2 tipos).
+ * @param {Array<object>} [team=[]] Pokemons da equipe.
+ * @param {object} [gyms={}] Estado dos ginasios (nextCooldownAt, lastChallengeAt, podiums).
+ * @param {Map|object|null} [speciesCatalog=null] Catalogo de especies opcional.
+ * @param {number} [nowMs=Date.now()] Timestamp atual em ms.
+ * @returns {{ cooldownReady: boolean, cooldownRemainingMs: number, recommendedType: string|null, recommendedCount: number, topOptions: Array<object>, recommendedSummary: string }}
+ */
+export function recommendBestGymForTeam(team = [], gyms = {}, speciesCatalog = null, nowMs = Date.now()) {
+    const now = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+    const nextCd = Number(gyms?.nextCooldownAt ?? gyms?.cooldownAte ?? gyms?.cooldownAt ?? 0) || 0;
+    const lastChallenge = Number(gyms?.lastChallengeAt ?? gyms?.ultimoDesafioEm ?? 0) || 0;
+    const cdTarget = nextCd > 0 ? nextCd : (lastChallenge > 0 ? lastChallenge + GYM_COOLDOWN_MS : 0);
+    const cooldownRemainingMs = cdTarget > now ? cdTarget - now : 0;
+    const cooldownReady = cooldownRemainingMs === 0;
+
+    const podiumMap = parseGymPodiumsMap(gyms);
+    const teamList = Array.isArray(team) ? team.filter(Boolean) : [];
+    const teamTypesList = teamList.map((pk) => {
+        const tipos = extractPokemonTypes(pk, speciesCatalog);
+        const bestInheritedPodiumPct = tipos.reduce((mx, t) => {
+            const pct = podiumMap.get(t)?.bonusPct || 0;
+            return Math.max(mx, pct);
+        }, 0);
+        return { pk, tipos, bestInheritedPodiumPct };
+    });
+
+    const options = [];
+    for (const p of PVP_PASSIVAS) {
+        const tipo = p.tipo;
+        let count = 0;
+        let inheritedMaxPct = 0;
+        let potentialGain = 0;
+        for (const member of teamTypesList) {
+            if (member.tipos.includes(tipo)) {
+                count++;
+                if (member.bestInheritedPodiumPct > inheritedMaxPct) {
+                    inheritedMaxPct = member.bestInheritedPodiumPct;
+                }
+                potentialGain += Math.max(0, 25 - member.bestInheritedPodiumPct);
+            }
+        }
+        const currentPodium = podiumMap.get(tipo) || { pos: null, bonusPct: 0 };
+        const score = count * 100 + potentialGain;
+        options.push({
+            tipo,
+            count,
+            score,
+            potentialGain,
+            bestPodiumPct: inheritedMaxPct,
+            currentPodiumPos: currentPodium.pos,
+            currentPodiumPct: currentPodium.bonusPct,
+        });
+    }
+
+    options.sort((a, b) =>
+        (b.count - a.count)
+        || (b.potentialGain - a.potentialGain)
+        || (a.currentPodiumPct - b.currentPodiumPct)
+        || a.tipo.localeCompare(b.tipo)
+    );
+    const topOptions = options.slice(0, 5);
+    const best = options[0] && options[0].count > 0 ? options[0] : null;
+    const recommendedType = best ? best.tipo : null;
+    const recommendedCount = best ? best.count : 0;
+
+    let recommendedSummary;
+    if (!recommendedType) {
+        recommendedSummary = cooldownReady
+            ? 'Sem tipos identificados no time para recomendar ginasio.'
+            : 'Sem tipos identificados no time; ginasio em cooldown.';
+    } else if (cooldownReady) {
+        recommendedSummary = `Ginasio ${recommendedType} recomendado (${recommendedCount}/${teamList.length} do time) com cooldown liberado.`;
+    } else {
+        const minsLeft = Math.ceil(cooldownRemainingMs / 60_000);
+        recommendedSummary = `Ginasio ${recommendedType} recomendado (${recommendedCount}/${teamList.length} do time), cooldown em ${minsLeft} min.`;
+    }
+
+    return {
+        cooldownReady,
+        cooldownRemainingMs,
+        recommendedType,
+        recommendedCount,
+        topOptions,
+        recommendedSummary,
+    };
+}
+
+// ---------- Intel de Rank PvP ----------
+const PVP_PR_WINDOWS = Object.freeze([
+    Object.freeze({ minElapsedMs: 6 * 3_600_000, window: Infinity }),
+    Object.freeze({ minElapsedMs: 4 * 3_600_000, window: 1000 }),
+    Object.freeze({ minElapsedMs: 2 * 3_600_000, window: 600 }),
+    Object.freeze({ minElapsedMs: 1 * 3_600_000, window: 400 }),
+    Object.freeze({ minElapsedMs: 30 * 60_000, window: 250 }),
+    Object.freeze({ minElapsedMs: 15 * 60_000, window: 150 }),
+    Object.freeze({ minElapsedMs: 5 * 60_000, window: 100 }),
+    Object.freeze({ minElapsedMs: 2 * 60_000, window: 50 }),
+    Object.freeze({ minElapsedMs: 0, window: 25 }),
+]);
+const PVP_DECAY_MS = 24 * 3_600_000;
+const PVP_DECAY_WARN_MS = 4 * 3_600_000;
+
+/**
+ * Calcula countdown de decaimento 24h, status do Escudo de Tier e janela atual de PR no matchmaking.
+ * @param {object} [pvpState={}] Estado do PvP (decayAt, lastMatchAt, escudo, queueSince, queueElapsedMs).
+ * @param {number} [nowMs=Date.now()] Timestamp atual em ms.
+ * @returns {object} Intel de rank PvP.
+ */
+export function computePvpRankIntel(pvpState = {}, nowMs = Date.now()) {
+    const st = pvpState && typeof pvpState === 'object' ? pvpState : {};
+    const now = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+
+    const lastMatchAtRaw = Number(st.lastMatchAt ?? st.ultimaPartidaEm ?? st.ultimoJogoEm ?? 0);
+    const lastMatchAt = Number.isFinite(lastMatchAtRaw) && lastMatchAtRaw > 0 ? lastMatchAtRaw : null;
+
+    const explicitDecayRaw = Number(st.decayAt ?? st.decaimentoEm ?? 0);
+    const decayAt = Number.isFinite(explicitDecayRaw) && explicitDecayRaw > 0
+        ? explicitDecayRaw
+        : (lastMatchAt != null ? lastMatchAt + PVP_DECAY_MS : null);
+
+    const decayRemainingMs = decayAt != null ? Math.max(0, decayAt - now) : null;
+    const decayActive = decayAt != null && now >= decayAt;
+    const decayWarning = decayAt != null && (decayActive || decayRemainingMs <= PVP_DECAY_WARN_MS);
+
+    const escudo = Math.max(0, Math.floor(Number(st.escudo ?? st.tierShield ?? 0) || 0));
+    const tierShieldActive = escudo > 0;
+
+    const queueSinceRaw = Number(st.queueSince ?? st.filaDesde ?? st.entrouFilaEm ?? 0);
+    const explicitElapsed = Number(st.queueElapsedMs ?? st.tempoFilaMs);
+    const queueElapsedMs = Number.isFinite(explicitElapsed) && explicitElapsed >= 0
+        ? explicitElapsed
+        : (Number.isFinite(queueSinceRaw) && queueSinceRaw > 0 ? Math.max(0, now - queueSinceRaw) : 0);
+    const inQueue = Boolean(st.inQueue ?? st.naFila ?? st.na ?? queueSinceRaw > 0);
+
+    const step = PVP_PR_WINDOWS.find((w) => queueElapsedMs >= w.minElapsedMs) || PVP_PR_WINDOWS[PVP_PR_WINDOWS.length - 1];
+    const prWindow = step.window;
+    const prWindowLabel = prWindow === Infinity ? 'infinito' : `+-${prWindow}`;
+
+    return {
+        pr: Number(st.pr ?? st.pontos ?? 0) || 0,
+        escudo,
+        tierShieldActive,
+        lastMatchAt,
+        decayAt,
+        decayRemainingMs,
+        decayActive,
+        decayWarning,
+        inQueue,
+        queueElapsedMs,
+        prWindow,
+        prWindowLabel,
+    };
+}
+
+// ---------- Alavancagem de Loot acima do Nv 25.000 ----------
+export const NIVEL_TETO_OURO = 25_000;
+
+/**
+ * Informa a alavancagem de bonus de Loot em hunts a partir do Nv 25.000 (teto do ouro direto).
+ * @param {number} [huntLevel=0] Nivel da hunt.
+ * @param {number} [bonusLootPct=0] Bonus percentual total de loot.
+ * @returns {{ active: boolean, huntLevel: number, tetoOuro: number, bonusLootPct: number, multiplier: number, summary: string }}
+ */
+export function computeLootLeverageInfo(huntLevel = 0, bonusLootPct = 0) {
+    const level = Math.max(0, Math.floor(Number(huntLevel) || 0));
+    const bonus = Math.max(0, Number(bonusLootPct) || 0);
+    const multiplier = Number((1 + bonus / 100).toFixed(4));
+    const active = level >= NIVEL_TETO_OURO;
+    const summary = active
+        ? `Alavancagem de Loot ativa (Nv ${level} >= ${NIVEL_TETO_OURO}): 100% do ganho extra vem do loot x${multiplier.toFixed(2)}.`
+        : `Hunt Nv ${level} abaixo do teto de ouro (${NIVEL_TETO_OURO}); alavancagem total de loot ativa a partir do Nv ${NIVEL_TETO_OURO}.`;
+
+    return {
+        active,
+        huntLevel: level,
+        tetoOuro: NIVEL_TETO_OURO,
+        bonusLootPct: bonus,
+        multiplier,
+        summary,
+    };
+}
+
+// ---------- Raid da Reserva e Boost da Guilda ----------
+const GUILD_RAID_HP_POR_LUTADOR = 25_000;
+const GUILD_RAID_MAX_BONUS_PCT = 5;
+const GUILD_BOOST_DIAMONDS_GOAL = 500;
+const GUILD_BOOST_PCT = 10;
+const GUILD_BOOST_DAYS = 7;
+
+/**
+ * Consolida a inteligencia da Raid da Reserva da Guilda e do Boost de +10% (7d / 500 diamantes).
+ * @param {object} [guildState={}] Estado da guilda.
+ * @param {number} [nowMs=Date.now()] Timestamp atual em ms.
+ * @returns {object} Metricas da Raid da Reserva e Boost da Guilda.
+ */
+export function computeGuildRaidIntel(guildState = {}, nowMs = Date.now()) {
+    const g = guildState && typeof guildState === 'object' ? guildState : {};
+    const now = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+
+    const fighters = Math.max(0, Math.floor(Number(g.fighters ?? g.lutadores ?? g.membros ?? 0) || 0));
+    const reserveMaxHp = GUILD_RAID_HP_POR_LUTADOR * fighters;
+    const teamDamage = Math.max(0, Number(g.teamDamage ?? g.dano ?? g.danoEquipe ?? 0) || 0);
+    const damageRatio = reserveMaxHp > 0 ? Math.min(1, teamDamage / reserveMaxHp) : 0;
+
+    const computedBonus = reserveMaxHp > 0
+        ? Math.min(GUILD_RAID_MAX_BONUS_PCT, Math.round(damageRatio * GUILD_RAID_MAX_BONUS_PCT * 100) / 100)
+        : 0;
+    const explicitBonus = Number(g.bonusPct);
+    const bonusPct = Number.isFinite(explicitBonus) && explicitBonus >= 0 && reserveMaxHp === 0
+        ? Math.min(GUILD_RAID_MAX_BONUS_PCT, explicitBonus)
+        : computedBonus;
+
+    const boostAteRaw = Number(g.boostAte ?? g.boostUntil ?? 0);
+    const boostAte = Number.isFinite(boostAteRaw) && boostAteRaw > 0 ? boostAteRaw : null;
+    const boostActive = boostAte != null && boostAte > now;
+    const boostRemainingMs = boostActive ? boostAte - now : 0;
+
+    const diamondsCurrent = Math.max(0, Number(g.diamantes ?? g.diamonds ?? g.boostDiamantes ?? 0) || 0);
+    const diamondsGoal = GUILD_BOOST_DIAMONDS_GOAL;
+    const diamondsRemaining = Math.max(0, diamondsGoal - diamondsCurrent);
+    const diamondsPct = Math.min(100, Math.round((diamondsCurrent / diamondsGoal) * 1000) / 10);
+
+    return {
+        hasGuild: Boolean(g.id || g.nome || g.name || fighters > 0 || boostAte || diamondsCurrent > 0),
+        fighters,
+        reserveMaxHp,
+        teamDamage,
+        damageRatio,
+        bonusPct,
+        maxBonusPct: GUILD_RAID_MAX_BONUS_PCT,
+        boostActive,
+        boostPct: boostActive ? GUILD_BOOST_PCT : 0,
+        boostAte,
+        boostRemainingMs,
+        boostDurationDays: GUILD_BOOST_DAYS,
+        diamondsGoal,
+        diamondsCurrent,
+        diamondsRemaining,
+        diamondsPct,
+    };
+}
+
+// ---------- Guia Probabilistico da Conta ----------
+const DEGRAUS_OVO_SHINY = Object.freeze([
+    5000, 5400, 5900, 6400, 6950, 8000, 8600, 10000,
+    11250, 12750, 14350, 16000, 20000, 21200, 25000, 26150,
+    27500, 28950, 30450, 35150, 40000, 42800, 46150, 49650,
+    53350, 64950, 75000, 84650, 95950, 108000, 120550, 160300,
+]);
+const OVO_SHINY_BASE_CHANCE = 1 / 150_000;
+const OVO_SHINY_PASSO_CHANCE = 0.04 / 150_000;
+
+/**
+ * Gera guia probabilistico personalizado da conta (EV de Ovo Shiny por hora real + tabelas oficiais).
+ * @param {object} [params] Parametros da conta e hunt atual.
+ * @returns {object} Estatisticas de EV e tabelas oficiais de referencia.
+ */
+export function computeAccountProbGuide({
+    killsPerHour = 0,
+    huntLevel = 0,
+    isOutland = false,
+    captureBoost = false,
+    lureActive = false,
+    twitchShiny = false,
+    kickShiny = false,
+} = {}) {
+    const kph = Math.max(0, Number(killsPerHour) || 0);
+    const lv = Math.max(0, Number(huntLevel) || 0);
+    const outland = Boolean(isOutland);
+
+    let step = 0;
+    if (!outland && lv >= DEGRAUS_OVO_SHINY[0]) {
+        for (const marco of DEGRAUS_OVO_SHINY) {
+            if (marco > lv) break;
+            step++;
+        }
+    }
+
+    const baseChance = step > 0 ? OVO_SHINY_BASE_CHANCE + (step - 1) * OVO_SHINY_PASSO_CHANCE : 0;
+    const shinyMult = Number(((lureActive ? 2 : 1) * (twitchShiny ? 1.15 : 1) * (kickShiny ? 1.15 : 1)).toFixed(4));
+    const boostedChance = baseChance;
+    const avgKillsPerFrag = baseChance > 0 ? Math.round(1 / baseChance) : null;
+    const avgKillsPerEgg = baseChance > 0 ? Math.round(10 / baseChance) : null;
+    const hoursPerEgg = kph > 0 && avgKillsPerEgg != null ? Number((avgKillsPerEgg / kph).toFixed(2)) : null;
+
+    const nextStep = !outland && step < DEGRAUS_OVO_SHINY.length ? step + 1 : null;
+    const nextLevel = nextStep != null ? DEGRAUS_OVO_SHINY[nextStep - 1] : null;
+    const nextChance = nextStep != null ? OVO_SHINY_BASE_CHANCE + (nextStep - 1) * OVO_SHINY_PASSO_CHANCE : null;
+    const nextAvgKillsPerEgg = nextChance != null ? Math.round(10 / nextChance) : null;
+    const hoursPerEggNextStep = kph > 0 && nextAvgKillsPerEgg != null ? Number((nextAvgKillsPerEgg / kph).toFixed(2)) : null;
+
+    const mysticBeastPct = captureBoost ? 1.0 : 0.5;
+
+    const tables = {
+        quality: {
+            q180: { pct: 0.288, oneIn: 347 },
+            q170Plus: { pct: 0.962, oneIn: 104 },
+            q150Plus: { pct: 5.962, oneIn: 17 },
+        },
+        prey: {
+            star5Pct: 0.5,
+            oneIn: 200,
+            categoryPct: 25,
+        },
+        craft: {
+            legendaryPct: 0.005,
+            legendaryOneIn: 20_000,
+            mythicPct: 0.5,
+        },
+        mysticArena: {
+            baseBeastPct: 0.5,
+            boostedBeastPct: 1.0,
+            activeBeastPct: mysticBeastPct,
+        },
+        safari: {
+            maxMult: Number(MULT_SHINY_TUDO_NO_SAFARI.toFixed(2)),
+            exactMaxMult: MULT_SHINY_TUDO_NO_SAFARI,
+        },
+        boss: REGIOES_BOSS.map((region, idx) => ({
+            region,
+            par: idx + 1,
+            mult: idx + 1,
+            ...chancesBossPorPar(idx + 1),
+        })),
+        stoneDrops: {
+            stage0Pct: 20,
+            stage1Pct: 35,
+            finalOrOutlandPct: 50,
+        },
+    };
+
+    return {
+        killsPerHour: kph,
+        huntLevel: lv,
+        isOutland: outland,
+        step,
+        maxSteps: DEGRAUS_OVO_SHINY.length,
+        baseChance,
+        boostedChance,
+        shinyMult,
+        mysticBeastPct,
+        avgKillsPerFrag,
+        avgKillsPerEgg,
+        hoursPerEgg,
+        nextStep,
+        nextLevel,
+        nextChance,
+        hoursPerEggNextStep,
+        tables,
+    };
+}
+
+// ---------- Resumo Estatistico de Rolagens da Sessao ----------
+/**
+ * Compara rolagens reais de captura (P4, P5, Q>=1.50, Q>=1.70, Q>=1.80) com a taxa oficial esperada.
+ * @param {Array<object>} [capturedRecords=[]] Registros de capturas da sessao.
+ * @returns {object} Contagens reais vs esperadas.
+ */
+export function summarizeSessionRolls(capturedRecords = []) {
+    const records = Array.isArray(capturedRecords) ? capturedRecords.filter((r) => r && typeof r === 'object') : [];
+    const total = records.length;
+    let p4 = 0;
+    let p5 = 0;
+    let q150 = 0;
+    let q170 = 0;
+    let q180 = 0;
+
+    for (const r of records) {
+        const pot = Number(r.potencia ?? r.pot ?? 1) || 1;
+        if (pot === 4) p4++;
+        else if (pot >= 5) p5++;
+
+        const q = Number(r.quality ?? r.qualidade ?? 1) || 1;
+        if (q >= 1.50 - 1e-9) q150++;
+        if (q >= 1.70 - 1e-9) q170++;
+        if (q >= 1.80 - 1e-9) q180++;
+    }
+
+    const expectedQ150 = Number((total * 0.05962).toFixed(2));
+    const expectedQ170 = Number((total * 0.00962).toFixed(2));
+    const expectedQ180 = Number((total * 0.00288).toFixed(2));
+
+    return {
+        total,
+        p4,
+        p5,
+        q150,
+        q170,
+        q180,
+        expected: {
+            q150: expectedQ150,
+            q170: expectedQ170,
+            q180: expectedQ180,
+        },
+        ratesPct: {
+            q150: { real: total > 0 ? Number(((q150 / total) * 100).toFixed(3)) : 0, expected: 5.962, diff: Number((q150 - expectedQ150).toFixed(2)) },
+            q170: { real: total > 0 ? Number(((q170 / total) * 100).toFixed(3)) : 0, expected: 0.962, diff: Number((q170 - expectedQ170).toFixed(2)) },
+            q180: { real: total > 0 ? Number(((q180 / total) * 100).toFixed(3)) : 0, expected: 0.288, diff: Number((q180 - expectedQ180).toFixed(2)) },
+        },
+    };
+}
+
+// ---------- Selecao de Time de Raid (PvE) ----------
+const POTENCIA_MULTS = Object.freeze([1.0, 1.05, 1.10, 1.25, 2.0]);
+
+/**
+ * Pontua e seleciona os melhores Pokemons da conta para Raid PvE (nivel real, potencia, qualidade, IVs, Mega/Z-Move).
+ * @param {Array<object>} [pokemons=[]] Lista de Pokemons da conta.
+ * @param {Map|object|null} [speciesCatalog=null] Catalogo de especies opcional.
+ * @param {number} [maxSlots=5] Maximo de slots na Raid.
+ * @returns {{ pokemonIds: Array<number|string>, members: Array<object> }}
+ */
+export function selectBestRaidTeam(pokemons = [], speciesCatalog = null, maxSlots = 5) {
+    const limit = Math.max(1, Math.floor(Number(maxSlots) || 5));
+    const list = Array.isArray(pokemons) ? pokemons : [];
+    const seen = new Set();
+    const scored = [];
+
+    for (const pk of list) {
+        if (!pk || pk.id == null) continue;
+        const idKey = String(pk.id);
+        if (seen.has(idKey)) continue;
+        seen.add(idKey);
+
+        const spId = Number(pk.speciesId) || 0;
+        const esp = lookupSpecies(speciesCatalog, spId);
+        const level = Math.max(1, Number(pk.level ?? pk.nivel) || 1);
+        const pot = Math.max(1, Math.min(5, Math.round(Number(pk.potencia) || 1)));
+        const potMult = POTENCIA_MULTS[pot - 1] ?? 1;
+        const q = Math.max(0.8, Number(pk.quality ?? pk.qualidade) || 1);
+        const ivSum = ivTotalOf(pk) ?? 96;
+        const isMega = Boolean(pk.mega || pk.isMega || pk.megaDeDex != null || (spId >= 3000 && spId < 4000));
+        const hasZMove = Boolean(pk.tmElemental || pk.zmove || pk.zMove);
+        const bstRaw = Number(esp?.bst);
+        const bst = Number.isFinite(bstRaw) && bstRaw > 0
+            ? bstRaw
+            : ((Number(esp?.baseHp) || 0) + (Number(esp?.baseAtk) || 0) + (Number(esp?.baseDef) || 0)
+                + (Number(esp?.baseSpAtk) || 0) + (Number(esp?.baseSpDef) || 0) + (Number(esp?.baseSpeed) || 0)) || 450;
+
+        const score = level
+            * potMult
+            * q
+            * (pk.shiny ? 1.5 : 1)
+            * (1 + Math.min(192, Math.max(0, ivSum)) / 384)
+            * (1 + bst / 2000)
+            * (isMega ? 1.25 : 1)
+            * (hasZMove ? 1.15 : 1);
+
+        scored.push({
+            id: pk.id,
+            speciesId: spId,
+            name: String(pk.apelido || pk.nome || pk.name || esp?.name || `#${pk.id}`),
+            level,
+            potencia: pot,
+            potMult,
+            quality: q,
+            ivTotal: ivSum,
+            isMega,
+            hasZMove,
+            shiny: Boolean(pk.shiny),
+            score: Number(score.toFixed(2)),
+        });
+    }
+
+    scored.sort((a, b) => (b.score - a.score) || (b.level - a.level));
+    const members = scored.slice(0, limit);
+    return {
+        pokemonIds: members.map((m) => m.id),
+        members,
+    };
+}
+
+// ---------- Formacao PvP por Modo (Padrao, Ginasio ^0.45, Guerra ^0.20) ----------
+const PVP_FRONTLINE_TILES = Object.freeze([2, 3, 1, 4, 0, 5]);
+const PVP_BACKLINE_TILES = Object.freeze([17, 18, 16, 15, 14, 19, 20, 21, 23, 24, 22, 25]);
+const PVP_DEFENSIVE_PASSIVE_SET = new Set(['iron_defense', 'rocky_helmet', 'recover', 'intimidate']);
+
+/**
+ * Monta formacao PvP de ate 5 slots adaptada ao modo ('padrao', 'ginasio' ^0.45, 'guerra' ^0.20).
+ * @param {object|Array<object>} [state={}] Estado da conta ou lista de Pokemons.
+ * @param {'padrao'|'ginasio'|'guerra'} [mode='padrao'] Modo da arena.
+ * @param {Map|object|null} [speciesCatalog=null] Catalogo de especies opcional.
+ * @returns {{ mode: string, pokemonIds: Array<number|string>, casas: Record<string, number>, members: Array<object> }}
+ */
+export function buildPvpFormationForMode(state = {}, mode = 'padrao', speciesCatalog = null) {
+    const rawMode = String(mode || 'padrao').trim().toLowerCase();
+    const normMode = rawMode === 'war' ? 'guerra' : (rawMode === 'ginasio' || rawMode === 'guerra' ? rawMode : 'padrao');
+    const pool = Array.isArray(state)
+        ? state
+        : (Array.isArray(state?.pokemons) ? state.pokemons : []);
+
+    const seen = new Set();
+    const candidates = [];
+
+    for (const pk of pool) {
+        if (!pk || pk.id == null) continue;
+        const idKey = String(pk.id);
+        if (seen.has(idKey)) continue;
+        seen.add(idKey);
+
+        const spId = Number(pk.speciesId) || 0;
+        const esp = lookupSpecies(speciesCatalog, spId);
+        const level = Math.max(1, Number(pk.level ?? pk.nivel) || 1);
+        const arenaLevel = effectiveArenaLevel(level, normMode === 'guerra' ? 'guerra' : 'ginasio');
+        const pot = Math.max(1, Math.min(5, Math.round(Number(pk.potencia) || 1)));
+        const potMult = POTENCIA_MULTS[pot - 1] ?? 1;
+        const q = Math.max(0.8, Number(pk.quality ?? pk.qualidade) || 1);
+        const ivSum = ivTotalOf(pk) ?? 96;
+        const ref = parseRefinoObj(pk.refino);
+        const refSum = STATS_REFINAVEIS.reduce((s, k) => s + ref[k], 0);
+        const isMega = Boolean(pk.mega || pk.isMega || pk.megaDeDex != null || (spId >= 3000 && spId < 4000));
+        const hasZMove = Boolean(pk.tmElemental || pk.zmove || pk.zMove);
+        const passive = passivaParaEspecie(esp || pk);
+        const defensivePassive = Boolean(
+            passive && (
+                PVP_DEFENSIVE_PASSIVE_SET.has(passive.id)
+                || (Number(passive.bonusDefPct) || 0) > 0
+                || (Number(passive.curaHpPct) || 0) > 0
+                || (Number(passive.reducaoDanoInimigoPct) || 0) > 0
+                || (Number(passive.reflexoPct) || 0) > 0
+            )
+        );
+
+        const st = pk.stats || {};
+        const hp = Number(st.hp) || (Number(esp?.baseHp) || 60) * 2;
+        const def = Number(st.def) || Number(esp?.baseDef) || 60;
+        const spDef = Number(st.spDef) || Number(esp?.baseSpDef) || 60;
+        const atk = Number(st.atk) || Number(esp?.baseAtk) || 60;
+        const spAtk = Number(st.spAtk) || Number(esp?.baseSpAtk) || 60;
+        const spd = Number(st.speed) || Number(esp?.baseSpeed) || 60;
+        const bulk = hp + def + spDef;
+        const offense = Math.max(atk, spAtk) + spd * 0.5;
+        const tankScore = (defensivePassive ? 250 : 0) + (bulk - offense * 0.35);
+
+        let score;
+        if (normMode === 'guerra') {
+            // Na Guerra (^0.20), sobrevivencia pesa 60% vs 40% abates; P5/Q/IV/Refino/Z-Move/Passiva dominam.
+            const statCore = bulk * 0.6 + offense * 0.4;
+            score = (arenaLevel * 0.4)
+                + (potMult * 110)
+                + (q * 60)
+                + (ivSum * 0.35)
+                + (refSum * 4)
+                + (pk.shiny ? 35 : 0)
+                + (isMega ? 45 : 0)
+                + (hasZMove ? 45 : 0)
+                + (passive ? (defensivePassive ? 65 : 40) : 0)
+                + (statCore * 0.15);
+        } else if (normMode === 'ginasio') {
+            score = (arenaLevel * 1.1)
+                + (potMult * 85)
+                + (q * 45)
+                + (ivSum * 0.25)
+                + (refSum * 2.5)
+                + (pk.shiny ? 25 : 0)
+                + (isMega ? 30 : 0)
+                + (hasZMove ? 25 : 0)
+                + (passive ? 30 : 0);
+        } else {
+            score = (arenaLevel * 0.85)
+                + (potMult * 90)
+                + (q * 50)
+                + (ivSum * 0.25)
+                + (refSum * 3)
+                + (pk.shiny ? 25 : 0)
+                + (isMega ? 30 : 0)
+                + (hasZMove ? 30 : 0)
+                + (passive ? 35 : 0);
+        }
+
+        candidates.push({
+            id: pk.id,
+            speciesId: spId,
+            name: String(pk.apelido || pk.nome || pk.name || esp?.name || `#${pk.id}`),
+            level,
+            arenaLevel,
+            potencia: pot,
+            quality: q,
+            hasZMove,
+            isMega,
+            passive,
+            tankScore: Number(tankScore.toFixed(2)),
+            score: Number(score.toFixed(2)),
+        });
+    }
+
+    candidates.sort((a, b) => (b.score - a.score) || (b.arenaLevel - a.arenaLevel));
+    const chosen = candidates.slice(0, 5);
+    if (chosen.length === 0) {
+        return { mode: normMode, pokemonIds: [], casas: {}, members: [] };
+    }
+
+    const byTank = [...chosen].sort((a, b) => (b.tankScore - a.tankScore) || (b.score - a.score));
+    const frontCount = byTank.length >= 4 ? 2 : 1;
+    const frontline = byTank.slice(0, frontCount);
+    const backline = byTank.slice(frontCount);
+
+    const pokemonIds = [];
+    const casas = {};
+    const members = [];
+
+    frontline.forEach((m, idx) => {
+        const tile = PVP_FRONTLINE_TILES[idx];
+        pokemonIds.push(m.id);
+        casas[String(m.id)] = tile;
+        members.push({ ...m, role: 'front', tile });
+    });
+    backline.forEach((m, idx) => {
+        const tile = PVP_BACKLINE_TILES[idx];
+        pokemonIds.push(m.id);
+        casas[String(m.id)] = tile;
+        members.push({ ...m, role: 'back', tile });
+    });
+
+    return { mode: normMode, pokemonIds, casas, members };
+}
+
+// ---------- Analise de Undercut em Anuncios Proprios ----------
+/**
+ * Analisa anuncios proprios no mercado contra o piso retornado por marketFloorFn,
+ * calculando preco sugerido (piso - 1 ou -1%, >= 1) e liquido apos taxa oficial.
+ * @param {Array<object>} [ownListings=[]] Anuncios proprios no mercado.
+ * @param {Function|null} [marketFloorFn=null] Funcao (listing) => number | { price, preco, floor }.
+ * @returns {{ total: number, undercutCount: number, listings: Array<object>, undercutListings: Array<object> }}
+ */
+export function analyzeOwnListingsUndercut(ownListings = [], marketFloorFn = null) {
+    const rawList = Array.isArray(ownListings) ? ownListings.filter(Boolean) : [];
+    const listings = [];
+    const undercutListings = [];
+
+    for (const item of rawList) {
+        const price = Math.max(0, Number(item.preco ?? item.price ?? 0) || 0);
+        const currency = String(item.moeda ?? item.currency ?? 'gold').toLowerCase() === 'orb' ? 'orb' : 'gold';
+        const kind = (item.tipo === 'pokemon' || item.speciesId != null || item.pokeId != null || item.pokemon != null)
+            ? 'pokemon'
+            : 'item';
+
+        const floorRaw = typeof marketFloorFn === 'function' ? marketFloorFn(item) : null;
+        const floorPriceRaw = typeof floorRaw === 'number'
+            ? floorRaw
+            : Number(floorRaw?.price ?? floorRaw?.preco ?? floorRaw?.floor ?? NaN);
+        const floorPrice = Number.isFinite(floorPriceRaw) && floorPriceRaw > 0 ? floorPriceRaw : null;
+
+        const undercut = floorPrice != null && price > floorPrice;
+        let suggestedPrice = price;
+        if (undercut) {
+            const pctStep = Math.floor(floorPrice * 0.99);
+            suggestedPrice = Math.max(1, floorPrice >= 100 ? Math.min(floorPrice - 1, pctStep) : floorPrice - 1);
+        }
+
+        const currentNet = liquidoVenda(price, currency, kind);
+        const suggestedNet = liquidoVenda(suggestedPrice, currency, kind);
+        const entry = {
+            id: item.id ?? null,
+            price,
+            currency,
+            kind,
+            floorPrice,
+            undercut,
+            diff: floorPrice != null ? price - floorPrice : 0,
+            suggestedPrice,
+            currentNet,
+            suggestedNet,
+            currentFee: Math.max(0, price - currentNet),
+            suggestedFee: Math.max(0, suggestedPrice - suggestedNet),
+        };
+        listings.push(entry);
+        if (undercut) undercutListings.push(entry);
+    }
+
+    return {
+        total: listings.length,
+        undercutCount: undercutListings.length,
+        listings,
+        undercutListings,
+    };
 }
