@@ -477,7 +477,7 @@ function applySummaryLayout() {
     const allCompact = densities.every((d) => d === 'compact');
     const densBtn = $('btnGridSummaryDensity');
     if (densBtn) {
-        densBtn.textContent = allCompact ? 'Modo: Resumido' : 'Modo: Completo';
+        densBtn.textContent = allCompact ? 'Resumido' : 'Completo';
         densBtn.classList.toggle('active', !allCompact);
     }
     for (const acc of ACCOUNTS) {
@@ -1094,7 +1094,7 @@ function renderGridToolbar() {
         const embedded = [...webviews.keys()];
         const anyOn = embedded.some((acc) => !isAccountMuted(acc));
         muteBtn.disabled = embedded.length === 0;
-        setHtml(muteBtn, `${anyOn ? ICON_SOUND_OFF : ICON_SOUND_ON}<span>${anyOn ? 'Mutar todas' : 'Som em todas'}</span>`);
+        setHtml(muteBtn, `${anyOn ? ICON_SOUND_OFF : ICON_SOUND_ON}<span>${anyOn ? 'Silenciar todas' : 'Som em todas'}</span>`);
         muteBtn.title = embedded.length === 0 ? 'Nenhum jogo aberto na grade' : '';
     }
     for (const acc of ACCOUNTS) {
@@ -2171,14 +2171,21 @@ function renderTopTabsAndSlots() {
         const sDot = $(`slotDot-${acc}`);
         if (sDot) sDot.className = `acc-dot ${status}`;
         const sTitle = $(`slotTitle-${acc}`);
-        if (sTitle) sTitle.textContent = `Conta ${acc} · ${nick}`;
+        setText(sTitle, `Conta ${acc} · ${nick}`);
         const sHunt = $(`slotHunt-${acc}`);
-        if (sHunt) sHunt.textContent = hunt ? `${hunt} · ${stLabel}` : stLabel;
+        setText(sHunt, hunt ? `${hunt} · ${stLabel}` : stLabel);
+        // título truncado na barra estreita: o texto inteiro fica na dica
+        if (sTitle && sTitle.title !== `Conta ${acc} · ${nick}${hunt ? ` · ${hunt}` : ''}`) sTitle.title = `Conta ${acc} · ${nick}${hunt ? ` · ${hunt}` : ''}`;
 
         const toggleBtn = document.querySelector(`[data-slot-act="toggle"][data-slot="${acc}"]`);
         if (toggleBtn) {
-            setText(toggleBtn, isEmbedded ? 'Ir p/ Headless' : 'Abrir Embutido');
+            // mesmo texto do botão do painel, para não parecer outra função
+            setText(toggleBtn, isEmbedded ? 'Voltar para Headless' : 'Abrir no Embutido');
             setClass(toggleBtn, isEmbedded ? 'btn sm primary grid-only' : 'btn sm teal grid-only');
+            const tip = isEmbedded
+                ? 'Fecha o jogo desta tela e o bot segue farmando sozinho em 2º plano (Headless: sem tela, quase sem GPU).'
+                : 'Abre o jogo desta conta aqui dentro (Embutido): você vê e pode jogar; o bot continua junto.';
+            if (toggleBtn.title !== tip) toggleBtn.title = tip;
         }
         const reloadBtn = document.querySelector(`[data-slot-act="reload"][data-slot="${acc}"]`);
         if (reloadBtn) reloadBtn.hidden = !isEmbedded;

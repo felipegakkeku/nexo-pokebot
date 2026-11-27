@@ -1333,11 +1333,11 @@
             <button type="button" class="grid-tb-btn" data-grid-layout="rows" title="Todas empilhadas">Linhas</button>
           </div>
           <div class="grid-tb-group" role="group" aria-label="Sidebar de resumo em todas as telas">
-            <span class="grid-tb-label">Todas</span>
-            <button type="button" class="grid-tb-btn" data-grid-summary="right" title="Aplicar resumo à direita em todas as contas (cada conta pode mudar na própria barra)">Dir</button>
-            <button type="button" class="grid-tb-btn" data-grid-summary="left" title="Aplicar resumo à esquerda em todas as contas">Esq</button>
-            <button type="button" class="grid-tb-btn" data-grid-summary="bottom" title="Aplicar resumo abaixo em todas as contas">Baixo</button>
-            <button type="button" class="grid-tb-btn" data-grid-summary="off" title="Ocultar resumo em todas as contas">Oculto</button>
+            <span class="grid-tb-label" title="Onde fica o resumo de cada tela. Cada conta ainda pode mudar o seu no próprio resumo.">Resumo</span>
+            <button type="button" class="grid-tb-btn" data-grid-summary="right" title="Resumo à direita em todas as contas (cada conta pode mudar no próprio resumo)">Direita</button>
+            <button type="button" class="grid-tb-btn" data-grid-summary="left" title="Resumo à esquerda em todas as contas">Esquerda</button>
+            <button type="button" class="grid-tb-btn" data-grid-summary="bottom" title="Resumo embaixo do jogo em todas as contas">Embaixo</button>
+            <button type="button" class="grid-tb-btn" data-grid-summary="off" title="Esconde o resumo em todas as contas (o jogo ocupa a tela toda)">Ocultar</button>
             <button type="button" class="grid-tb-btn" id="btnGridSummaryDensity" title="Alternar entre visão resumida e completa em todas as contas">Resumido</button>
           </div>
           <div class="grid-tb-group">
@@ -1357,7 +1357,7 @@
           </div>
           <span class="grid-tb-hint" id="gridHint">Arraste a barra de uma tela para trocar de lugar · arraste a divisória para redimensionar</span>
           <div class="grid-tb-group">
-            <button type="button" class="grid-tb-btn" id="btnGridMuteAll">Mutar todas</button>
+            <button type="button" class="grid-tb-btn" id="btnGridMuteAll" title="Silencia ou liga o som de todas as telas de jogo">Silenciar todas</button>
             <button type="button" class="grid-tb-btn" id="btnGridReset" title="Volta para 2x2, ordem 1 a 4 e todas visíveis">Restaurar</button>
           </div>
         </div>
@@ -1376,7 +1376,7 @@
               <button type="button" class="btn sm slot-audio is-muted" data-slot-act="mute" data-slot="1" id="slotAudio-1" hidden>Mudo</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="focus" data-slot="1" title="Focar nesta conta" aria-label="Focar na Conta 1" data-icon="crosshair"></button>
               <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="1" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 1" data-icon="refresh" hidden></button>
-              <button type="button" class="btn sm teal grid-only" data-slot-act="toggle" data-slot="1">Abrir Embutido</button>
+              <button type="button" class="btn sm teal grid-only" data-slot-act="toggle" data-slot="1">Abrir no Embutido</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="1" title="Maximizar esta tela" aria-label="Maximizar a tela da Conta 1"></button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="hide" data-slot="1" title="Ocultar esta tela da grade" aria-label="Ocultar a tela da Conta 1" data-icon="eyeoff"></button>
             </div>
@@ -1411,7 +1411,7 @@
               <button type="button" class="btn sm slot-audio is-muted" data-slot-act="mute" data-slot="2" id="slotAudio-2" hidden>Mudo</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="focus" data-slot="2" title="Focar nesta conta" aria-label="Focar na Conta 2" data-icon="crosshair"></button>
               <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="2" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 2" data-icon="refresh" hidden></button>
-              <button type="button" class="btn sm teal grid-only" data-slot-act="toggle" data-slot="2">Abrir Embutido</button>
+              <button type="button" class="btn sm teal grid-only" data-slot-act="toggle" data-slot="2">Abrir no Embutido</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="2" title="Maximizar esta tela" aria-label="Maximizar a tela da Conta 2"></button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="hide" data-slot="2" title="Ocultar esta tela da grade" aria-label="Ocultar a tela da Conta 2" data-icon="eyeoff"></button>
             </div>
@@ -1446,7 +1446,7 @@
               <button type="button" class="btn sm slot-audio is-muted" data-slot-act="mute" data-slot="3" id="slotAudio-3" hidden>Mudo</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="focus" data-slot="3" title="Focar nesta conta" aria-label="Focar na Conta 3" data-icon="crosshair"></button>
               <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="3" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 3" data-icon="refresh" hidden></button>
-              <button type="button" class="btn sm teal grid-only" data-slot-act="toggle" data-slot="3">Abrir Embutido</button>
+              <button type="button" class="btn sm teal grid-only" data-slot-act="toggle" data-slot="3">Abrir no Embutido</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="3" title="Maximizar esta tela" aria-label="Maximizar a tela da Conta 3"></button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="hide" data-slot="3" title="Ocultar esta tela da grade" aria-label="Ocultar a tela da Conta 3" data-icon="eyeoff"></button>
             </div>
@@ -1481,7 +1481,7 @@
               <button type="button" class="btn sm slot-audio is-muted" data-slot-act="mute" data-slot="4" id="slotAudio-4" hidden>Mudo</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="focus" data-slot="4" title="Focar nesta conta" aria-label="Focar na Conta 4" data-icon="crosshair"></button>
               <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="4" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 4" data-icon="refresh" hidden></button>
-              <button type="button" class="btn sm teal grid-only" data-slot-act="toggle" data-slot="4">Abrir Embutido</button>
+              <button type="button" class="btn sm teal grid-only" data-slot-act="toggle" data-slot="4">Abrir no Embutido</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="4" title="Maximizar esta tela" aria-label="Maximizar a tela da Conta 4"></button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="hide" data-slot="4" title="Ocultar esta tela da grade" aria-label="Ocultar a tela da Conta 4" data-icon="eyeoff"></button>
             </div>

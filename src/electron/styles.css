@@ -1927,6 +1927,8 @@ body:has(#activityDock) .toast-stack.pos-top-center {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* sem espaço, a dica cortada no meio só confunde: some (o ícone de arrastar e a divisória têm a mesma dica) */
+@media (max-width: 1400px) { .grid-tb-hint { display: none; } }
 .wv-slot .grid-only { display: none; }
 .workspace.mode-grid .wv-slot .grid-only { display: inline-flex; }
 .workspace.mode-grid .wv-slot.grid-hidden { display: none; }
