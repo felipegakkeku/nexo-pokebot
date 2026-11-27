@@ -1,6 +1,7 @@
 // Controlador stateful de farm headless e servidor HTTP/API para Dashboard Web e App Desktop.
 import { createServer } from 'node:http';
 import { prepareDataRoot } from './data-dir.mjs';
+import { spawnBrowserWithPipe } from './cdp-pipe.mjs';
 import { decryptText, encryptText, isEncrypted, isSecretStoreAvailable } from './secret-store.mjs';
 import {
     TOKEN_QUERY_PARAM,
@@ -16,7 +17,7 @@ import { fetchSpeciesCatalog, getSharedMarketBase, SPECIES_CACHE_VERSION } from 
 import { adviseItems, advisePokemons, buildSpeciesIndex, estimatePokemonPrice, isLegendary, notaOf } from './economy-advisor.mjs';
 import { findPokedexEvolutions, planFinalEvolution } from './evolution-plan.mjs';
 import { DROP_DEFAULTS, decideDrop, frameForDecision, marketRulesOf, netOfListing, normalizeDropPatch } from './drop-router.mjs';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -1154,17 +1155,64 @@ export function detectProfileBrowserKind(profileDir) {
     return '';
 }
 
+// Navegadores do bot abertos com depuração por canal privado (pipe), por perfil. O canal só existe dentro
+// deste processo, então a ponte do jogo e a captura de login reaproveitam estas conexões em vez de uma
+// porta TCP sem autenticação (`--remote-debugging-port`).
+const ownedBrowsers = new Map();
+
+function ownedBrowserKey(profileDir) {
+    return resolve(profileDir).toLowerCase();
+}
+
+function getOwnedBrowser(profileDir) {
+    if (!profileDir) return null;
+    const entry = ownedBrowsers.get(ownedBrowserKey(profileDir));
+    if (!entry) return null;
+    if (entry.hub.isClosed()) {
+        ownedBrowsers.delete(ownedBrowserKey(profileDir));
+        return null;
+    }
+    return entry;
+}
+
+async function launchOwnedBrowser(exe, profileDir, urls) {
+    const owned = getOwnedBrowser(profileDir);
+    if (owned) {
+        // Perfil já aberto pelo bot: pede as janelas pelo canal em vez de abrir outro processo.
+        const cdp = owned.hub.handle();
+        try {
+            for (const [i, url] of urls.entries()) {
+                await cdp.send('Target.createTarget', { url, ...(i === 0 ? { newWindow: true } : {}) });
+            }
+        } finally {
+            cdp.close();
+        }
+        return { exitedQuickly: false };
+    }
+    const { child, hub } = await spawnBrowserWithPipe(exe, [
+        `--user-data-dir=${profileDir}`,
+        '--no-first-run', '--no-default-browser-check',
+        '--new-window', ...urls,
+    ]);
+    const key = ownedBrowserKey(profileDir);
+    ownedBrowsers.set(key, { child, hub });
+    hub.onClose(() => {
+        if (ownedBrowsers.get(key)?.hub === hub) ownedBrowsers.delete(key);
+    });
+    return { exitedQuickly: false };
+}
+
 async function launchBrowserWindow(exe, profileDir, urls, existingProfile, { enableRemoteDebugging = true, waitForExit = false, signal = null } = {}) {
     if (!existingProfile) mkdirSync(profileDir, { recursive: true });
+    if (!existingProfile && enableRemoteDebugging && !waitForExit) {
+        return launchOwnedBrowser(exe, profileDir, urls);
+    }
     const profileArgs = existingProfile
         ? [
             ...(existingProfile.root ? [`--user-data-dir=${existingProfile.root}`] : []),
             `--profile-directory=${existingProfile.name}`,
         ]
-        : [
-            `--user-data-dir=${profileDir}`,
-            ...(enableRemoteDebugging ? ['--remote-debugging-port=0'] : []),
-        ];
+        : [`--user-data-dir=${profileDir}`];
     const child = spawn(exe, [
         ...profileArgs,
         '--no-first-run', '--no-default-browser-check',
@@ -1460,6 +1508,15 @@ async function connectCdpClient(wsUrl, timeoutMs = 12_000) {
 }
 
 async function connectActiveBrowserCdp(options = {}) {
+    const owned = getOwnedBrowser(options.profileDir);
+    if (owned) {
+        return {
+            cdp: owned.hub.handle(),
+            userDataDir: resolve(options.profileDir),
+            isSharedBrowser: true,
+            viaPipe: true,
+        };
+    }
     let candidateRoots;
     if (options.profileDir) {
         candidateRoots = [resolve(options.profileDir)];
@@ -1736,27 +1793,27 @@ export async function openInteractiveLogin(provider, options = {}) {
     const profileDir = options.profileDir || resolve(cwd, DEFAULT_BROWSER_PROFILE_DIR);
     mkdirSync(profileDir, { recursive: true });
 
-    const portFile = join(profileDir, 'DevToolsActivePort');
-    try {
-        rmSync(portFile, { force: true });
-    } catch {
-        // sem arquivo antigo
-    }
-
     const timeoutMs = options.timeoutMs ?? (headless ? 10_000 : 300_000);
     const args = [
         `--user-data-dir=${profileDir}`,
-        '--remote-debugging-port=0',
         '--no-first-run',
         '--no-default-browser-check',
         ...(headless ? ['--headless=new', 'about:blank'] : ['--new-window', targetUrl]),
     ];
 
-    const child = spawn(exe, args, { stdio: 'ignore' });
+    // Depuração por canal privado (pipe): sem porta TCP nem DevToolsActivePort para outro programa achar.
+    let child;
+    let hub;
     let exited = false;
     let launchError = null;
+    try {
+        ({ child, hub } = await spawnBrowserWithPipe(exe, args));
+    } catch (err) {
+        throw new Error(`Falha ao abrir o navegador: ${err.message}`);
+    }
     child.once('exit', () => { exited = true; });
     child.once('error', (err) => { launchError = err; exited = true; });
+    if (child.exitCode !== null) exited = true;
 
     let cdp = null;
     const closeAll = async () => {
@@ -1785,29 +1842,26 @@ export async function openInteractiveLogin(provider, options = {}) {
     options.signal?.addEventListener('abort', onAbort, { once: true });
 
     try {
-        let port = null;
-        let wsPath = null;
-        const waitPortDeadline = Date.now() + 12_000;
-        while (Date.now() < waitPortDeadline && !exited && !options.signal?.aborted) {
-            if (existsSync(portFile)) {
-                const lines = readFileSync(portFile, 'utf8').trim().split(/\r?\n/);
-                const parsedPort = Number(lines[0]);
-                const parsedPath = String(lines[1] || '').trim();
-                if (parsedPort > 0 && parsedPath.startsWith('/devtools/')) {
-                    port = parsedPort;
-                    wsPath = parsedPath;
-                    break;
-                }
+        const connectDeadline = Date.now() + (options.connectTimeoutMs ?? 12_000);
+        let ready = false;
+        const probe = hub.handle();
+        while (Date.now() < connectDeadline && !exited && !hub.isClosed() && !options.signal?.aborted) {
+            try {
+                await probe.send('Browser.getVersion');
+                ready = true;
+                break;
+            } catch {
+                await new Promise((r) => setTimeout(r, 150));
             }
-            await new Promise((r) => setTimeout(r, 150));
         }
+        probe.close();
 
-        if (!port || !wsPath) {
+        if (!ready) {
             if (launchError) throw new Error(`Falha ao abrir o navegador: ${launchError.message}`);
             throw new Error('Janela de login fechada ou perfil ocupado. Feche as janelas abertas deste perfil e tente novamente.');
         }
 
-        cdp = await connectCdpClient(`ws://127.0.0.1:${port}${wsPath}`, options.connectTimeoutMs ?? 12_000);
+        cdp = hub.handle();
         const deadline = Date.now() + timeoutMs;
 
         while (Date.now() < deadline && !exited && !options.signal?.aborted) {
@@ -1976,7 +2030,7 @@ export async function createCdpBrowserBridge(options = {}) {
         await new Promise((r) => setTimeout(r, 250));
     }
     if (!active) {
-        throw new Error('Navegador da tela vinculada com DevToolsActivePort nao encontrado.');
+        throw new Error('Navegador do jogo nao encontrado para acoplar (o bot nao o abriu neste processo e nao ha depuracao ativa no perfil).');
     }
 
     const { cdp } = active;

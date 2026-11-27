@@ -4,6 +4,7 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+- **Navegador do bot sem porta de depuração**: o perfil separado do bot (login e jogo) deixou de abrir a porta de depuração remota, que qualquer programa do seu usuário poderia usar para controlar o navegador e ler as contas logadas. O bot agora fala com o navegador por um canal privado que só ele tem. Em troca, o navegador aberto pelo bot fecha junto com o bot (antes ele ficava aberto sozinho). Seu Chrome de uso diário não é afetado.
 - **Sessão e tokens criptografados**: o arquivo de sessão e os tokens de live (Twitch/Kick) na configuração agora ficam criptografados no disco (AES-256-GCM), com a chave protegida pelo DPAPI do Windows: só a sua conta do Windows, neste PC, abre. Arquivos antigos em texto puro são convertidos sozinhos na primeira leitura. Sem DPAPI disponível, o app segue funcionando como antes e avisa no log.
 
 - **Painel local protegido por token**: a API em `127.0.0.1` agora só responde a quem tem o token da execução (gerado a cada abertura). O botão **Abrir painel** do Hub e o endereço mostrado no console já levam o token; digitar `127.0.0.1:17890` direto no navegador mostra a página de acesso protegido. Outros programas da máquina não conseguem mais comandar o bot.
