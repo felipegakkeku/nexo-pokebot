@@ -10,6 +10,7 @@ import {
 import { dirname, join, resolve } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { randomUUID } from 'node:crypto';
+import { decryptText, encryptText, isEncrypted, isSecretStoreAvailable } from './secret-store.mjs';
 
 const MAX_SNAPPY_UNCOMPRESSED_BYTES = 32 * 1024 * 1024;
 const LEVELDB_FOOTER_SIZE = 48;
@@ -1086,6 +1087,8 @@ function resolveDefaultCachePath(cachePath, cwd) {
     return cachePath ? resolve(cachePath) : resolve(cwd || process.cwd(), '.pokebot-session.json');
 }
 
+const SESSION_CONTEXT = 'pokebot-session';
+
 /**
  * Carrega o cache local da sessao headless se existir e for JSON valido.
  * @param {string} [cachePath] Caminho do arquivo de cache.
@@ -1095,12 +1098,30 @@ export function loadSessionCache(cachePath) {
     const target = resolveDefaultCachePath(cachePath);
     if (!existsSync(target)) return null;
     try {
-        const raw = readFileSync(target, 'utf8');
-        const parsed = JSON.parse(raw);
+        const raw = readFileSync(target, 'utf8').trim();
+        const encrypted = isEncrypted(raw);
+        const text = encrypted ? decryptText(raw, SESSION_CONTEXT) : raw;
+        if (text === null) return null;
+        const parsed = JSON.parse(text);
         if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+        // Arquivo antigo em texto puro: assim que for lido, regrava criptografado.
+        if (!encrypted && isSecretStoreAvailable()) {
+            try { writeSessionFile(target, parsed); } catch { /* segue com a leitura */ }
+        }
         return parsed;
     } catch {
         return null;
+    }
+}
+
+function writeSessionFile(target, data) {
+    const json = JSON.stringify(data, null, 2) + '\n';
+    const sealed = encryptText(json, SESSION_CONTEXT);
+    writeFileSync(target, sealed ? `${sealed}\n` : json, { encoding: 'utf8', mode: 0o600 });
+    try {
+        chmodSync(target, 0o600);
+    } catch {
+        // Ignora sistemas sem suporte a chmod POSIX
     }
 }
 
@@ -1120,12 +1141,7 @@ export function saveSessionCache(cachePath, sessionData) {
         dispositivo: sessionData.dispositivo ?? null,
         updatedAt: sessionData.updatedAt ?? Date.now(),
     };
-    writeFileSync(target, JSON.stringify(data, null, 2) + '\n', { encoding: 'utf8', mode: 0o600 });
-    try {
-        chmodSync(target, 0o600);
-    } catch {
-        // Ignora sistemas sem suporte a chmod POSIX
-    }
+    writeSessionFile(target, data);
     return data;
 }
 

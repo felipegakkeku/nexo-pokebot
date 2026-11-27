@@ -64,6 +64,10 @@ import {
 } from '../src/headless/gui-server.mjs';
 import { buildDesktopExecutable, buildPokeballIconBuffer } from '../src/desktop/build-exe.mjs';
 import { startMultiAccountDaemon } from '../src/headless/multi-daemon.mjs';
+import { setSecretKeyProvider } from '../src/headless/secret-store.mjs';
+
+// Testes não tocam no DPAPI nem na pasta de dados real: chave fixa só para esta execução.
+setSecretKeyProvider(() => Buffer.alloc(32, 5));
 
 // A API local exige token: os testes sobem o servidor por este wrapper e o fetch daqui anexa o token
 // às chamadas feitas para servidores que eles mesmos subiram (o resto passa direto).

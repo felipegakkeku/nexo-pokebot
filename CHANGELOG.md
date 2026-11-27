@@ -4,6 +4,8 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+- **Sessão e tokens criptografados**: o arquivo de sessão e os tokens de live (Twitch/Kick) na configuração agora ficam criptografados no disco (AES-256-GCM), com a chave protegida pelo DPAPI do Windows: só a sua conta do Windows, neste PC, abre. Arquivos antigos em texto puro são convertidos sozinhos na primeira leitura. Sem DPAPI disponível, o app segue funcionando como antes e avisa no log.
+
 - **Painel local protegido por token**: a API em `127.0.0.1` agora só responde a quem tem o token da execução (gerado a cada abertura). O botão **Abrir painel** do Hub e o endereço mostrado no console já levam o token; digitar `127.0.0.1:17890` direto no navegador mostra a página de acesso protegido. Outros programas da máquina não conseguem mais comandar o bot.
 - **Dados fora do OneDrive**: sessões, cookies, perfis de navegador e configurações passam a ficar em `%LOCALAPPDATA%\Nexo PokeBot` em vez da pasta do programa (que no Desktop é sincronizada com a nuvem). Na primeira abertura os dados antigos são movidos sozinhos, com conferência antes de apagar a origem; se algo estiver em uso, tenta de novo na próxima vez. `NEXO_DATA_DIR` troca o local.
 

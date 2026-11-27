@@ -1,6 +1,7 @@
 // Controlador stateful de farm headless e servidor HTTP/API para Dashboard Web e App Desktop.
 import { createServer } from 'node:http';
 import { prepareDataRoot } from './data-dir.mjs';
+import { decryptText, encryptText, isEncrypted, isSecretStoreAvailable } from './secret-store.mjs';
 import {
     TOKEN_QUERY_PARAM,
     UNAUTHORIZED_PAGE,
@@ -873,11 +874,38 @@ function normalizeConfigPatch(current, patch = {}) {
     return next;
 }
 
+// Tokens de live ficam criptografados no arquivo (DPAPI, ver secret-store.mjs); o resto segue legível,
+// inclusive porque o launcher em C# lê `browserProfile` direto daqui.
+const SECRET_CONFIG_KEYS = ['liveTwitchToken', 'liveTwitchDeviceId', 'liveKickToken'];
+
+function sealConfigSecrets(source) {
+    const out = { ...source };
+    for (const key of SECRET_CONFIG_KEYS) {
+        const value = out[key];
+        if (typeof value === 'string' && value && !isEncrypted(value)) {
+            out[key] = encryptText(value, `config:${key}`) ?? value;
+        }
+    }
+    return out;
+}
+
 function loadSavedConfig(configPath) {
     if (!configPath || !existsSync(configPath)) return {};
     try {
         const parsed = JSON.parse(readFileSync(configPath, 'utf8'));
-        return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+        let hasPlainSecret = false;
+        for (const key of SECRET_CONFIG_KEYS) {
+            const value = parsed[key];
+            if (typeof value !== 'string' || !value) continue;
+            if (isEncrypted(value)) parsed[key] = decryptText(value, `config:${key}`) ?? '';
+            else hasPlainSecret = true;
+        }
+        // Arquivo antigo com token em texto puro: regrava criptografado na primeira leitura.
+        if (hasPlainSecret && isSecretStoreAvailable()) {
+            try { writeFileSync(configPath, JSON.stringify(sealConfigSecrets(parsed), null, 2) + '\n', 'utf8'); } catch { /* segue */ }
+        }
+        return parsed;
     } catch {
         return {};
     }
@@ -890,7 +918,7 @@ function persistConfig(configPath, config) {
         out[key] = config[key];
     }
     mkdirSync(dirname(configPath), { recursive: true });
-    writeFileSync(configPath, JSON.stringify(out, null, 2) + '\n', 'utf8');
+    writeFileSync(configPath, JSON.stringify(sealConfigSecrets(out), null, 2) + '\n', 'utf8');
 }
 
 function formatLogTime(tsMs) {
