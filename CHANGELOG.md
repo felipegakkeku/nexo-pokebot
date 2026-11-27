@@ -4,6 +4,10 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+- **Telas mais legíveis**: nenhum texto abaixo de 11px, botões com contraste suficiente em todas as cores de destaque e de conta, e cores dos botões acompanhando o tema. No modo fundo os cartões ficam sólidos, então o desenho não passa por trás dos números; menus e janelas por cima deixaram de usar desfoque, que pesava na placa de vídeo.
+- **Grade em colunas**: quando a tela de uma conta fica estreita, o resumo desce para baixo do jogo sozinho (antes o jogo virava uma faixa fina) e volta para o lado quando a tela alarga. Rótulos da barra da grade por extenso e com dica.
+- **Atividade sem repetição**: a mesma mensagem de rotina em sequência vira uma linha com ×N. "Conectado" mostra o nome da hunt em vez do endereço técnico e não abre mais aviso flutuante.
+- **Menos trabalho em segundo plano**: o resumo de cada tela não é mais redesenhado a cada segundo, e com o Hub minimizado ou na bandeja a tela é redesenhada a cada 10 s (alertas de shiny e som continuam na hora).
 - **Navegador do bot sem porta de depuração**: o perfil separado do bot (login e jogo) deixou de abrir a porta de depuração remota, que qualquer programa do seu usuário poderia usar para controlar o navegador e ler as contas logadas. O bot agora fala com o navegador por um canal privado que só ele tem. Em troca, o navegador aberto pelo bot fecha junto com o bot (antes ele ficava aberto sozinho). Seu Chrome de uso diário não é afetado.
 - **Sessão e tokens criptografados**: o arquivo de sessão e os tokens de live (Twitch/Kick) na configuração agora ficam criptografados no disco (AES-256-GCM), com a chave protegida pelo DPAPI do Windows: só a sua conta do Windows, neste PC, abre. Arquivos antigos em texto puro são convertidos sozinhos na primeira leitura. Sem DPAPI disponível, o app segue funcionando como antes e avisa no log.
 
