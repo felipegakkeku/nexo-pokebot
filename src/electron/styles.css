@@ -4831,3 +4831,7 @@ button.btn.claim-btn.claim-ready {
   .wv-summary:focus-within .wv-sum-pos { opacity: 1; }
 }
 @media (hover: none) { .wv-sum-pos { opacity: 1 !important; } }
+
+/* Atividade: aviso igual de várias contas numa linha, com um selo por conta */
+.log-accs { display: flex; flex-wrap: wrap; gap: 2px; max-width: 62px; }
+.log-row.multi { border-left-color: var(--border-hi); }

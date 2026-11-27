@@ -875,6 +875,40 @@
         if (accs.length > 1) out.sort((a, b) => (a.ts || 0) - (b.ts || 0));
         return out;
     }
+    // Visão "4 contas": o mesmo aviso chegando de várias contas em até 2 min vira uma linha só,
+    // com o selo de cada conta. O nick e a hunt saem do texto para a comparação.
+    const CROSS_ACC_WINDOW_MS = 120_000;
+    const reEsc = (t) => String(t).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    function crossTextOf(r) {
+        let t = String(r.meta.cleanText || '');
+        const nick = nickOf(r.acc);
+        if (nick) {
+            const n = reEsc(nick);
+            t = t.replace(new RegExp(`\\s+como\\s+${n}(?!\\w)`, 'g'), '').replace(new RegExp(`${n}(?!\\w)`, 'g'), '');
+        }
+        return t.replace(/\s*·\s*hunt\s+[^.·]+/g, '').replace(/\s{2,}/g, ' ').trim();
+    }
+    function groupAcrossAccounts(rows) {
+        const out = [];
+        const open = new Map();
+        for (const r of rows) {
+            const crossText = crossTextOf(r);
+            const key = `${r.meta.vKind}|${crossText}`;
+            const g = open.get(key);
+            if (g && (r.firstTs || r.ts) - g.ts <= CROSS_ACC_WINDOW_MS) {
+                if (!g.accs.includes(r.acc)) g.accs.push(r.acc);
+                g.parts.push(r);
+                g.count = Math.max(g.count, r.count);
+                g.ts = Math.max(g.ts, r.ts);
+                continue;
+            }
+            const ng = { ...r, crossText, accs: [r.acc], parts: [r] };
+            open.set(key, ng);
+            out.push(ng);
+        }
+        for (const g of out) g.accs.sort((a, b) => a - b);
+        return out.sort((a, b) => (a.ts || 0) - (b.ts || 0));
+    }
     function renderLogView(view, force = false) {
         if (!view) return;
         const { state, host } = view;
@@ -909,7 +943,7 @@
             }
             rows.push({ ...l, ts: lastTs, meta, count: reps, firstTs: l.ts });
         }
-        const shown = rows.slice(-300).reverse();
+        const shown = (state.scope === 'all' ? groupAcrossAccounts(rows) : rows).slice(-300).reverse();
         const list = host.querySelector('.log-list');
         const hl = (t) => {
             const safe = escapeHtml(t);
@@ -922,10 +956,17 @@
             ? shown.map((r) => {
                 const m = r.meta;
                 const accColor = ni?.accountAccent?.(r.acc) || 'azul';
-                return `<li class="log-row ${esc(m.vKind)}" data-acc="${r.acc}" data-acc-color="${esc(accColor)}">
+                const accs = r.accs || [r.acc];
+                const multi = accs.length > 1;
+                const badge = (a) => {
+                    const c = ni?.accountAccent?.(a) || 'azul';
+                    return `<span class="log-acc" data-acc="${a}" data-acc-color="${esc(c)}" title="${esc(`Conta ${a} · ${nickOf(a)}`)}">${a}</span>`;
+                };
+                const partsTip = multi ? r.parts.map((p) => `Conta ${p.acc}: ${p.meta.cleanText}`).join('\n') : '';
+                return `<li class="log-row ${esc(m.vKind)}${multi ? ' multi' : ''}" data-acc="${r.acc}"${multi ? '' : ` data-acc-color="${esc(accColor)}"`}>
                 <span class="log-ico">${IC(m.icon)}</span>
-                ${state.scope === 'all' ? `<span class="log-acc" data-acc="${r.acc}" data-acc-color="${esc(accColor)}" title="${esc(`Conta ${r.acc} · ${nickOf(r.acc)}`)}">${r.acc}</span>` : ''}
-                <span class="log-text"><span class="log-cat ${esc(m.vKind)}">${escapeHtml(m.tag.charAt(0) + m.tag.slice(1).toLowerCase())}</span>${hl(m.cleanText)}${r.count > 1 ? `<span class="log-count" title="Repetiu ${r.count} vezes">×${r.count}</span>` : ''}</span>
+                ${state.scope === 'all' ? (multi ? `<span class="log-accs">${accs.map(badge).join('')}</span>` : badge(r.acc)) : ''}
+                <span class="log-text"${multi ? ` title="${esc(partsTip)}"` : ''}><span class="log-cat ${esc(m.vKind)}">${escapeHtml(m.tag.charAt(0) + m.tag.slice(1).toLowerCase())}</span>${hl(multi ? r.crossText : m.cleanText)}${r.count > 1 ? `<span class="log-count" title="Repetiu ${r.count} vezes">×${r.count}</span>` : ''}</span>
                 <time class="log-time" title="${clockOf(r.ts)}${r.count > 1 ? ` (primeira às ${clockOf(r.firstTs)})` : ''}">${relTime(r.ts)}</time>
               </li>`;
             }).join('')

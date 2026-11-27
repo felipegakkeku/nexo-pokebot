@@ -4636,9 +4636,9 @@ export function createHeadlessController(options = {}) {
         const choice = tracker.potionChoice;
         if (config.potionOptimize && choice && choice.id !== tracker.lastPotionChoiceId) {
             tracker.lastPotionChoiceId = choice.id;
-            const fmtRate = (v) => String(Math.round(v * 100) / 100).replace('.', ',');
-            const worst = choice.ranked[choice.ranked.length - 1];
-            pushLog('info', `Poção mais econômica: ${choice.name} (${fmtRate(choice.goldPerHp)} gold por HP no Pokémon de ${Number(choice.maxHp).toLocaleString('pt-BR')} HP${worst && worst.id !== choice.id ? `; ${worst.name} sairia ${fmtRate(worst.goldPerHp)}` : ''}).`);
+            // só a escolha: o custo por HP muda com o Pokémon de cada conta, e sem ele as 4 contas
+            // cabem numa linha só na Atividade quando escolhem a mesma poção
+            pushLog('info', `Poção mais econômica agora: ${choice.name}.`);
         }
         const report = tracker.lastRestockReport;
         if (!forceRestock && report?.blockedByGold && nowFn() - (tracker.lastGoldReserveWarnAt || 0) >= 300_000) {
@@ -5801,7 +5801,7 @@ export function createHeadlessController(options = {}) {
         if (!stats.startedAt) stats.startedAt = nowFn();
         lastMsgAt = nowFn();
         lastSimAt = lastMsgAt;
-        pushLog('info', `Conectando em ${DEFAULT_WS_URL} como ${session.nick}...`);
+        pushLog('info', `Conectando ao servidor do jogo como ${session.nick}...`);
 
         const socket = wsFactory(DEFAULT_WS_URL, {
             headers: {
