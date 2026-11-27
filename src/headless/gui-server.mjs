@@ -3931,15 +3931,7 @@ export function createHeadlessController(options = {}) {
             state.noCentro !== true &&
             !(Number(state.mistico?.prazo || 0) > nowFn())
         ) {
-            if (config.huntGuideMode === 'notify') {
-                const logKey = `notify:${mode}:${decision.targetSlug}`;
-                if (objectiveLastLogKey !== logKey) {
-                    objectiveLastLogKey = logKey;
-                    pushLog('info', `${modeLabel} (${focusLabel}): próxima hunt recomendada -> ${decision.targetName} (troca pausada em "Só avisar").`);
-                }
-            } else {
-                queueObjectiveHuntSwap(decision.targetSlug, `${modeLabel} (${focusLabel})`);
-            }
+            queueObjectiveHuntSwap(decision.targetSlug, `${modeLabel} (${focusLabel})`);
         }
         return decision;
     };
@@ -4121,8 +4113,7 @@ export function createHeadlessController(options = {}) {
             ...catalog,
             huntSpeciesId: catalog.huntSpeciesBySlug?.[state?.huntSlug] ?? null,
         };
-        const effectiveTargetSlug = (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch') &&
-            objectiveTargetSlug && config.huntGuideMode !== 'notify'
+        const effectiveTargetSlug = (config.farmObjective === 'pokedex' || config.farmObjective === 'topcatch') && objectiveTargetSlug
             ? objectiveTargetSlug
             : (config.huntGuideMode === 'auto' && huntGuideTarget ? huntGuideTarget : config.targetHuntSlug);
         const syncedNow = getSyncedNowMs();
@@ -4291,7 +4282,8 @@ export function createHeadlessController(options = {}) {
                 const name = e.pokemon?.nome || e.pokemon?.name || catalog.pokemonNames?.[e.pokemon?.speciesId] || `#${e.pokemon?.speciesId ?? '?'}`;
                 const level = e.pokemon?.level ?? e.pokemon?.nivel ?? '?';
                 pushLog(isShiny ? 'shiny' : 'catch', `Capturado${isShiny ? ' SHINY' : ''}: ${name} (Nv ${level})`);
-                const caughtKey = chavePokedex(e.pokemon?.speciesId);
+                const rawSpId = e.pokemon?.speciesId ?? catalog.pokemonIdByName?.[String(name).trim().toLowerCase()] ?? null;
+                const caughtKey = chavePokedex(rawSpId);
                 if (caughtKey != null) {
                     const keyStr = String(caughtKey);
                     const weeklyBefore = getEffectiveWeeklyCaughtSet();
@@ -5780,7 +5772,7 @@ export function createHeadlessController(options = {}) {
                 huntGuideStatus = null;
                 huntGuideTarget = null;
                 huntGuideSwapAt = null;
-                if (config.huntGuideMode === 'notify' || (config.huntGuideMode === 'off' && config.farmObjective === 'off')) {
+                if (config.huntGuideMode !== 'auto' && config.farmObjective === 'off') {
                     cancelPendingHunt();
                 }
             }
