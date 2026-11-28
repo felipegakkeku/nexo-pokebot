@@ -205,7 +205,19 @@
                 <button type="button" data-split-dock="right" role="radio">Direita</button>
                 <button type="button" data-split-dock="hidden" role="radio">Removida</button>
               </div>
-              <button type="button" class="menu-item" id="btnWvAutoZoom" role="menuitemcheckbox" aria-checked="true" data-icon="layout" title="Em telas baixas da grade, afasta o zoom do jogo para o mapa continuar visível">Ajustar zoom do jogo à tela</button>
+              <div class="menu-label" data-icon="layout" style="margin-top:8px;">Interface do jogo (zoom)</div>
+              <div class="mini-seg" id="wvScaleSeg" role="radiogroup" aria-label="Escala da interface do jogo embutido" title="Diminui os menus do jogo para sobrar mais mapa. O padrão é 70%.">
+                <button type="button" data-wv-scale="0" role="radio" title="Afasta o zoom só em telas baixas">Auto</button>
+                <button type="button" data-wv-scale="50" role="radio">50%</button>
+                <button type="button" data-wv-scale="60" role="radio">60%</button>
+                <button type="button" data-wv-scale="70" role="radio">70%</button>
+                <button type="button" data-wv-scale="80" role="radio">80%</button>
+                <button type="button" data-wv-scale="100" role="radio">100%</button>
+              </div>
+              <div class="mini-seg" id="wvLayoutSeg" role="radiogroup" aria-label="Layout preferido do jogo embutido">
+                <button type="button" data-wv-layout="desktop" role="radio" title="Usa o layout de computador sempre que a tela comportar">Layout de PC</button>
+                <button type="button" data-wv-layout="mobile" role="radio" title="Força o layout de celular, que preenche a tela com botões grandes">Layout de celular</button>
+              </div>
               <div class="menu-label" data-icon="bell" style="margin-top:8px;">Avisos flutuantes (Hub)</div>
               <div class="mini-seg" id="toastPosSeg" role="radiogroup" aria-label="Posição dos avisos flutuantes">
                 <button type="button" data-toast-pos="top-right" role="radio">Topo dir.</button>
@@ -1410,6 +1422,7 @@
               <button type="button" class="btn sm" data-slot-act="summary" data-slot="1" title="Mostrar ou ocultar o resumo desta conta">Resumo</button>
               <button type="button" class="btn sm slot-audio is-muted" data-slot-act="mute" data-slot="1" id="slotAudio-1" hidden>Mudo</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="focus" data-slot="1" title="Focar nesta conta" aria-label="Focar na Conta 1" data-icon="crosshair"></button>
+              <button type="button" class="btn sm slot-scale" data-slot-act="scale" data-slot="1" title="Escala da interface do jogo (clique para alternar: Auto, 50, 60, 70, 80, 100%)" aria-label="Escala da interface do jogo da Conta 1" hidden>70%</button>
               <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="1" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 1" data-icon="refresh" hidden></button>
               <button type="button" class="btn sm teal grid-only" data-slot-act="toggle" data-slot="1">Abrir no Embutido</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="1" title="Maximizar esta tela" aria-label="Maximizar a tela da Conta 1"></button>
@@ -1445,6 +1458,7 @@
               <button type="button" class="btn sm" data-slot-act="summary" data-slot="2" title="Mostrar ou ocultar o resumo desta conta">Resumo</button>
               <button type="button" class="btn sm slot-audio is-muted" data-slot-act="mute" data-slot="2" id="slotAudio-2" hidden>Mudo</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="focus" data-slot="2" title="Focar nesta conta" aria-label="Focar na Conta 2" data-icon="crosshair"></button>
+              <button type="button" class="btn sm slot-scale" data-slot-act="scale" data-slot="2" title="Escala da interface do jogo (clique para alternar: Auto, 50, 60, 70, 80, 100%)" aria-label="Escala da interface do jogo da Conta 2" hidden>70%</button>
               <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="2" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 2" data-icon="refresh" hidden></button>
               <button type="button" class="btn sm teal grid-only" data-slot-act="toggle" data-slot="2">Abrir no Embutido</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="2" title="Maximizar esta tela" aria-label="Maximizar a tela da Conta 2"></button>
@@ -1480,6 +1494,7 @@
               <button type="button" class="btn sm" data-slot-act="summary" data-slot="3" title="Mostrar ou ocultar o resumo desta conta">Resumo</button>
               <button type="button" class="btn sm slot-audio is-muted" data-slot-act="mute" data-slot="3" id="slotAudio-3" hidden>Mudo</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="focus" data-slot="3" title="Focar nesta conta" aria-label="Focar na Conta 3" data-icon="crosshair"></button>
+              <button type="button" class="btn sm slot-scale" data-slot-act="scale" data-slot="3" title="Escala da interface do jogo (clique para alternar: Auto, 50, 60, 70, 80, 100%)" aria-label="Escala da interface do jogo da Conta 3" hidden>70%</button>
               <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="3" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 3" data-icon="refresh" hidden></button>
               <button type="button" class="btn sm teal grid-only" data-slot-act="toggle" data-slot="3">Abrir no Embutido</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="3" title="Maximizar esta tela" aria-label="Maximizar a tela da Conta 3"></button>
@@ -1515,6 +1530,7 @@
               <button type="button" class="btn sm" data-slot-act="summary" data-slot="4" title="Mostrar ou ocultar o resumo desta conta">Resumo</button>
               <button type="button" class="btn sm slot-audio is-muted" data-slot-act="mute" data-slot="4" id="slotAudio-4" hidden>Mudo</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="focus" data-slot="4" title="Focar nesta conta" aria-label="Focar na Conta 4" data-icon="crosshair"></button>
+              <button type="button" class="btn sm slot-scale" data-slot-act="scale" data-slot="4" title="Escala da interface do jogo (clique para alternar: Auto, 50, 60, 70, 80, 100%)" aria-label="Escala da interface do jogo da Conta 4" hidden>70%</button>
               <button type="button" class="btn sm icon-btn" data-slot-act="reload" data-slot="4" title="Recarregar o jogo" aria-label="Recarregar o jogo da Conta 4" data-icon="refresh" hidden></button>
               <button type="button" class="btn sm teal grid-only" data-slot-act="toggle" data-slot="4">Abrir no Embutido</button>
               <button type="button" class="btn sm icon-btn grid-only" data-slot-act="max" data-slot="4" title="Maximizar esta tela" aria-label="Maximizar a tela da Conta 4"></button>

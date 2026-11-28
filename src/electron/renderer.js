@@ -197,8 +197,22 @@ setInterval(() => {
 }, 5_000);
 
 const wvZoomObservers = new Map();
-function wvAutoZoomOn() {
-    try { return localStorage.getItem('nexo.wvAutoZoom') !== '0'; } catch { return true; }
+// Escala da interface do jogo: 0 = automática (afasta só em telas baixas), senão o percentual fixo.
+// O padrão é 70%: o jogo mostra o mapa grande e os menus deixam de ocupar a tela.
+const GAME_SCALE_DEFAULT = 70;
+const GAME_SCALE_CHOICES = [0, 50, 60, 70, 80, 100];
+function wvScaleGet() {
+    try {
+        const raw = localStorage.getItem('nexo.wvScale');
+        if (raw === 'auto') return 0;
+        const n = Number(raw);
+        if (raw !== null && Number.isFinite(n) && n >= 40 && n <= 140) return Math.round(n);
+        if (localStorage.getItem('nexo.wvAutoZoom') === '0') return 100; // migração do interruptor antigo
+    } catch { /* ignore */ }
+    return GAME_SCALE_DEFAULT;
+}
+function wvLayoutGet() {
+    try { return localStorage.getItem('nexo.wvLayout') === 'mobile' ? 'mobile' : 'desktop'; } catch { return 'desktop'; }
 }
 // O pokeidle tem três layouts pela largura efetiva (largura da tela / zoom): até 720px é o móvel
 // (preenche a tela), acima de 1100px o de desktop, e no meio um de tablet que vira página de rolagem
@@ -206,33 +220,79 @@ function wvAutoZoomOn() {
 const GAME_MOBILE_MAX_W = 720;
 const GAME_TABLET_MAX_W = 1100;
 const GAME_MAX_ZOOM_IN = 1.4;
-function gameZoomFor(width, height, autoZoom) {
-    // Telas baixas: afasta o zoom para caber (altura de referência ~700px).
-    let z = autoZoom && height > 0 ? Math.max(0.6, Math.min(1, height / 700)) : 1;
+// Abaixo disso o desktop fica ilegível: numa tela estreita vale mais o layout de celular.
+const GAME_DESKTOP_MIN_ZOOM = 0.55;
+function gameZoomFor(width, height, scale, layout = 'desktop') {
+    let z = scale > 0 ? scale / 100 : (height > 0 ? Math.max(0.6, Math.min(1, height / 700)) : 1);
+    // Telas baixas: afasta o zoom para o mapa caber (altura de referência ~640px).
+    if (scale > 0 && height > 0) z = Math.min(z, Math.max(0.5, height / 640));
     z = Math.round(z * 20) / 20;
     if (!(width > 0)) return z;
+    const zMobile = Math.ceil((width / GAME_MOBILE_MAX_W) * 20) / 20;
+    if (layout === 'mobile' && zMobile <= GAME_MAX_ZOOM_IN) return zMobile;
     const eff = width / z;
     if (eff <= GAME_MOBILE_MAX_W || eff > GAME_TABLET_MAX_W) return z;
-    const zMobile = Math.ceil((width / GAME_MOBILE_MAX_W) * 20) / 20;
-    if (zMobile <= GAME_MAX_ZOOM_IN) return Math.max(z, zMobile);
-    // Larga demais para o móvel sem ficar gigante: afasta até o layout de desktop.
+    // Zona do tablet: prefere afastar até o desktop e só cai no celular se o desktop ficar pequeno demais.
     let zDesk = Math.floor((width / GAME_TABLET_MAX_W) * 20) / 20;
     while (zDesk > 0.3 && width / zDesk <= GAME_TABLET_MAX_W) zDesk -= 0.05;
-    return Math.round(zDesk * 100) / 100;
+    zDesk = Math.round(zDesk * 100) / 100;
+    if (zDesk >= GAME_DESKTOP_MIN_ZOOM) return Math.min(zDesk, z);
+    if (zMobile <= GAME_MAX_ZOOM_IN) return Math.max(z, zMobile);
+    return zDesk;
 }
 function applyWebviewZoom(acc) {
     const wv = webviews.get(acc);
     const body = $(`wv-body-${acc}`);
     if (!wv || !body || !wv.__ready) return;
-    const z = gameZoomFor(body.clientWidth, body.clientHeight, wvAutoZoomOn());
+    const z = gameZoomFor(body.clientWidth, body.clientHeight, wvScaleGet(), wvLayoutGet());
     if (wv.__zoom === z) return;
     try { wv.setZoomFactor(z); wv.__zoom = z; } catch { /* ainda carregando */ }
+    document.querySelector(`[data-slot-act="scale"][data-slot="${acc}"]`)?.setAttribute('data-zoom', `${Math.round(z * 100)}%`);
 }
-function setWebviewAutoZoom(on) {
-    try { localStorage.setItem('nexo.wvAutoZoom', on ? '1' : '0'); } catch { /* ignore */ }
+function refreshAllWebviewZoom() {
     for (const acc of webviews.keys()) applyWebviewZoom(acc);
+    window.hubUi?.syncMenuState?.();
 }
-window.nexoWvZoom = { isOn: wvAutoZoomOn, set: setWebviewAutoZoom };
+function setWebviewScale(pct) {
+    try { localStorage.setItem('nexo.wvScale', pct > 0 ? String(pct) : 'auto'); } catch { /* ignore */ }
+    refreshAllWebviewZoom();
+}
+function setWebviewLayout(mode) {
+    try { localStorage.setItem('nexo.wvLayout', mode === 'mobile' ? 'mobile' : 'desktop'); } catch { /* ignore */ }
+    refreshAllWebviewZoom();
+}
+function cycleWebviewScale() {
+    const cur = wvScaleGet();
+    const i = GAME_SCALE_CHOICES.indexOf(cur);
+    setWebviewScale(GAME_SCALE_CHOICES[(i + 1) % GAME_SCALE_CHOICES.length]);
+}
+window.nexoWvZoom = {
+    getScale: wvScaleGet, setScale: setWebviewScale, cycleScale: cycleWebviewScale,
+    getLayout: wvLayoutGet, setLayout: setWebviewLayout, choices: GAME_SCALE_CHOICES,
+};
+
+// XP do Pokémon ativo, lido da barra do cartão do jogo embutido (some se o jogo não mostrar a barra).
+window.nexoPkXp = {};
+const PK_XP_PROBE_JS = `(() => {
+  const c = document.getElementById('ativo-card'); if (!c) return null;
+  const bar = c.querySelector('.barra.xp, .barra.exp, .barra[class*="xp"], .barra[class*="exp"]'); if (!bar) return null;
+  const txt = (bar.querySelector('span') || bar).textContent || '';
+  const m = txt.match(/([0-9.]+)[ ]*[/][ ]*([0-9.]+)/);
+  const num = (v) => Number(String(v).split('.').join(''));
+  if (m && num(m[2]) > 0) return { cur: num(m[1]), max: num(m[2]), pct: (num(m[1]) / num(m[2])) * 100 };
+  const w = bar.querySelector('.fill')?.style?.width;
+  return w && w.endsWith('%') ? { cur: 0, max: 0, pct: parseFloat(w) } : null;
+})()`;
+async function pollPokemonXp() {
+    for (const [acc, wv] of webviews) {
+        if (!wv.__ready) continue;
+        try {
+            const r = await wv.executeJavaScript(PK_XP_PROBE_JS);
+            if (r && Number.isFinite(r.pct)) window.nexoPkXp[acc] = r; else delete window.nexoPkXp[acc];
+        } catch { delete window.nexoPkXp[acc]; }
+    }
+}
+setInterval(() => { void pollPokemonXp(); }, 4_000);
 
 async function openEmbeddedForAccount(acc) {
     if (webviews.has(acc)) return;
@@ -2255,6 +2315,13 @@ function renderTopTabsAndSlots() {
         }
         const reloadBtn = document.querySelector(`[data-slot-act="reload"][data-slot="${acc}"]`);
         if (reloadBtn) reloadBtn.hidden = !isEmbedded;
+        const scaleBtn = document.querySelector(`[data-slot-act="scale"][data-slot="${acc}"]`);
+        if (scaleBtn) {
+            scaleBtn.hidden = !isEmbedded;
+            const sc = window.nexoWvZoom.getScale();
+            const lbl = sc > 0 ? `${sc}%` : 'Auto';
+            if (scaleBtn.textContent !== lbl) scaleBtn.textContent = lbl;
+        }
 
         if (!isEmbedded) {
             const phTitle = $(`phTitle-${acc}`);
@@ -6351,6 +6418,8 @@ function wireEvents() {
             } else if (act === 'focus') {
                 selectAccount(acc);
                 setViewMode('split');
+            } else if (act === 'scale') {
+                window.nexoWvZoom.cycleScale();
             } else if (act === 'reload') {
                 webviews.get(acc)?.reload();
             } else if (act === 'headless') {

@@ -7806,6 +7806,11 @@ export function createHeadlessController(options = {}) {
                     level: config.pvpMonitorLevel,
                     halted: tracker.pvp?.halted || null,
                     ...computePvpMonitor(tracker.pvp, config.pvpMonitorLevel),
+                    // ultimas 5 partidas da sessao (1 = vitoria, 0 = derrota), da mais antiga para a mais nova
+                    recent: (Array.isArray(tracker.pvp?.history) ? tracker.pvp.history : []).slice(-5).map((h) => (h.won ? 1 : 0)),
+                    queued: Boolean(tracker.pvp?.na),
+                    rankLabel: [state?.pvp?.tierNome, state?.pvp?.tierName, state?.pvp?.liga, state?.pvp?.tier, state?.pvp?.rank]
+                        .find((v) => typeof v === 'string' && v.trim()) || null,
                     history: undefined,
                 },
                 modeFormations: {

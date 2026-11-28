@@ -106,18 +106,12 @@
             : `<span class="trend down" title="Caindo ${Math.round(-t * 100)}% nos últimos minutos">↓</span>`;
     };
 
-    // ===== S15: três números grandes no Desempenho =====
-    let lastHeroSig = '';
-    function renderHero() {
-        const box = $('heroKpis');
-        if (!box) return;
-        const acc = activeAccount;
+    // Dados e HTML dos quatro cards grandes (XP/h, Lucro/h, Capturas, Shinies). O painel Desempenho
+    // e o resumo de cada conta usam o mesmo desenho; `sig` muda só quando algo visível muda.
+    function heroData(acc) {
         const s = snapshots[acc] || {};
         const st = s.stats || {};
-        const list = hist[acc];
-        const xpVals = list.map((p) => p.xpRate);
-        const goldVals = list.map((p) => p.goldRate);
-        const capVals = list.map((p) => p.capPerKill);
+        const list = hist[acc] || [];
         const gold = Number(st.netGoldPerHour || 0);
         const kills = Number(st.kills || 0);
         const caps = Number(st.captures || 0);
@@ -129,10 +123,15 @@
             : (kills > 0 ? 'sem capturas ainda' : 'aguardando abates');
         const own = Array.isArray(s.ownShinies) ? s.ownShinies.slice(0, 3) : [];
         const missed = Number(st.shiniesMissed || 0);
-        const sig = `${acc}|${st.xpPerHour}|${gold}|${caps}|${kills}|${st.capturePerKillPct}|${st.shiniesCaptured}|${st.shiniesSeen}|${missed}|${list.length}|${list[list.length - 1]?.t || 0}|${own.map((o) => o.ts).join(',')}`;
-        if (sig === lastHeroSig) return;
-        lastHeroSig = sig;
-        box.innerHTML = `
+        const sig = `${acc}|${st.xpPerHour}|${st.xpTrainerPerHour}|${gold}|${caps}|${kills}|${st.capturePerKillPct}|${st.killsPerCapture}|${st.shiniesCaptured}|${st.shiniesSeen}|${missed}|${list.length}|${list[list.length - 1]?.t || 0}|${own.map((o) => o.ts).join(',')}`;
+        return { acc, st, list, gold, caps, capPctTxt, capPerHour, kpcTxt, own, missed, sig };
+    }
+    function heroHtml(d) {
+        const { acc, st, list, gold, caps, capPctTxt, capPerHour, kpcTxt, own, missed } = d;
+        const xpVals = list.map((p) => p.xpRate);
+        const goldVals = list.map((p) => p.goldRate);
+        const capVals = list.map((p) => p.capPerKill);
+        return `
           <div class="hero xp" title="XP do Pokémon por hora desde o início da sessão. A curva mostra o ritmo a cada 30 s.">
             <div class="hero-top"><span class="hero-lbl">${IC('zap')}XP por hora</span>${trendHtml(trendOf(acc, 'xpRate'))}</div>
             <div class="hero-val">${fmtCompact(st.xpPerHour)}</div>
@@ -162,6 +161,17 @@
                 }).join('')
                 : '<span class="hero-sub">Nenhum capturado ainda</span>'}${missed ? `<span class="miss-tag" title="Vistos e não capturados">${missed} escap${missed > 1 ? 'aram' : 'ou'}</span>` : ''}</div>
           </div>`;
+    }
+
+    // ===== S15: três números grandes no Desempenho =====
+    let lastHeroSig = '';
+    function renderHero() {
+        const box = $('heroKpis');
+        if (!box) return;
+        const d = heroData(activeAccount);
+        if (d.sig === lastHeroSig) return;
+        lastHeroSig = d.sig;
+        box.innerHTML = heroHtml(d);
     }
 
     // ===== S1 e S9: abas compactas e bordas de estado =====
@@ -1612,7 +1622,10 @@
         $('btnPinActivity')?.setAttribute('aria-pressed', activityPinned ? 'true' : 'false');
         $('btnPinActivity')?.classList.toggle('active-toggle', activityPinned);
         $('btnMiniHud')?.setAttribute('aria-checked', miniHudOpen ? 'true' : 'false');
-        $('btnWvAutoZoom')?.setAttribute('aria-checked', window.nexoWvZoom?.isOn() ? 'true' : 'false');
+        const wvScale = window.nexoWvZoom?.getScale?.();
+        document.querySelectorAll('[data-wv-scale]').forEach((b) => b.setAttribute('aria-checked', Number(b.dataset.wvScale) === wvScale ? 'true' : 'false'));
+        const wvLayout = window.nexoWvZoom?.getLayout?.();
+        document.querySelectorAll('[data-wv-layout]').forEach((b) => b.setAttribute('aria-checked', b.dataset.wvLayout === wvLayout ? 'true' : 'false'));
         $('btnAwake')?.setAttribute('aria-checked', $('btnAwake')?.classList.contains('active-toggle') ? 'true' : 'false');
     }
     async function toggleMiniHud() {
@@ -1753,18 +1766,23 @@
             const hitDrops = (dr.featured || []).filter((d) => d.qty > 0).slice(0, 3);
             const list = hist[acc] || [];
             const evs = recentEvents(acc, 4);
-            const buffs = flatBuffsHtml(acc);
+            // No resumo cada fonte vai numa linha ("Kick 3h 56m" / "Twitch 4h 49m"): cabe em coluna estreita sem cortar.
+            const buffs = flatBuffsHtml(acc).replaceAll(' · ', '<br>');
             const profitH = Number(st.netGoldPerHour ?? st.goldPerHour ?? 0) || 0;
             const pct = pk ? Math.max(0, Math.min(100, Number(pk.hpPercent) || 0)) : 0;
+            // XP do Pokémon ativo: lida da tela do jogo embutido (renderer.js); sem a barra, some.
+            const xpd = pk ? (window.nexoPkXp?.[acc] || null) : null;
+            const xpPct = xpd && Number.isFinite(xpd.pct) ? Math.max(0, Math.min(100, xpd.pct)) : null;
             const hpColor = pct > 55 ? 'var(--green)' : pct > 25 ? 'var(--amber)' : 'var(--red)';
             const pkDex = pk ? resolvePokemonSpriteDex(pk.speciesId, pk.name, pk.spriteDex) : 0;
             const url = pkDex > 0 ? pokemonSpriteUrl(pk.speciesId, Boolean(pk.shiny), pkDex, pk.name) : '';
             const curDock = box.closest('.wv-slot')?.dataset?.summaryDock || 'right';
             const density = box.dataset.sumDensity === 'full' ? 'full' : 'compact';
+            const hd = density === 'full' ? heroData(acc) : null;
 
             const sig = [
                 acc, curDock, density,
-                pk?.speciesId, pk?.shiny, pk?.name, pk?.level, pk?.hp, pk?.maxHp, pct,
+                pk?.speciesId, pk?.shiny, pk?.name, pk?.level, pk?.hp, pk?.maxHp, pct, xpPct === null ? '' : Math.round(xpPct * 2),
                 st.xpPerHour, profitH, st.kills, st.captures, st.shiniesCaptured,
                 st.avgKillSec, st.capturePerKillPct,
                 density === 'full' ? hitDrops.map((d) => `${d.key}:${d.qty}`).join(',') : '',
@@ -1772,13 +1790,16 @@
                 density === 'full' ? evs.map((e) => e.id).join(',') : '',
                 density === 'full' ? Math.floor(Date.now() / 30_000) : 0,
                 density === 'full' ? buffs.length : 0,
+                hd ? hd.sig : '',
+                density === 'full' ? [s.gameIntel?.pvpMeta?.rankIntel?.pr, s.gameIntel?.pvpMeta?.monitor?.games, (s.gameIntel?.pvpMeta?.monitor?.recent || []).join(''), s.gameIntel?.pvpMeta?.monitor?.queued, Boolean(s.gameIntel?.pvpMeta?.monitor?.halted), s.gameIntel?.pvpMeta?.monitor?.netPr].join(':') : '',
             ].join('|');
             // O tempo ativo muda todo segundo: fica fora da assinatura e é trocado só no próprio
             // texto, em vez de redesenhar o resumo inteiro (4 telas x 1 vez por segundo).
             const uptimeTxt = fmtSumUptime(st.uptimeSec);
             if (box.dataset.sig === sig) {
-                const up = box.querySelector('[data-sum-uptime]');
-                if (up && up.textContent !== uptimeTxt) up.textContent = uptimeTxt;
+                for (const up of box.querySelectorAll('[data-sum-uptime]')) {
+                    if (up.textContent !== uptimeTxt) up.textContent = uptimeTxt;
+                }
                 continue;
             }
             box.dataset.sig = sig;
@@ -1804,6 +1825,8 @@
                   <div class="wv-sum-poke-name">${pk ? `${pk.shiny ? '★ ' : ''}${escapeHtml(pk.name)} Nv ${pk.level}` : 'Aguardando Pokémon'}</div>
                   <div class="wv-sum-hp"><i style="width:${pct}%;background:${hpColor}"></i></div>
                   <div class="wv-sum-hp-txt">${pk ? `${fmtNum(pk.hp)} / ${fmtNum(pk.maxHp)} HP (${pct}%)` : ''}</div>
+                  ${xpPct === null ? '' : `<div class="wv-sum-xp" title="XP do Pokémon até o próximo nível"><i style="width:${xpPct.toFixed(1)}%"></i></div>
+                  <div class="wv-sum-hp-txt">${xpd.max > 0 ? `${fmtNum(xpd.cur)} / ${fmtNum(xpd.max)} XP (${Math.round(xpPct)}%)` : `XP ${Math.round(xpPct)}%`}</div>`}
                 </div>
               </div>`;
 
@@ -1838,7 +1861,9 @@
                 ['Ativo', uptimeTxt, 'uptime'],
             ];
 
-            const kpisHtml = `<dl class="wv-sum-kpis">${tiles.map(([k, v, cls]) =>
+            // Os oito números ficam só para o resumo em miniatura (mostrado quando a tela é baixa);
+            // na visão completa quem aparece são os cards grandes e os três números de apoio.
+            const kpisHtml = `<dl class="wv-sum-kpis wv-sum-kpis-mini">${tiles.map(([k, v, cls]) =>
                 `<div${cls ? ` class="${cls}"` : ''}><dt>${escapeHtml(k)}</dt><dd${cls === 'uptime' ? ' data-sum-uptime' : ''}>${escapeHtml(String(v))}</dd></div>`
             ).join('')}</dl>`;
 
@@ -1847,8 +1872,38 @@
                 : 'Drops da sessão: nenhum ainda'}</div>`;
 
             const buffsSection = buffs
-                ? `<div class="wv-sum-sec wv-sum-sec-buffs">Buffs das lives</div><div class="pcard-buffs wv-sum-buffs">${buffs}</div>`
+                ? `<div class="pcard-buffs wv-sum-buffs">${buffs}</div>`
                 : '';
+
+            const killsPerMin = Number(st.uptimeSec || 0) > 0 ? (Number(st.kills || 0) / (Number(st.uptimeSec) / 60)) : 0;
+            const heroBlock = `<div class="hero-kpis wv-sum-hero">${heroHtml(hd)}</div>`;
+            const chipsHtml = `<dl class="wv-sum-chips">
+              <div class="chip green"><dt>${IC('swords')}Abates</dt><dd>${fmtNum(st.kills)}</dd><small>${killsPerMin > 0 ? `${killsPerMin.toFixed(1).replace('.', ',')}/min` : '&nbsp;'}</small></div>
+              <div class="chip sky"><dt>${IC('activity')}Tempo/abate</dt><dd>${st.avgKillSec > 0 ? `${String(st.avgKillSec).replace('.', ',')}s` : '-'}</dd><small>por abate</small></div>
+              <div class="chip amber"><dt>${IC('clock')}Ativo</dt><dd data-sum-uptime>${uptimeTxt}</dd><small>nesta sessão</small></div>
+            </dl>`;
+
+            // PvP: PR, rank (quando o jogo informa), fila e as 5 ultimas partidas (V verde, X vermelho).
+            const pvpm = s.gameIntel?.pvpMeta || null;
+            const pvpMon = pvpm?.monitor || null;
+            const pvpPr = Number(pvpm?.rankIntel?.pr || 0);
+            const pvpGames = Number(pvpMon?.games || 0);
+            const pvpQueued = Boolean(pvpMon?.queued || pvpm?.rankIntel?.inQueue);
+            const pvpRecent = Array.isArray(pvpMon?.recent) ? pvpMon.recent : [];
+            let pvpHtml = '';
+            if (density === 'full' && (pvpPr > 0 || pvpGames > 0 || pvpQueued)) {
+                const marks = pvpRecent.length
+                    ? pvpRecent.map((w) => `<i class="${w ? 'w' : 'l'}" title="${w ? 'Vitória' : 'Derrota'}">${w ? 'V' : 'X'}</i>`).join('')
+                    : '<em>sem partidas na sessão</em>';
+                const net = Number(pvpMon?.netPr || 0);
+                const netTxt = pvpGames > 0 ? `${net >= 0 ? '+' : ''}${Math.round(net)} PR` : '';
+                const pvpState = pvpMon?.halted ? '<span class="pvp-pill stop" title="O monitor parou a fila">Fila parada</span>'
+                    : pvpQueued ? '<span class="pvp-pill on">Na fila</span>' : '';
+                pvpHtml = `<div class="wv-sum-pvp">
+                  <div class="pvp-head"><span class="pvp-ttl">${IC('swords')}PvP</span>${pvpMon?.rankLabel ? `<b class="pvp-rank">${escapeHtml(pvpMon.rankLabel)}</b>` : ''}${pvpPr > 0 ? `<b class="pvp-pr">${fmtNum(pvpPr)} PR</b>` : ''}${pvpState}</div>
+                  <div class="pvp-row"><span class="pvp-marks" title="Últimas 5 partidas (a mais recente à direita)">${marks}</span><span class="pvp-score">${pvpGames > 0 ? `${fmtNum(pvpMon.wins)}V ${fmtNum(pvpMon.losses)}D` : ''}${netTxt ? ` · ${netTxt}` : ''}</span></div>
+                </div>`;
+            }
 
             const accColor = window.nexoIcons?.accountAccent?.(acc) || 'azul';
             const eventsHtml = `<div class="wv-sum-sec wv-sum-sec-events">Eventos recentes</div><ul class="wv-sum-events">${evs.map((e) => {
@@ -1857,7 +1912,7 @@
             }).join('') || '<li class="ev empty">Sem eventos ainda.</li>'}</ul>`;
 
             // Os buffs das lives ocupam o lugar de KPIs e gráficos (logo abaixo do Pokémon); KPIs e gráficos vão para onde os buffs ficavam.
-            box.innerHTML = headHtml + pokeHtml + buffsSection + dropsHtml + kpisHtml + sparkHtml + eventsHtml;
+            box.innerHTML = headHtml + pokeHtml + buffsSection + dropsHtml + heroBlock + chipsHtml + pvpHtml + kpisHtml + eventsHtml;
         }
     }
 
@@ -2391,6 +2446,7 @@
         onViewMode: () => { setPopover('more', false); },
         afterViewMode: () => { buildDock(); if (viewMode === 'grid') applyGridLayout(); renderWvSummaries(); },
         renderWvSummaries,
+        syncMenuState,
         onConfigDirty,
         routeToast,
         recordEvent,
@@ -2460,7 +2516,8 @@
         $('btnPinActivityMenu')?.addEventListener('click', () => setActivityPinned(!activityPinned));
         $('btnPinActivity')?.addEventListener('click', () => setActivityPinned(!activityPinned));
         $('btnMiniHud')?.addEventListener('click', () => void toggleMiniHud());
-        $('btnWvAutoZoom')?.addEventListener('click', () => { window.nexoWvZoom?.set(!window.nexoWvZoom.isOn()); syncMenuState(); });
+        document.querySelectorAll('[data-wv-scale]').forEach((b) => b.addEventListener('click', () => window.nexoWvZoom?.setScale(Number(b.dataset.wvScale))));
+        document.querySelectorAll('[data-wv-layout]').forEach((b) => b.addEventListener('click', () => window.nexoWvZoom?.setLayout(b.dataset.wvLayout)));
         $('btnShortcuts')?.addEventListener('click', showShortcuts);
         $('btnAwake')?.addEventListener('click', () => setTimeout(syncMenuState, 400));
         $('btnPopoutTab')?.addEventListener('click', () => {
