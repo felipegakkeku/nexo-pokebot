@@ -1717,7 +1717,8 @@ async function initSoundControls() {
 }
 
 function initGridControls() {
-    $('gridToolbar')?.addEventListener('click', (ev) => {
+    // Os botões vivem na barra de janelas (#windowBar); #gridToolbar fica só como reserva de linha da grade.
+    const onGridBarClick = (ev) => {
         const layoutBtn = ev.target.closest('[data-grid-layout]');
         const sumBtn = ev.target.closest('[data-grid-summary]');
         const showBtn = ev.target.closest('[data-grid-show]');
@@ -1768,7 +1769,9 @@ function initGridControls() {
         applyGridLayout();
         applySummaryLayout();
         renderGridToolbar();
-    });
+    };
+    $('windowBar')?.addEventListener('click', onGridBarClick);
+    $('gridToolbar')?.addEventListener('click', onGridBarClick);
     const onSortChange = (nextMode) => {
         if (!ACC_SORT_MODES.includes(nextMode)) return;
         accSortMode = nextMode;
@@ -5858,7 +5861,11 @@ function renderAllInner() {
 let hubOnScreen = true;
 let lastHiddenRenderAt = 0;
 const HIDDEN_RENDER_EVERY_MS = 10_000;
+let pollInFlight = false;
 async function pollSnapshots() {
+    // Um pedido por vez: se o anterior ainda não voltou (conta pesada, máquina ocupada), não empilha outro.
+    if (pollInFlight) return;
+    pollInFlight = true;
     try {
         snapshots = await window.pokeHub.getAllSnapshots();
         processActivityToasts(snapshots);
@@ -5870,6 +5877,8 @@ async function pollSnapshots() {
         renderAll();
     } catch {
         // aguarda proximo ciclo
+    } finally {
+        pollInFlight = false;
     }
 }
 

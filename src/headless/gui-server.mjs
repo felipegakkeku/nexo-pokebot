@@ -7809,8 +7809,7 @@ export function createHeadlessController(options = {}) {
                     // ultimas 5 partidas da sessao (1 = vitoria, 0 = derrota), da mais antiga para a mais nova
                     recent: (Array.isArray(tracker.pvp?.history) ? tracker.pvp.history : []).slice(-5).map((h) => (h.won ? 1 : 0)),
                     queued: Boolean(tracker.pvp?.na),
-                    rankLabel: [state?.pvp?.tierNome, state?.pvp?.tierName, state?.pvp?.liga, state?.pvp?.tier, state?.pvp?.rank]
-                        .find((v) => typeof v === 'string' && v.trim()) || null,
+                    rankLabel: pickPvpRankLabel(state?.pvp),
                     history: undefined,
                 },
                 modeFormations: {
@@ -8521,4 +8520,36 @@ if (isEntrypoint) {
 
     process.on('SIGINT', stopAllAndExit);
     process.on('SIGTERM', stopAllAndExit);
+}
+
+/**
+ * Acha o nome do rank do PvP (ex.: Diamante) no estado do jogo. O campo muda de nome conforme a versão do servidor,
+ * então olha os nomes conhecidos e, depois, qualquer chave de texto que lembre rank, tier, liga ou divisão.
+ * Números e valores sem letras ficam de fora (PR e posição não são nome de rank).
+ * @param {object} pvp Estado do PvP do jogo.
+ * @returns {string|null}
+ */
+function pickPvpRankLabel(pvp) {
+    if (!pvp || typeof pvp !== 'object') return null;
+    const text = (v) => {
+        if (typeof v === 'string') return /\p{L}/u.test(v) && v.trim().length <= 24 ? v.trim() : null;
+        if (v && typeof v === 'object') {
+            for (const k of ['nome', 'name', 'label', 'titulo', 'rotulo']) {
+                const t = text(v[k]);
+                if (t) return t;
+            }
+        }
+        return null;
+    };
+    for (const k of ['tierNome', 'tierName', 'rankNome', 'rankName', 'ligaNome', 'liga', 'league', 'tier', 'rank', 'divisao', 'division']) {
+        const t = text(pvp[k]);
+        if (t) return t;
+    }
+    for (const [k, v] of Object.entries(pvp)) {
+        if (/tier|rank|liga|league|divis/i.test(k) && !/escudo|shield|pos|decay|since|at$/i.test(k)) {
+            const t = text(v);
+            if (t) return t;
+        }
+    }
+    return null;
 }

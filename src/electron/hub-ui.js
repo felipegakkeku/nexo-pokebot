@@ -1791,7 +1791,7 @@
                 density === 'full' ? Math.floor(Date.now() / 30_000) : 0,
                 density === 'full' ? buffs : '',
                 hd ? hd.sig : '',
-                density === 'full' ? [s.gameIntel?.pvpMeta?.rankIntel?.pr, s.gameIntel?.pvpMeta?.monitor?.games, (s.gameIntel?.pvpMeta?.monitor?.recent || []).join(''), s.gameIntel?.pvpMeta?.monitor?.queued, Boolean(s.gameIntel?.pvpMeta?.monitor?.halted), s.gameIntel?.pvpMeta?.monitor?.netPr].join(':') : '',
+                density === 'full' ? [s.gameIntel?.pvpMeta?.rankIntel?.pr, s.gameIntel?.pvpMeta?.monitor?.rankLabel, s.gameIntel?.pvpMeta?.monitor?.games, (s.gameIntel?.pvpMeta?.monitor?.recent || []).join(''), s.gameIntel?.pvpMeta?.monitor?.queued, Boolean(s.gameIntel?.pvpMeta?.monitor?.halted), s.gameIntel?.pvpMeta?.monitor?.netPr].join(':') : '',
             ].join('|');
             // O tempo ativo muda todo segundo: fica fora da assinatura e é trocado só no próprio
             // texto, em vez de redesenhar o resumo inteiro (4 telas x 1 vez por segundo).

@@ -56,22 +56,6 @@
         </button>
       </nav>
 
-      <select id="accSortSelect" class="acc-sort-sel" aria-label="Ordenar contas na HUD" title="Organiza a ordem visual das contas na HUD sem alterar os vínculos 1 a 4">
-        <option value="manual">Ordem: Manual</option>
-        <option value="level">Por Nível (Treinador)</option>
-        <option value="pokeLevel">Por Nível (Pokémon)</option>
-        <option value="xp">Por XP/h</option>
-        <option value="profit">Por Lucro/h</option>
-        <option value="name">Por Nome (A-Z)</option>
-      </select>
-
-      <div class="segmented" role="group" aria-label="Modo de exibição">
-        <button type="button" class="seg-btn active" data-view="split" title="Painel ao lado do jogo (tecla S)" data-icon="split"><span class="seg-label">Painel + Jogo</span></button>
-        <button type="button" class="seg-btn" data-view="grid" title="As 4 telas do jogo em grade (tecla G)" data-icon="grid"><span class="seg-label">Grade</span></button>
-        <button type="button" class="seg-btn" data-view="panel-only" title="Só o painel, em colunas que você monta (tecla P)" data-icon="columns"><span class="seg-label">Só Painel</span></button>
-        <button type="button" class="seg-btn" data-view="panels-grid" title="As 4 contas em cartões lado a lado, sem abrir o jogo (tecla C)" data-icon="cards"><span class="seg-label">Painéis</span></button>
-      </div>
-
       <div class="top-actions">
         <button type="button" class="btn sm eco-btn" id="btnAllHeadless" title="Fecha todos os jogos embutidos e mantém as contas farmando em Headless (~90% menos RAM/CPU)" data-icon="leaf">Modo Eco</button>
         <div class="bell-wrap" id="bellWrap">
@@ -250,6 +234,58 @@
       </div>
     </header>
 
+    <!-- Barra de janelas: tudo que muda o jeito de ver as contas fica junto, do lado esquerdo -->
+    <div class="window-bar" id="windowBar">
+      <div class="segmented" role="group" aria-label="Modo de exibição">
+        <button type="button" class="seg-btn active" data-view="split" title="Painel ao lado do jogo (tecla S)" data-icon="split"><span class="seg-label">Painel + Jogo</span></button>
+        <button type="button" class="seg-btn" data-view="grid" title="As 4 telas do jogo em grade (tecla G)" data-icon="grid"><span class="seg-label">Grade</span></button>
+        <button type="button" class="seg-btn" data-view="panel-only" title="Só o painel, em colunas que você monta (tecla P)" data-icon="columns"><span class="seg-label">Só Painel</span></button>
+        <button type="button" class="seg-btn" data-view="panels-grid" title="As 4 contas em cartões lado a lado, sem abrir o jogo (tecla C)" data-icon="cards"><span class="seg-label">Painéis</span></button>
+      </div>
+
+      <div class="wb-group" data-wb="split" role="group" aria-label="Posição da sidebar">
+        <span class="grid-tb-label">Sidebar</span>
+        <button type="button" class="grid-tb-btn" data-split-dock="left" title="Sidebar à esquerda">Esquerda</button>
+        <button type="button" class="grid-tb-btn" data-split-dock="right" title="Sidebar à direita">Direita</button>
+        <button type="button" class="grid-tb-btn" data-split-dock="hidden" title="Remover sidebar no modo Painel + Jogo">Remover</button>
+      </div>
+      <div class="wb-group" data-wb="grid" role="group" aria-label="Layout da grade">
+        <span class="grid-tb-label">Layout</span>
+        <button type="button" class="grid-tb-btn" data-grid-layout="2x2" title="Quatro telas iguais">2x2</button>
+        <button type="button" class="grid-tb-btn" data-grid-layout="focus" title="A primeira tela grande e as outras empilhadas ao lado">Destaque 1+3</button>
+        <button type="button" class="grid-tb-btn" data-grid-layout="cols" title="Todas lado a lado">Colunas</button>
+        <button type="button" class="grid-tb-btn" data-grid-layout="rows" title="Todas empilhadas">Linhas</button>
+      </div>
+      <div class="wb-group" data-wb="grid" role="group" aria-label="Sidebar de resumo em todas as telas">
+        <span class="grid-tb-label" title="Onde fica o resumo de cada tela. Cada conta ainda pode mudar o seu no próprio resumo.">Resumo</span>
+        <button type="button" class="grid-tb-btn" data-grid-summary="right" title="Resumo à direita em todas as contas (cada conta pode mudar no próprio resumo)">Direita</button>
+        <button type="button" class="grid-tb-btn" data-grid-summary="left" title="Resumo à esquerda em todas as contas">Esquerda</button>
+        <button type="button" class="grid-tb-btn" data-grid-summary="bottom" title="Resumo embaixo do jogo em todas as contas">Embaixo</button>
+        <button type="button" class="grid-tb-btn" data-grid-summary="off" title="Esconde o resumo em todas as contas (o jogo ocupa a tela toda)">Ocultar</button>
+        <button type="button" class="grid-tb-btn" id="btnGridSummaryDensity" title="Alternar entre visão resumida e completa em todas as contas">Resumido</button>
+      </div>
+      <div class="wb-group" role="group" aria-label="Ordem das contas">
+        <span class="grid-tb-label">Ordem</span>
+        <select id="accSortSelect" class="acc-sort-sel" aria-label="Ordenar contas" title="Organiza a ordem visual das contas sem alterar os vínculos 1 a 4">
+          <option value="manual">Manual</option>
+          <option value="level">Nível (Treinador)</option>
+          <option value="pokeLevel">Nível (Pokémon)</option>
+          <option value="xp">XP/h</option>
+          <option value="profit">Lucro/h</option>
+          <option value="name">Nome (A-Z)</option>
+        </select>
+      </div>
+      <div class="wb-group" id="gridHiddenWrap" data-wb="grid" hidden>
+        <span class="grid-tb-label">Ocultas</span>
+        <span class="grid-tb-chips" id="gridHiddenChips"></span>
+      </div>
+      <span class="grid-tb-hint wb-hint" id="gridHint" data-wb="grid">Arraste a barra de uma tela para trocar de lugar</span>
+      <div class="wb-group wb-end" data-wb="grid">
+        <button type="button" class="grid-tb-btn" id="btnGridMuteAll" title="Silencia ou liga o som de todas as telas de jogo">Silenciar todas</button>
+        <button type="button" class="grid-tb-btn" id="btnGridReset" title="Volta para 2x2, ordem 1 a 4 e todas visíveis">Restaurar</button>
+      </div>
+    </div>
+
     <div class="update-banner hidden" id="updateBanner" role="status" aria-live="polite">
       <span class="update-banner-icon" id="updateBannerIcon" aria-hidden="true">⬇</span>
       <div class="update-banner-text">
@@ -280,11 +316,6 @@
               <span class="status-pill" id="hdrStatus">OFFLINE</span>
             </div>
             <div class="acc-header-right">
-              <div class="split-dock-quick" role="group" aria-label="Posição da sidebar">
-                <button type="button" class="btn sm icon-btn" data-split-dock="left" title="Sidebar à esquerda">Esq</button>
-                <button type="button" class="btn sm icon-btn" data-split-dock="right" title="Sidebar à direita">Dir</button>
-                <button type="button" class="btn sm icon-btn" data-split-dock="hidden" title="Remover sidebar no modo Painel + Jogo">×</button>
-              </div>
               <button type="button" class="btn sm" id="btnProbGuide" title="Guia de probabilidades da conta e placar de rolagens">Probabilidades</button>
               <button type="button" class="btn sm" id="btnOpenWeb">Painel Web</button>
             </div>
@@ -1371,43 +1402,7 @@
 
       <!-- EMBEDDED BROWSER STAGE (4 ISOLATED PERSISTENT PARTITIONS) -->
       <section class="browser-stage" id="browserStage">
-        <div class="grid-toolbar" id="gridToolbar">
-          <div class="grid-tb-group" role="group" aria-label="Layout da grade">
-            <span class="grid-tb-label">Layout</span>
-            <button type="button" class="grid-tb-btn" data-grid-layout="2x2" title="Quatro telas iguais">2x2</button>
-            <button type="button" class="grid-tb-btn" data-grid-layout="focus" title="A primeira tela grande e as outras empilhadas ao lado">Destaque 1+3</button>
-            <button type="button" class="grid-tb-btn" data-grid-layout="cols" title="Todas lado a lado">Colunas</button>
-            <button type="button" class="grid-tb-btn" data-grid-layout="rows" title="Todas empilhadas">Linhas</button>
-          </div>
-          <div class="grid-tb-group" role="group" aria-label="Sidebar de resumo em todas as telas">
-            <span class="grid-tb-label" title="Onde fica o resumo de cada tela. Cada conta ainda pode mudar o seu no próprio resumo.">Resumo</span>
-            <button type="button" class="grid-tb-btn" data-grid-summary="right" title="Resumo à direita em todas as contas (cada conta pode mudar no próprio resumo)">Direita</button>
-            <button type="button" class="grid-tb-btn" data-grid-summary="left" title="Resumo à esquerda em todas as contas">Esquerda</button>
-            <button type="button" class="grid-tb-btn" data-grid-summary="bottom" title="Resumo embaixo do jogo em todas as contas">Embaixo</button>
-            <button type="button" class="grid-tb-btn" data-grid-summary="off" title="Esconde o resumo em todas as contas (o jogo ocupa a tela toda)">Ocultar</button>
-            <button type="button" class="grid-tb-btn" id="btnGridSummaryDensity" title="Alternar entre visão resumida e completa em todas as contas">Resumido</button>
-          </div>
-          <div class="grid-tb-group">
-            <span class="grid-tb-label">Ordem</span>
-            <select id="gridSortSelect" class="grid-sort-sel" aria-label="Ordenar contas na grade">
-              <option value="manual">Manual</option>
-              <option value="level">Nível (Treinador)</option>
-              <option value="pokeLevel">Nível (Pokémon)</option>
-              <option value="xp">XP/h</option>
-              <option value="profit">Lucro/h</option>
-              <option value="name">Nome (A-Z)</option>
-            </select>
-          </div>
-          <div class="grid-tb-group" id="gridHiddenWrap" hidden>
-            <span class="grid-tb-label">Ocultas</span>
-            <span class="grid-tb-chips" id="gridHiddenChips"></span>
-          </div>
-          <span class="grid-tb-hint" id="gridHint">Arraste a barra de uma tela para trocar de lugar · arraste a divisória para redimensionar</span>
-          <div class="grid-tb-group">
-            <button type="button" class="grid-tb-btn" id="btnGridMuteAll" title="Silencia ou liga o som de todas as telas de jogo">Silenciar todas</button>
-            <button type="button" class="grid-tb-btn" id="btnGridReset" title="Volta para 2x2, ordem 1 a 4 e todas visíveis">Restaurar</button>
-          </div>
-        </div>
+        <div class="grid-toolbar" id="gridToolbar" aria-hidden="true"></div>
         <div class="grid-gutter v" id="gridGutterV" hidden title="Arraste para redimensionar · duplo clique centraliza"></div>
         <div class="grid-gutter h" id="gridGutterH" hidden title="Arraste para redimensionar · duplo clique centraliza"></div>
         <div class="wv-slot slot-active" id="wv-slot-1" data-slot="1">
