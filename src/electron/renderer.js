@@ -1367,10 +1367,15 @@ function renderSoundCard() {
 const DEFAULT_BEEPS = {
     shinyMiss: [880, 660, 440],
     shinyCaught: [523, 659, 784, 1047],
+    capture: [1319, 1760],
     rareDrop: [784, 988, 1175],
     error: [330, 262],
     chest: [659, 880],
     vote: [587, 784],
+};
+// Timbre por alerta (padrão: triângulo, notas de 0,17 s). A captura é um "plim" curto e suave.
+const BEEP_STYLES = {
+    capture: { type: 'sine', step: 0.075, len: 0.11, peak: 0.16 },
 };
 const activeSoundNodes = new Set();
 
@@ -1423,18 +1428,19 @@ async function playDefaultBeep(volume, event = 'shinyMiss') {
             await ctx.resume().catch(() => {});
         }
         const notes = DEFAULT_BEEPS[event] || DEFAULT_BEEPS.shinyMiss;
+        const st = { type: 'triangle', step: 0.17, len: 0.16, peak: 0.35, ...(BEEP_STYLES[event] || {}) };
         notes.forEach((freq, i) => {
-            const t0 = ctx.currentTime + i * 0.17;
+            const t0 = ctx.currentTime + i * st.step;
             const osc = ctx.createOscillator();
             const gain = ctx.createGain();
-            osc.type = 'triangle';
+            osc.type = st.type;
             osc.frequency.setValueAtTime(freq, t0);
             gain.gain.setValueAtTime(0.0001, t0);
-            gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, 0.35 * volume), t0 + 0.02);
-            gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+            gain.gain.exponentialRampToValueAtTime(Math.max(0.0002, st.peak * volume), t0 + 0.012);
+            gain.gain.exponentialRampToValueAtTime(0.0001, t0 + st.len);
             osc.connect(gain).connect(ctx.destination);
             osc.start(t0);
-            osc.stop(t0 + 0.18);
+            osc.stop(t0 + st.len + 0.02);
         });
     } catch {
         // sem WebAudio

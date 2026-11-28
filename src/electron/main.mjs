@@ -1452,11 +1452,13 @@ function liveWatchTick() {
 // para .pokebot-sounds e tocado pela janela do Hub, mesmo minimizada na bandeja.
 const SOUND_DIR = join(DATA_ROOT, '.pokebot-sounds');
 const SOUND_CFG_PATH = join(SOUND_DIR, 'sounds.json');
-const SOUND_EVENTS = ['shinyMiss', 'shinyCaught', 'rareDrop', 'error', 'chest', 'vote'];
+const SOUND_EVENTS = ['shinyMiss', 'shinyCaught', 'capture', 'rareDrop', 'error', 'chest', 'vote'];
 // canais padrão por evento: som, aviso no Hub (toast) e aviso do Windows
+// (volume opcional: capture nasce baixinho, por ser um som que repete a toda captura)
 const ALERT_DEFAULTS = {
     shinyMiss: { enabled: true, toast: true, os: true },
     shinyCaught: { enabled: true, toast: true, os: true },
+    capture: { enabled: true, toast: false, os: false, volume: 0.35 },
     rareDrop: { enabled: false, toast: true, os: false },
     error: { enabled: false, toast: true, os: true },
     chest: { enabled: false, toast: true, os: false },
@@ -1493,7 +1495,7 @@ let soundCfg = loadSoundCfg();
 
 function defaultSoundCfg() {
     const events = {};
-    for (const ev of SOUND_EVENTS) events[ev] = { ...ALERT_DEFAULTS[ev], volume: 1, url: '', file: '', title: '' };
+    for (const ev of SOUND_EVENTS) events[ev] = { volume: 1, ...ALERT_DEFAULTS[ev], url: '', file: '', title: '' };
     return { enabled: true, volume: 0.8, events };
 }
 
@@ -1734,6 +1736,17 @@ function fireAlert(event, acc, title, body, info = {}) {
     notifyWindows(event, acc, title, body);
 }
 
+// Som de captura comum: no máximo um a cada CAPTURE_SOUND_GAP_MS, mesmo com várias contas
+// ou várias capturas no mesmo ciclo, para continuar sutil.
+const CAPTURE_SOUND_GAP_MS = 700;
+let lastCaptureSoundAt = 0;
+function fireCaptureSound(acc, count) {
+    const now = Date.now();
+    if (now - lastCaptureSoundAt < CAPTURE_SOUND_GAP_MS) return;
+    lastCaptureSoundAt = now;
+    emitSound('capture', { account: acc, count });
+}
+
 function broadcastSoundCfg(invalidateEvent = null) {
     const payload = { cfg: publicSoundCfg(), invalidateEvent };
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -1772,6 +1785,7 @@ function alertTick() {
         const pityGarantido = Boolean(snap.gameIntel?.pityShiny?.garantido);
         const pityNoticeTs = Number(snap.gameIntel?.pityShiny?.notice?.ts || 0);
         const gymBuffPct = Number(snap.gameIntel?.gyms?.activeBuffPct || 0);
+        const captures = Number(snap.stats?.captures || 0);
 
         const base = alertBase.get(acc);
         if (!base) {
@@ -1789,9 +1803,13 @@ function alertTick() {
                 pityNoticeTs,
                 notifiedEvents: new Set(),
                 gymBuffPct,
+                captures,
             });
             continue;
         }
+        // captura comum: contador da sessão subiu (queda = sessão zerada, só atualiza a base)
+        const freshCaptures = captures - Number(base.captures ?? captures);
+        base.captures = captures;
         const freshMiss = missed.filter((e) => Number(e?.ts) > base.missTs);
         if (freshMiss.length) {
             base.missTs = Math.max(...freshMiss.map((e) => Number(e.ts)));
@@ -1804,6 +1822,8 @@ function alertTick() {
             const o = freshOwn[0];
             fireAlert('shinyCaught', acc, `Shiny capturado · Conta ${acc}`, `${nick} capturou ${o.name || 'um shiny'}${o.level ? ` (Nv ${o.level})` : ''}.`, { name: o.name || '' });
         }
+        // o shiny já tem som próprio: não soma o de captura por cima
+        if (freshCaptures > 0 && !freshOwn.length) fireCaptureSound(acc, freshCaptures);
         const freshRare = rareList.filter((d) => dropKeyOf(d) > base.lastRareKey);
         if (freshRare.length) {
             base.lastRareKey = Math.max(base.lastRareKey, ...freshRare.map(dropKeyOf));

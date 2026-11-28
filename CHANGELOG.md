@@ -4,6 +4,7 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+- **Som de captura**: um "plim" baixinho a cada captura comum, com no máximo um a cada 0,7 s mesmo com várias contas. Shiny continua com o som próprio. Configurável como os outros alertas (Som, Hub, Windows, volume próprio, trocar por link ou voltar ao padrão); nasce com volume em 35% e sem aviso no Hub nem no Windows.
 - **Telas mais legíveis**: nenhum texto abaixo de 11px, botões com contraste suficiente em todas as cores de destaque e de conta, e cores dos botões acompanhando o tema. No modo fundo os cartões ficam sólidos, então o desenho não passa por trás dos números; menus e janelas por cima deixaram de usar desfoque, que pesava na placa de vídeo.
 - **Grade em colunas**: quando a tela de uma conta fica estreita, o resumo desce para baixo do jogo sozinho (antes o jogo virava uma faixa fina) e volta para o lado quando a tela alarga. Rótulos da barra da grade por extenso e com dica.
 - **Atividade sem repetição**: a mesma mensagem de rotina em sequência vira uma linha com ×N. "Conectado" mostra o nome da hunt em vez do endereço técnico e não abre mais aviso flutuante.

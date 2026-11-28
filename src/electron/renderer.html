@@ -1093,6 +1093,33 @@
                   <div class="sound-status hint-text" data-snd-status="shinyCaught"></div>
                 </details>
               </div>
+              <div class="sound-event" data-sound-event="capture">
+                <div class="sound-event-head">
+                  <span class="alert-ev-name" data-icon="pokeball">Captura</span>
+                  <span class="alert-channels">
+                    <label class="ch-chk" title="Tocar som"><input type="checkbox" data-snd-toggle="capture" /> Som</label>
+                    <label class="ch-chk" title="Aviso dentro do Hub"><input type="checkbox" data-alert-ch="toast" data-alert-ev="capture" /> Hub</label>
+                    <label class="ch-chk" title="Aviso do Windows quando o Hub não está em foco"><input type="checkbox" data-alert-ch="os" data-alert-ev="capture" /> Windows</label>
+                  </span>
+                </div>
+                <div class="sound-event-sub">Um "plim" baixinho a cada captura comum (no máximo um a cada 0,7 s). Shiny tem som próprio.</div>
+                <div class="sound-event-vol" data-snd-vol-row="capture">
+                  <span class="sound-event-vol-lbl">Volume</span>
+                  <input type="range" min="0" max="100" step="5" value="35" data-snd-vol="capture" aria-label="Volume do alerta: Captura" />
+                  <span class="sound-event-vol-val" data-snd-vol-val="capture">35%</span>
+                  <button type="button" class="btn sm" data-snd-act="test" data-snd-event="capture" data-icon="volume" title="Testar com este volume">Testar</button>
+                </div>
+                <details class="sound-more">
+                  <summary><span class="sound-current" data-snd-current="capture">Som padrão</span> · trocar som</summary>
+                  <div class="sound-link-row">
+                    <input type="text" data-snd-url="capture" placeholder="Cole um link do myinstants.com ou de um arquivo .mp3" spellcheck="false" aria-label="Link do som: Captura" />
+                    <button type="button" class="btn sm primary" data-snd-act="save" data-snd-event="capture">Usar link</button>
+                    <button type="button" class="btn sm" data-snd-act="test" data-snd-event="capture" data-icon="volume">Testar</button>
+                    <button type="button" class="btn sm" data-snd-act="reset" data-snd-event="capture" title="Voltar para o som padrão">Padrão</button>
+                  </div>
+                  <div class="sound-status hint-text" data-snd-status="capture"></div>
+                </details>
+              </div>
               <div class="sound-event" data-sound-event="rareDrop">
                 <div class="sound-event-head">
                   <span class="alert-ev-name" data-icon="gift">Drop raro</span>
