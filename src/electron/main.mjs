@@ -535,8 +535,17 @@ const perf = createPerfSampler({
     },
 });
 
-function getAllSnapshots() {
-    return perf.measureSnapshots(buildAllSnapshots);
+// Os snapshots das 4 contas são caros e três consumidores pedem em ritmos próprios (Hub 1,25 s,
+// alertas 2 s, bandeja 5 s). Quem não precisa do dado do último instante passa `maxAgeMs` e
+// reaproveita o que já foi montado; ações do usuário chamam sem argumento e recebem dado fresco.
+let snapshotsCache = null;
+let snapshotsCacheAt = 0;
+function getAllSnapshots({ maxAgeMs = 0 } = {}) {
+    const now = Date.now();
+    if (maxAgeMs > 0 && snapshotsCache && now - snapshotsCacheAt < maxAgeMs) return snapshotsCache;
+    snapshotsCache = perf.measureSnapshots(buildAllSnapshots);
+    snapshotsCacheAt = Date.now();
+    return snapshotsCache;
 }
 
 function buildAllSnapshots() {
@@ -587,7 +596,7 @@ function fmtTrayNum(n) {
 
 function refreshTrayMenu(snapsArg = null) {
     if (!tray || tray.isDestroyed()) return;
-    const snaps = snapsArg || getAllSnapshots();
+    const snaps = snapsArg || getAllSnapshots({ maxAgeMs: 4_000 });
     const sigParts = [];
     const tooltipParts = [];
     const accountItems = [];
@@ -1738,7 +1747,7 @@ function broadcastSoundCfg(invalidateEvent = null) {
 }
 
 function alertTick() {
-    const snaps = getAllSnapshots();
+    const snaps = getAllSnapshots({ maxAgeMs: 1_000 });
     const nowMs = Date.now();
     for (const acc of ACCOUNT_IDS) {
         const snap = snaps[acc];

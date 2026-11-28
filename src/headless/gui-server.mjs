@@ -7073,6 +7073,17 @@ export function createHeadlessController(options = {}) {
         return false;
     };
 
+    const DERIVED_MEMO_TTL_MS = 8_000;
+    const derivedMemo = new Map();
+    const memoDerived = (name, sig, compute) => {
+        const t = nowFn();
+        const hit = derivedMemo.get(name);
+        if (hit && hit.sig === sig && t - hit.at < DERIVED_MEMO_TTL_MS) return hit.value;
+        const value = compute();
+        derivedMemo.set(name, { sig, at: t, value });
+        return value;
+    };
+
     const getSnapshot = ({ includeHunts = true, advisorLists = true } = {}) => {
         const now = nowFn();
         const state = merger.getState();
@@ -7278,21 +7289,29 @@ export function createHeadlessController(options = {}) {
             return { ...r, currentMinPrice, avgPrice, pendingQty: pendingByRule.get(r.id) || 0 };
         });
 
-        const speciesById = new Map();
-        for (const [idStr, nm] of Object.entries(catalog.pokemonNames || {})) {
-            const idNum = Number(idStr);
-            if (Number.isInteger(idNum) && idNum > 0 && nm) speciesById.set(idNum, String(nm));
-        }
-        for (const p of state?.pokemons || []) {
-            const spId = Number(p?.speciesId ?? p?.pokeId ?? 0);
-            const nm = p?.nome || p?.name;
-            if (Number.isInteger(spId) && spId > 0 && nm && !speciesById.has(spId)) {
-                speciesById.set(spId, String(nm));
-            }
-        }
-        const marketSpecies = [...speciesById.entries()]
-            .map(([id, name]) => ({ id, name }))
-            .sort((a, b) => a.name.localeCompare(b.name));
+        // Lista estática de espécies (catálogo + o que a conta tem): ordenar ~1000 nomes com localeCompare
+        // a cada snapshot era desperdício. Mesmo tamanho de catálogo e de lista = mesma lista.
+        const marketSpecies = memoDerived(
+            'marketSpecies',
+            `${Object.keys(catalog.pokemonNames || {}).length}|${(state?.pokemons || []).length}`,
+            () => {
+                const speciesById = new Map();
+                for (const [idStr, nm] of Object.entries(catalog.pokemonNames || {})) {
+                    const idNum = Number(idStr);
+                    if (Number.isInteger(idNum) && idNum > 0 && nm) speciesById.set(idNum, String(nm));
+                }
+                for (const p of state?.pokemons || []) {
+                    const spId = Number(p?.speciesId ?? p?.pokeId ?? 0);
+                    const nm = p?.nome || p?.name;
+                    if (Number.isInteger(spId) && spId > 0 && nm && !speciesById.has(spId)) {
+                        speciesById.set(spId, String(nm));
+                    }
+                }
+                return [...speciesById.entries()]
+                    .map(([id, name]) => ({ id, name }))
+                    .sort((a, b) => a.name.localeCompare(b.name));
+            },
+        );
 
         // Intel de jogo consolidada (Fase 1)
         const seasonalWin = getSeasonalTypeWindow(serverNowSnap);
@@ -7406,6 +7425,11 @@ export function createHeadlessController(options = {}) {
         const evolutionDexReady = buildEvolutionReadyList(state);
 
         const teamPokes = (state?.pokemons || []).filter((p) => p && p.slot != null);
+        // Sugestões derivadas da lista inteira de Pokémon (time PvP, formações, raid): ~35 ms com 3000
+        // Pokémon e mudam devagar. Recalcula quando muda o tamanho da lista, a equipe (id/slot/nível),
+        // o nível do treinador ou o catálogo, ou depois do TTL (o HP muda a cada tique, não serve de chave).
+        const derivedSig = `${(state?.pokemons || []).length}|${trainerLevel}|${advisorSpecies?.byId?.size || 0}|`
+            + teamPokes.map((p) => `${p.id}:${p.slot}:${p.level ?? p.nivel}`).join(',');
         const gymSource = {
             podiums: Array.isArray(gymPodiums) ? gymPodiums : [],
             nextCooldownAt: gymCooldownAt,
@@ -7498,7 +7522,7 @@ export function createHeadlessController(options = {}) {
         const sacCanClaim = Number(state?.automation?.sacrificio?.pts || 0) >= 50;
         const affCanClaim = Boolean(state?.afiliado?.pendente || Number(state?.afiliado?.saldo || state?.afiliado?.gold || 0) > 0);
 
-        const teamBuilderSnap = state ? computeTeamBuilderPlan(state) : null;
+        const teamBuilderSnap = state ? memoDerived('teamBuilder', derivedSig, () => computeTeamBuilderPlan(state)) : null;
         const probAlerts = [];
         if (pityIntel?.ativo && !pityIntel.garantido && Number(pityIntel.restanteMs) > 0 && Number(pityIntel.restanteMs) <= 300_000) {
             probAlerts.push({
@@ -7709,9 +7733,9 @@ export function createHeadlessController(options = {}) {
                 casas: state?.pvp?.casas ?? state?.pvpFormacao?.casas ?? {},
                 rankIntel: pvpRankIntel,
                 modeFormations: {
-                    ginasio: buildPvpFormationForMode(state, 'ginasio', advisorSpecies?.byId),
-                    guerra: buildPvpFormationForMode(state, 'guerra', advisorSpecies?.byId),
-                    padrao: buildPvpFormationForMode(state, 'padrao', advisorSpecies?.byId),
+                    ginasio: memoDerived('pvpGinasio', derivedSig, () => buildPvpFormationForMode(state, 'ginasio', advisorSpecies?.byId)),
+                    guerra: memoDerived('pvpGuerra', derivedSig, () => buildPvpFormationForMode(state, 'guerra', advisorSpecies?.byId)),
+                    padrao: memoDerived('pvpPadrao', derivedSig, () => buildPvpFormationForMode(state, 'padrao', advisorSpecies?.byId)),
                 },
                 lastTreinoResult,
                 guildBoostPct,
@@ -7722,7 +7746,7 @@ export function createHeadlessController(options = {}) {
                 hasToken: Number(state?.items?.[70000] || 0) >= 1,
                 fichas: raidDetailState?.fichas ?? null,
                 info: raidDetailState?.info ?? null,
-                suggestedTeam: selectBestRaidTeam(state?.pokemons || [], advisorSpecies?.byId),
+                suggestedTeam: memoDerived('raidTeam', derivedSig, () => selectBestRaidTeam(state?.pokemons || [], advisorSpecies?.byId)),
             },
             guildRaid: computeGuildRaidIntel((guildRaidState || state?.guild) ? { ...(state?.guild || {}), ...(guildRaidState || {}) } : null, serverNowSnap),
             ownListings: ownListingsIntel,
