@@ -298,6 +298,7 @@
             <label class="chk"><input type="checkbox" id="cPass" /> Auto-Passe Diario</label>
             <label class="chk"><input type="checkbox" id="cPrey" /> Auto-Prey Diario</label>
             <label class="chk"><input type="checkbox" id="cPvpQueue" /> Fila de PvP ranqueado</label>
+            <label class="chk"><input type="checkbox" id="cPvpMonitor" checked /> Monitor de PvP (para a fila se perder demais)</label>
             <label class="chk"><input type="checkbox" id="cNativeHeal" /> Auto-Cura/Revive Nativo</label>
             <label class="chk"><input type="checkbox" id="cLives" /> Auto-Lives (Twitch &amp; Kick)</label>
             <label class="chk"><input type="checkbox" id="cLiveSmart" /> Balancear buffs ate a meta</label>
@@ -700,6 +701,7 @@
         potionOptimize: document.getElementById('cRestockPotion').value === 'opt',
         ballEconomy: document.getElementById('cBallEconomy').checked,
         pvpQueue: document.getElementById('cPvpQueue').checked,
+        pvpMonitor: document.getElementById('cPvpMonitor').checked,
         liveRewardType: liveTwitchRewards[0] || liveKickRewards[0] || 'xp',
         liveTwitchRewards,
         liveKickRewards,
@@ -1090,6 +1092,7 @@
         document.getElementById('cRestockPotion').value = c.potionOptimize ? 'opt' : String(c.restockPotionId || 0);
         document.getElementById('cBallEconomy').checked = !!c.ballEconomy;
         document.getElementById('cPvpQueue').checked = !!c.pvpQueue;
+        document.getElementById('cPvpMonitor').checked = c.pvpMonitor !== false;
         document.getElementById('cLiveTier').value = c.liveRewardTier || 'smart';
         document.getElementById('cGuideMode').value = c.huntGuideMode || 'off';
         document.getElementById('cGuideMetric').value = c.huntGuideMetric || 'xp';

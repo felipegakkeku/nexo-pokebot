@@ -531,6 +531,14 @@
                 <label class="toggle-item"><input type="checkbox" id="cAutoPokedexEvolve" /> Auto-evoluir espécies pendentes na Pokédex</label>
                 <label class="toggle-item"><input type="checkbox" id="cTopCatchPreferEasyStage" checked /> Priorizar estágios iniciais fáceis no Top Catch</label>
                 <label class="toggle-item with-sub"><input type="checkbox" id="cPvpQueue" /><span class="toggle-copy"><span>Ficar na fila do PvP ranqueado</span><span class="toggle-sub">Entra na fila e volta depois de cada partida, respeitando a espera do jogo. Funciona sem VIP; o resultado de cada partida vai para o registro.</span></span></label>
+                <label class="toggle-item with-sub"><input type="checkbox" id="cPvpMonitor" checked /><span class="toggle-copy"><span>Monitor de PvP: parar a fila se começar a perder demais</span><span class="toggle-sub">Vitória rende mais PR do que a derrota tira (cerca de +13 e -9). O monitor calcula, com as partidas da sessão, quantas derrotas seguidas já passam do normal e para a fila antes do prejuízo crescer. Para recomeçar, desligue e ligue a fila.</span></span></label>
+                <div class="field"><label for="cPvpMonitorLevel">Sensibilidade do monitor de PvP</label>
+                  <select id="cPvpMonitorLevel">
+                    <option value="cauteloso">Cauteloso (para cedo)</option>
+                    <option value="equilibrado" selected>Equilibrado</option>
+                    <option value="tolerante">Tolerante (aguenta mais sequência ruim)</option>
+                  </select>
+                </div>
                 <label class="toggle-item with-sub"><input type="checkbox" id="cBallEconomy" /><span class="toggle-copy"><span>Economizar Pokébolas</span><span class="toggle-sub warn">Pode deixar escapar shiny: o shiny é sorteado no arremesso e bola mais fraca segura menos. Desligado, todo Pokémon de nível alto recebe Ultra Ball.</span></span></label>
                 <div class="cfg-group-title">Otimização e Economia</div>
                 <label class="toggle-item"><input type="checkbox" id="cAutoCraftShinyEgg" checked /> Fabricar Ovo Shiny ao juntar 10 fragmentos</label>

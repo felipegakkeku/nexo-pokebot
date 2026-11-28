@@ -4,6 +4,7 @@ Uma linha por versão. Ao publicar, mova o conteúdo de "Unreleased" para a nova
 
 ## Unreleased
 
+- **Monitor de PvP**: a fila ranqueada para sozinha quando a sessão começa a dar prejuízo. O cálculo usa o PR que o jogo realmente dá (cerca de +13 na vitória e -9 na derrota, equilíbrio perto de 41% de vitórias) e para por três motivos: derrotas seguidas acima do que a taxa de vitória da conta explica (4 a 7, menos quanto mais ela vence), últimas 10 partidas abaixo do equilíbrio com saldo negativo, ou queda grande de PR desde o melhor ponto da sessão. Ligado por padrão, com sensibilidade Cauteloso, Equilibrado ou Tolerante; para recomeçar, desligue e ligue a fila.
 - **Som de captura**: um "plim" baixinho a cada captura comum, com no máximo um a cada 0,7 s mesmo com várias contas. Shiny continua com o som próprio. Configurável como os outros alertas (Som, Hub, Windows, volume próprio, trocar por link ou voltar ao padrão); nasce com volume em 35% e sem aviso no Hub nem no Windows.
 - **Telas mais legíveis**: nenhum texto abaixo de 11px, botões com contraste suficiente em todas as cores de destaque e de conta, e cores dos botões acompanhando o tema. No modo fundo os cartões ficam sólidos, então o desenho não passa por trás dos números; menus e janelas por cima deixaram de usar desfoque, que pesava na placa de vídeo.
 - **Grade em colunas**: quando a tela de uma conta fica estreita, o resumo desce para baixo do jogo sozinho (antes o jogo virava uma faixa fina) e volta para o lado quando a tela alarga. Rótulos da barra da grade por extenso e com dica.

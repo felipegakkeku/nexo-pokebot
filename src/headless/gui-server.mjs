@@ -48,6 +48,7 @@ import {
     evaluateHeadlessTick,
     evaluatePvpQueue,
     applyPvpMessage,
+    checkPvpMonitor,
     computeModeWarnings,
     chavePokedex,
     getTopCatchWeekKey,
@@ -107,6 +108,7 @@ import {
     buildPvpFormationForMode,
     analyzeOwnListingsUndercut,
 } from './pvp-meta.mjs';
+import { normalizePvpMonitorLevel, computePvpMonitor } from './pvp-monitor.mjs';
 import { buildRecommendedPvpTeam } from './team-builder.mjs';
 import {
     XP_SHARE_HELD_ID,
@@ -213,6 +215,8 @@ const EDITABLE_CONFIG_KEYS = new Set([
     'potionOptimize',
     'ballEconomy',
     'pvpQueue',
+    'pvpMonitor',
+    'pvpMonitorLevel',
     'minRevives',
     'targetRevives',
     'restockRevive',
@@ -450,6 +454,8 @@ function buildConfig(prefs = {}, saved = {}, overrides = {}, isolatedAccount = f
         potionOptimize: p.potionOptimize === true,
         ballEconomy: p.ballEconomy === true,
         pvpQueue: p.pvpQueue === true,
+        pvpMonitor: p.pvpMonitor !== false,
+        pvpMonitorLevel: normalizePvpMonitorLevel(p.pvpMonitorLevel),
         minRevives: undefined,
         targetRevives: typeof p.targetRevives === 'number' ? p.targetRevives : 20,
         restockRevive: p.restockRevive ?? true,
@@ -595,6 +601,8 @@ function normalizeConfigPatch(current, patch = {}) {
     if (patch.potionOptimize !== undefined) next.potionOptimize = Boolean(patch.potionOptimize);
     if (patch.ballEconomy !== undefined) next.ballEconomy = Boolean(patch.ballEconomy);
     if (patch.pvpQueue !== undefined) next.pvpQueue = Boolean(patch.pvpQueue);
+    if (patch.pvpMonitor !== undefined) next.pvpMonitor = Boolean(patch.pvpMonitor);
+    if (patch.pvpMonitorLevel !== undefined) next.pvpMonitorLevel = normalizePvpMonitorLevel(patch.pvpMonitorLevel);
     if (patch.minPotions !== undefined) {
         const n = Number(patch.minPotions);
         if (Number.isFinite(n)) next.minPotions = next.targetPotions > 0 ? Math.max(1, Math.min(next.targetPotions, Math.round(n))) : 0;
@@ -5368,6 +5376,13 @@ export function createHeadlessController(options = {}) {
             tracker.pvp ??= {};
             const note = applyPvpMessage(tracker.pvp, m, nowFn());
             if (note && config.pvpQueue) pushLog(m.partida ? (m.partida.venci ? 'ok' : 'info') : (m.filaRecusa ? 'warn' : 'info'), note);
+            if (m.partida) {
+                const stop = checkPvpMonitor(tracker.pvp, config, nowFn());
+                if (stop) {
+                    pushLog('warn', stop.note);
+                    if (stop.actions.length) sendActions(stop.actions);
+                }
+            }
             return;
         }
 
@@ -6398,6 +6413,7 @@ export function createHeadlessController(options = {}) {
         const prevBrowserProfile = config.browserProfile;
         const prevPotionsKey = JSON.stringify(config.preferredPotionIds || []);
         const prevPvpQueue = Boolean(config.pvpQueue);
+        const prevPvpMonitorLevel = config.pvpMonitorLevel;
         const prevSniperEnabled = Boolean(config.sniperEnabled);
         const prevSniperInterval = Number(config.sniperIntervalSec || 30);
         const prevTrainerEnabled = Boolean(config.trainerEnabled);
@@ -6422,6 +6438,12 @@ export function createHeadlessController(options = {}) {
                 if (wasInQueue) sendActions([{ t: 'pvp.fila.sair' }]);
                 pushLog('info', 'Fila de PvP desligada.');
             }
+        }
+        if (tracker.pvp?.halted && (config.pvpMonitor === false || prevPvpMonitorLevel !== config.pvpMonitorLevel)) {
+            // Desligar o monitor (ou mudar a sensibilidade) libera a fila parada; se o novo nível ainda
+            // achar o histórico perigoso, a próxima partida para de novo.
+            tracker.pvp.halted = null;
+            pushLog('info', 'Monitor de PvP: fila liberada de novo.');
         }
         if (JSON.stringify(config.preferredPotionIds || []) !== prevPotionsKey) {
             tracker.lastAutoSetAt = 0;
@@ -7629,6 +7651,15 @@ export function createHeadlessController(options = {}) {
                 detail: 'Seu buff ou quantidade de pódios de ginásio caiu nesta sessão.',
             });
         }
+        if (tracker.pvp?.halted) {
+            const h = tracker.pvp.halted;
+            probAlerts.push({
+                id: 'pvp-monitor-halt',
+                level: 'warn',
+                title: 'Fila de PvP parada pelo monitor',
+                detail: `${h.reason} Desligue e ligue a fila para recomeçar.`,
+            });
+        }
         if (pvpRankIntel.decayWarning) {
             probAlerts.push({
                 id: 'pvp-decay',
@@ -7770,6 +7801,13 @@ export function createHeadlessController(options = {}) {
                 team: pvpTeam,
                 casas: state?.pvp?.casas ?? state?.pvpFormacao?.casas ?? {},
                 rankIntel: pvpRankIntel,
+                monitor: {
+                    enabled: config.pvpQueue === true && config.pvpMonitor !== false,
+                    level: config.pvpMonitorLevel,
+                    halted: tracker.pvp?.halted || null,
+                    ...computePvpMonitor(tracker.pvp, config.pvpMonitorLevel),
+                    history: undefined,
+                },
                 modeFormations: {
                     ginasio: memoDerived('pvpGinasio', derivedSig, () => buildPvpFormationForMode(state, 'ginasio', advisorSpecies?.byId)),
                     guerra: memoDerived('pvpGuerra', derivedSig, () => buildPvpFormationForMode(state, 'guerra', advisorSpecies?.byId)),

@@ -1361,6 +1361,7 @@
         cCaidos: 'Joga a Pokébola em Pokémon caídos. O jogo só sorteia o shiny na hora do arremesso, então não dá para saber antes: toda bola jogada é uma chance, e um shiny que escapa vai embora com o corpo. Funciona também no Modo Economia do jogo, com 0% de GPU.',
         cNativeHeal: 'Liga a cura automática e o Revive do próprio jogo, com as poções marcadas mais abaixo.',
         cPvpQueue: 'Mantém a conta na fila do PvP ranqueado: entra, e depois de cada partida (e da espera que o jogo pede entre elas) entra de novo. Funciona sem VIP. O placar da sessão aparece no registro.',
+        cPvpMonitor: 'Vitória rende mais PR do que a derrota tira, então perder de vez em quando não dá prejuízo: o equilíbrio fica perto de 41% de vitórias. O monitor estima a taxa de vitória da sessão e para a fila quando as derrotas seguidas passam do que a sorte explica, quando as últimas 10 partidas dão saldo negativo ou quando o PR cai muito do melhor ponto da sessão. A conta continua jogando normalmente fora da fila.',
         cRestock: 'Compra bolas, poções e revives no mercado quando ficam abaixo dos alvos, sem passar da reserva mínima de gold.',
         cPass: 'Resgata a recompensa diária do passe assim que libera.',
         cPrey: 'Rola o Prey diário automaticamente.',

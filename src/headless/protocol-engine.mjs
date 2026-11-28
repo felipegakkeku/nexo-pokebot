@@ -1,4 +1,5 @@
 import { selectBestAutoBoss } from './pvp-meta.mjs';
+import { recordPvpMatch, evaluatePvpMonitor } from './pvp-monitor.mjs';
 
 export const DEFAULT_WS_URL = 'wss://pokeidle.io';
 export const DEFAULT_ORIGIN = 'https://pokeidle.io';
@@ -131,6 +132,7 @@ export function applyPvpMessage(pvp, m, nowMs = Date.now()) {
         pvp.na = false;
         if (p.venci) pvp.wins = Number(pvp.wins || 0) + 1;
         else pvp.losses = Number(pvp.losses || 0) + 1;
+        recordPvpMatch(pvp, p, nowMs);
         pvp.waitUntil = Math.max(Number(pvp.waitUntil || 0), nowMs + PVP_AFTER_MATCH_MS);
         const rival = String((typeof p.oponente === 'object' ? p.oponente?.nick ?? p.oponente?.nome : p.oponente) ?? '?');
         const delta = Number(p.delta) || 0;
@@ -148,7 +150,7 @@ export function applyPvpMessage(pvp, m, nowMs = Date.now()) {
  * @returns {Array<object>} Acoes a enviar.
  */
 export function evaluatePvpQueue(pvp, config, nowMs = Date.now()) {
-    if (!pvp || !config?.pvpQueue) return [];
+    if (!pvp || !config?.pvpQueue || pvp.halted) return [];
     if (!pvp.asked) {
         pvp.asked = true;
         pvp.lastTry = nowMs;
@@ -157,6 +159,33 @@ export function evaluatePvpQueue(pvp, config, nowMs = Date.now()) {
     if (pvp.na || nowMs < Number(pvp.waitUntil || 0) || nowMs - Number(pvp.lastTry || 0) < PVP_RETRY_MS) return [];
     pvp.lastTry = nowMs;
     return [{ t: 'pvp.fila.entrar' }];
+}
+
+/**
+ * Monitor de PvP: depois de cada partida, confere se a sequência de resultados está perigosa
+ * (derrotas seguidas, janela ruim ou queda de PR) e, se estiver, para a fila. A fila só volta
+ * quando a pessoa desliga e liga "Ficar na fila do PvP ranqueado" (isso zera a sessão).
+ * @param {object} pvp Estado da fila (mutado: `halted`, `na`).
+ * @param {object} config Config (pvpQueue, pvpMonitor, pvpMonitorLevel).
+ * @param {number} nowMs Agora.
+ * @returns {{note: string, actions: Array<object>, halted: object}|null} null quando segue na fila.
+ */
+export function checkPvpMonitor(pvp, config, nowMs = Date.now()) {
+    if (!pvp || !config?.pvpQueue || config.pvpMonitor === false || pvp.halted) return null;
+    const r = evaluatePvpMonitor(pvp, config.pvpMonitorLevel);
+    if (!r.stop) return null;
+    const actions = pvp.na ? [{ t: 'pvp.fila.sair' }] : [];
+    pvp.na = false;
+    pvp.halted = {
+        at: nowMs, rule: r.rule, reason: r.reason,
+        wins: Number(pvp.wins || 0), losses: Number(pvp.losses || 0), netPr: Number(pvp.netPr || 0),
+    };
+    const net = Math.round(Number(pvp.netPr || 0));
+    return {
+        note: `PvP: monitor parou a fila: ${r.reason} Placar ${pvp.wins || 0}V ${pvp.losses || 0}D, saldo ${net >= 0 ? '+' : ''}${net} PR. Desligue e ligue a fila para recomeçar.`,
+        actions,
+        halted: pvp.halted,
+    };
 }
 
 export const MYSTIC_BALL_PRIORITY = Object.freeze([5, 4, 3, 2, 1]);

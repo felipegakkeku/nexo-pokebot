@@ -1982,6 +1982,8 @@ function readConfigForm() {
         potionOptimize: $('cRestockPotion').value === 'opt',
         ballEconomy: $('cBallEconomy').checked,
         pvpQueue: $('cPvpQueue').checked,
+        pvpMonitor: $('cPvpMonitor').checked,
+        pvpMonitorLevel: $('cPvpMonitorLevel').value,
         targetRevives,
         restockRevive: targetRevives > 0,
         minBalls: readMinField('cMinBalls'),
@@ -2528,6 +2530,8 @@ function renderActiveAccountPanel() {
         $('cRestockPotion').value = cfg.potionOptimize ? 'opt' : String(cfg.restockPotionId || 0);
         $('cBallEconomy').checked = Boolean(cfg.ballEconomy);
         $('cPvpQueue').checked = Boolean(cfg.pvpQueue);
+        $('cPvpMonitor').checked = cfg.pvpMonitor !== false;
+        $('cPvpMonitorLevel').value = cfg.pvpMonitorLevel || 'equilibrado';
         $('cTargetRevives').value = cfg.restockRevive === false ? 0 : (cfg.targetRevives ?? 20);
         $('cReserve').value = cfg.minGoldReserve ?? 0;
         // Mostra o mínimo só quando foge do padrão (35% do alvo); vazio continua automático.
