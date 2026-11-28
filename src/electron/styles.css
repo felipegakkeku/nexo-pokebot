@@ -5138,3 +5138,136 @@ button.btn.claim-btn.claim-ready {
   .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-chips { grid-column: 1 / 3; grid-row: 5; }
   .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-pvp { grid-column: 3; grid-row: 5; }
 }
+
+/* Resumo na cor da conta: o fundo inteiro ganha o tom escolhido para a conta e os cartões
+   ficam translúcidos para o tom aparecer por baixo. */
+.wv-slot[data-acc-color] .wv-summary {
+  background:
+    radial-gradient(110% 80% at 0% 0%, color-mix(in srgb, var(--acc-c) 30%, transparent) 0%, transparent 62%),
+    linear-gradient(180deg, color-mix(in srgb, var(--acc-c) 16%, var(--bg-elev)) 0%, color-mix(in srgb, var(--acc-c) 7%, var(--bg-elev)) 100%);
+  border-color: color-mix(in srgb, var(--acc-c) 38%, var(--border));
+}
+.wv-slot[data-acc-color] .wv-sum-title { color: var(--acc-text); }
+.wv-slot[data-acc-color] .wv-sum-poke { --hc: var(--acc-c); }
+.wv-slot[data-acc-color] .wv-sum-poke,
+.wv-slot[data-acc-color] .wv-sum-chips .chip,
+.wv-slot[data-acc-color] .wv-sum-pvp,
+.wv-slot[data-acc-color] .wv-sum-kpis > div {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--acc-c) 12%, transparent) 0%, color-mix(in srgb, #000 22%, transparent) 100%);
+}
+.wv-slot[data-acc-color] .wv-sum-hero .hero {
+  background: linear-gradient(160deg, color-mix(in srgb, var(--hc) 20%, transparent) 0%, color-mix(in srgb, #000 24%, transparent) 75%);
+}
+.wv-slot[data-acc-color] .wv-sum-hp,
+.wv-slot[data-acc-color] .wv-sum-xp { background: color-mix(in srgb, #000 35%, transparent); }
+
+/* Hierarquia do resumo (visão completa): o Pokémon é o bloco maior; os buffs viram uma faixa fina. */
+.wv-summary[data-sum-density="full"] .wv-sum-poke { gap: 11px; padding: 9px 11px; border-radius: var(--r-lg, var(--r-md)); }
+.wv-summary[data-sum-density="full"] .wv-sum-sprite { width: 66px; height: 66px; border-radius: var(--r-lg, var(--r-md)); background: color-mix(in srgb, var(--hc) 12%, var(--bg)); }
+.wv-summary[data-sum-density="full"] .wv-sum-sprite img { width: 60px; height: 60px; }
+.wv-summary[data-sum-density="full"] .wv-sum-poke-name { font-size: 15px; letter-spacing: 0.1px; }
+.wv-summary[data-sum-density="full"] .wv-sum-hp { height: 8px; margin-top: 5px; }
+.wv-summary[data-sum-density="full"] .wv-sum-xp { height: 6px; margin-top: 5px; }
+.wv-summary[data-sum-density="full"] .wv-sum-hp-txt { margin-top: 3px; }
+@container wvsum (max-width: 230px) {
+  .wv-summary[data-sum-density="full"] .wv-sum-sprite { width: 48px; height: 48px; }
+  .wv-summary[data-sum-density="full"] .wv-sum-sprite img { width: 44px; height: 44px; }
+  .wv-summary[data-sum-density="full"] .wv-sum-poke-name { font-size: var(--fs-sm); }
+}
+
+.wv-sum-buffs {
+  grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; padding: 4px 8px; align-items: end;
+  border-radius: var(--r-md); border: 1px solid var(--border); background: color-mix(in srgb, #000 16%, transparent);
+}
+.wv-sum-buffs .pbuff { gap: 2px; }
+.wv-sum-buffs .pbuff b { display: flex; justify-content: space-between; gap: 4px; min-width: 0; font-size: 10px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; }
+.wv-sum-buffs .pbuff b em { font-style: normal; color: var(--text-soft); font-variant-numeric: tabular-nums; }
+.wv-sum-buffs .pbuff.off { opacity: 0.55; }
+@container wvsum (max-width: 230px) {
+  .wv-sum-buffs { gap: 5px; padding: 4px 6px; }
+  .wv-sum-buffs .pbuff b { font-size: 9px; }
+}
+
+/* Embaixo: Pokémon na coluna da esquerda, ocupando a altura toda; cards, buffs e chips à direita. */
+@container wvslot (min-width: 480px) {
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-poke { grid-column: 1; grid-row: 2 / span 3; align-self: stretch; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-hero { grid-column: 2 / -1; grid-row: 2; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-buffs { grid-column: 2 / -1; grid-row: 3; align-self: start; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-chips { grid-column: 2 / -1; grid-row: 4; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-pvp { grid-column: 1 / -1; grid-row: 5; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-drops { grid-column: 1 / -1; grid-row: 6; white-space: normal; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-events { grid-column: 1 / -1; grid-row: 8; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-sec { grid-row: 7; }
+}
+
+/* Sprite do Pokémon solto, sem o quadrado em volta: só o desenho com um brilho suave na cor da conta. */
+.wv-sum-sprite,
+.wv-summary[data-sum-density="full"] .wv-sum-sprite,
+.wv-sum-sprite.shiny {
+  background: none; border: 0; box-shadow: none; border-radius: 0; overflow: visible;
+}
+.wv-sum-sprite img { filter: drop-shadow(0 2px 6px color-mix(in srgb, var(--hc) 55%, transparent)); }
+.wv-sum-sprite.shiny img { filter: drop-shadow(0 0 7px color-mix(in srgb, var(--shiny) 70%, transparent)); }
+.wv-summary[data-sum-density="full"] .wv-sum-sprite { width: 72px; height: 72px; }
+.wv-summary[data-sum-density="full"] .wv-sum-sprite img { width: 72px; height: 72px; }
+@container wvsum (max-width: 230px) {
+  .wv-summary[data-sum-density="full"] .wv-sum-sprite,
+  .wv-summary[data-sum-density="full"] .wv-sum-sprite img { width: 52px; height: 52px; }
+}
+
+/* Embaixo (completo): duas colunas, com o Pokémon numa coluna larga o bastante para o nome inteiro. */
+@container wvslot (min-width: 480px) {
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] { grid-template-columns: minmax(235px, 0.9fr) minmax(0, 1.6fr); }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-poke { padding: 12px; }
+}
+
+/* Nome do Pokémon pode quebrar em duas linhas em vez de ser cortado com reticências. */
+.wv-summary[data-sum-density="full"] .wv-sum-poke-name { white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.2; overflow-wrap: anywhere; }
+/* Embaixo a coluna dos cards é estreita: dois por linha; com a tela da conta bem larga voltam a quatro. */
+.wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] .wv-sum-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@container wvslot (min-width: 1000px) {
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] .wv-sum-hero { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* Embaixo (completo): o cartão do Pokémon ocupa a coluna inteira, com o desenho grande no topo. */
+@container wvslot (min-width: 480px) {
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-poke { flex-direction: column; justify-content: center; text-align: center; gap: 8px; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-poke .wv-sum-sprite,
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-poke .wv-sum-sprite img { width: 96px; height: 96px; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-poke .wv-sum-poke-info { flex: 0 0 auto; width: 100%; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-poke .wv-sum-poke-name { font-size: 17px; }
+}
+@container wvslot (min-width: 480px) {
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-poke { gap: 5px; padding: 8px 12px; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-poke .wv-sum-sprite,
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-poke .wv-sum-sprite img { width: 80px; height: 80px; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-poke .wv-sum-hp { margin-top: 3px; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-poke .wv-sum-xp { margin-top: 3px; }
+}
+@container wvslot (min-width: 480px) and (max-height: 700px) {
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-poke .wv-sum-sprite,
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-poke .wv-sum-sprite img { width: 62px; height: 62px; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-poke { padding: 6px 12px; gap: 3px; }
+}
+
+/* Shiny é raro: no resumo vira uma pastilha pequena ao lado dos outros números, sem card próprio. */
+.wv-sum-hero { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.wv-sum-chips { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.wv-sum-chips .chip.shiny { --cc: var(--shiny); }
+.wv-sum-chips dt { overflow: hidden; text-overflow: ellipsis; }
+@container (max-width: 520px) {
+  .wv-sum-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .wv-sum-hero .hero.catch { grid-column: 1 / -1; }
+}
+@container (max-width: 190px) {
+  .wv-sum-hero .hero.catch { grid-column: auto; }
+}
+.wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] .wv-sum-hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] .wv-sum-hero .hero.catch { grid-column: 1 / -1; }
+@container wvslot (min-width: 1000px) {
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] .wv-sum-hero { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] .wv-sum-hero .hero.catch { grid-column: auto; }
+}
+@container wvsum (max-width: 260px) {
+  .wv-sum-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

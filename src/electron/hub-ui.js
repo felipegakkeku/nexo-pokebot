@@ -126,7 +126,7 @@
         const sig = `${acc}|${st.xpPerHour}|${st.xpTrainerPerHour}|${gold}|${caps}|${kills}|${st.capturePerKillPct}|${st.killsPerCapture}|${st.shiniesCaptured}|${st.shiniesSeen}|${missed}|${list.length}|${list[list.length - 1]?.t || 0}|${own.map((o) => o.ts).join(',')}`;
         return { acc, st, list, gold, caps, capPctTxt, capPerHour, kpcTxt, own, missed, sig };
     }
-    function heroHtml(d) {
+    function heroHtml(d, { shiny = true } = {}) {
         const { acc, st, list, gold, caps, capPctTxt, capPerHour, kpcTxt, own, missed } = d;
         const xpVals = list.map((p) => p.xpRate);
         const goldVals = list.map((p) => p.goldRate);
@@ -150,7 +150,7 @@
             <div class="hero-sub">${kpcTxt}${capPerHour > 0 ? ` · ${fmtCompact(capPerHour)}/h` : ''}</div>
             ${sparkSvg(capVals, 'catch')}
           </div>
-          <div class="hero shiny${missed ? ' has-miss' : ''}" title="Shinies capturados e vistos nesta sessão.">
+          ${shiny ? `<div class="hero shiny${missed ? ' has-miss' : ''}" title="Shinies capturados e vistos nesta sessão.">
             <div class="hero-top"><span class="hero-lbl">${IC('sparkles')}Shinies</span></div>
             <div class="hero-val">${Number(st.shiniesCaptured || 0)}<small> / ${Number(st.shiniesSeen || 0)} vistos</small></div>
             <div class="hero-sprites">${own.length
@@ -160,7 +160,7 @@
                     return url ? `<img src="${url}" data-sprite-dex="${dex}" data-sprite-shiny="1" alt="${esc(o.name)}" title="${esc(o.name)} · ${relTime(o.ts)}" loading="lazy" />` : '';
                 }).join('')
                 : '<span class="hero-sub">Nenhum capturado ainda</span>'}${missed ? `<span class="miss-tag" title="Vistos e não capturados">${missed} escap${missed > 1 ? 'aram' : 'ou'}</span>` : ''}</div>
-          </div>`;
+          </div>` : ''}`;
     }
 
     // ===== S15: três números grandes no Desempenho =====
@@ -1767,7 +1767,7 @@
             const list = hist[acc] || [];
             const evs = recentEvents(acc, 4);
             // No resumo cada fonte vai numa linha ("Kick 3h 56m" / "Twitch 4h 49m"): cabe em coluna estreita sem cortar.
-            const buffs = flatBuffsHtml(acc).replaceAll(' · ', '<br>');
+            const buffs = flatBuffsHtml(acc, { mini: true });
             const profitH = Number(st.netGoldPerHour ?? st.goldPerHour ?? 0) || 0;
             const pct = pk ? Math.max(0, Math.min(100, Number(pk.hpPercent) || 0)) : 0;
             // XP do Pokémon ativo: lida da tela do jogo embutido (renderer.js); sem a barra, some.
@@ -1789,7 +1789,7 @@
                 list.length, list[list.length - 1]?.t || 0,
                 density === 'full' ? evs.map((e) => e.id).join(',') : '',
                 density === 'full' ? Math.floor(Date.now() / 30_000) : 0,
-                density === 'full' ? buffs.length : 0,
+                density === 'full' ? buffs : '',
                 hd ? hd.sig : '',
                 density === 'full' ? [s.gameIntel?.pvpMeta?.rankIntel?.pr, s.gameIntel?.pvpMeta?.monitor?.games, (s.gameIntel?.pvpMeta?.monitor?.recent || []).join(''), s.gameIntel?.pvpMeta?.monitor?.queued, Boolean(s.gameIntel?.pvpMeta?.monitor?.halted), s.gameIntel?.pvpMeta?.monitor?.netPr].join(':') : '',
             ].join('|');
@@ -1876,10 +1876,11 @@
                 : '';
 
             const killsPerMin = Number(st.uptimeSec || 0) > 0 ? (Number(st.kills || 0) / (Number(st.uptimeSec) / 60)) : 0;
-            const heroBlock = `<div class="hero-kpis wv-sum-hero">${heroHtml(hd)}</div>`;
+            const heroBlock = `<div class="hero-kpis wv-sum-hero">${heroHtml(hd, { shiny: false })}</div>`;
             const chipsHtml = `<dl class="wv-sum-chips">
               <div class="chip green"><dt>${IC('swords')}Abates</dt><dd>${fmtNum(st.kills)}</dd><small>${killsPerMin > 0 ? `${killsPerMin.toFixed(1).replace('.', ',')}/min` : '&nbsp;'}</small></div>
-              <div class="chip sky"><dt>${IC('activity')}Tempo/abate</dt><dd>${st.avgKillSec > 0 ? `${String(st.avgKillSec).replace('.', ',')}s` : '-'}</dd><small>por abate</small></div>
+              <div class="chip sky"><dt>${IC('activity')}Tempo</dt><dd>${st.avgKillSec > 0 ? `${String(st.avgKillSec).replace('.', ',')}s` : '-'}</dd><small>por abate</small></div>
+              <div class="chip shiny" title="Shinies capturados e vistos nesta sessão."><dt>${IC('sparkles')}Shinies</dt><dd>${fmtNum(st.shiniesCaptured)}</dd><small>${fmtNum(st.shiniesSeen || 0)} vistos</small></div>
               <div class="chip amber"><dt>${IC('clock')}Ativo</dt><dd data-sum-uptime>${uptimeTxt}</dd><small>nesta sessão</small></div>
             </dl>`;
 
@@ -1911,8 +1912,8 @@
                 return `<li class="ev ${esc(meta.vKind)}" data-acc="${acc}" data-acc-color="${esc(accColor)}">${IC(meta.icon)}<span class="ev-text">${escapeHtml(meta.cleanText)}</span><time>${relTime(e.ts)}</time></li>`;
             }).join('') || '<li class="ev empty">Sem eventos ainda.</li>'}</ul>`;
 
-            // Os buffs das lives ocupam o lugar de KPIs e gráficos (logo abaixo do Pokémon); KPIs e gráficos vão para onde os buffs ficavam.
-            box.innerHTML = headHtml + pokeHtml + buffsSection + dropsHtml + heroBlock + chipsHtml + pvpHtml + kpisHtml + eventsHtml;
+            // Hierarquia: Pokémon (grande) > cards de XP/lucro/capturas > faixa fina de buffs > apoio (chips, PvP, drops) > eventos.
+            box.innerHTML = headHtml + pokeHtml + heroBlock + buffsSection + chipsHtml + pvpHtml + dropsHtml + kpisHtml + eventsHtml;
         }
     }
 
@@ -2009,7 +2010,7 @@
         return v >= 60 ? `${Math.floor(v / 60)}h ${String(v % 60).padStart(2, '0')}m` : `${v}m`;
     };
     /** Barras flat dos buffs (uma por tipo, Kick + Twitch juntas) com o tempo de cada plataforma. */
-    function flatBuffsHtml(acc, { foot = false } = {}) {
+    function flatBuffsHtml(acc, { foot = false, mini = false } = {}) {
         const lv = snapshots[acc]?.lives;
         if (!lv) return '';
         const bonus = lv.activeBonuses || {};
@@ -2033,6 +2034,11 @@
             if (twOn || twMin > 0) parts.push(`Twitch ${twMin > 0 ? fmtMinShort(twMin) : '-'}`);
             const val = parts.length ? parts.join(' · ') : 'não coleta';
             const tip = `${label}: Kick ${fmtMinShort(kkMin)} + Twitch ${fmtMinShort(twMin)} (meta individual: ${fmtMinShort(target)} cada)`;
+            // Faixa fina do resumo: só o tipo e a porcentagem; o tempo de Kick e Twitch fica na dica.
+            if (mini) {
+                const off = !parts.length;
+                return `<span class="pbuff ${k}${off ? ' off' : ''}" title="${esc(tip)}"><b>${label}<em>${off ? '-' : `${pct.toFixed(0)}%`}</em></b><i><u style="width:${pct.toFixed(0)}%"></u></i></span>`;
+            }
             return `<span class="pbuff ${k}" title="${esc(tip)}"><b>${label}</b><i><u style="width:${pct.toFixed(0)}%"></u></i><small>${escapeHtml(val)}</small></span>`;
         }).join('');
         if (!foot) return rows;

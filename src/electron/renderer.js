@@ -292,7 +292,7 @@ async function pollPokemonXp() {
         } catch { delete window.nexoPkXp[acc]; }
     }
 }
-setInterval(() => { void pollPokemonXp(); }, 4_000);
+setInterval(() => { void pollPokemonXp(); }, 2_500);
 
 async function openEmbeddedForAccount(acc) {
     if (webviews.has(acc)) return;
@@ -326,6 +326,8 @@ async function openEmbeddedForAccount(acc) {
         wv.__ready = true;
         wv.__zoom = null;
         applyWebviewZoom(acc);
+        // Lê o XP logo depois de o jogo carregar, sem esperar o próximo ciclo de 2,5 s.
+        setTimeout(() => { void pollPokemonXp(); }, 1_200);
         const needCampo = snapshots[acc]?.config?.caidosEnabled !== false;
         wv.executeJavaScript(`window.__pbSetNeedCampoFeed && window.__pbSetNeedCampoFeed(${JSON.stringify(needCampo)})`).catch(() => {});
         if (!seedDone && res.seedSession) {
