@@ -4914,7 +4914,7 @@ button.btn.claim-btn.claim-ready {
     gap: 6px 8px;
   }
   .wv-slot[data-summary-dock="bottom"] .wv-summary > :is(.wv-sum-head, .wv-sum-spark, .wv-sum-drops, .wv-sum-sec, .wv-sum-buffs, .wv-sum-events, .wv-sum-compact-meta) { display: none; }
-  .wv-slot[data-summary-dock="bottom"] .wv-summary > :is(.wv-sum-poke, .wv-sum-kpis) { grid-column: auto; grid-row: auto; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density] > :is(.wv-sum-poke, .wv-sum-kpis) { grid-column: auto; grid-row: auto; }
   .wv-slot[data-summary-dock="bottom"] .wv-sum-kpis > div:nth-child(n+5) { display: none; }
   .wv-slot[data-summary-dock="bottom"] .wv-sum-resizer { display: none; }
 }
@@ -4976,4 +4976,20 @@ button.btn.claim-btn.claim-ready {
   .seg-btn { padding: 6px 8px; }
   .acc-tab .acc-audio { display: none; }
   .acc-tab { flex-shrink: 0; }
+}
+
+/* Embaixo, visão completa: buffs das lives ao lado do Pokémon (onde ficavam KPIs e gráficos);
+   KPIs e gráficos descem para a faixa larga logo acima dos eventos. */
+@container wvslot (min-width: 480px) {
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-poke { grid-column: 1; grid-row: 2; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-drops { grid-column: 1; grid-row: 3; white-space: normal; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-sec-buffs { grid-column: 2 / -1; grid-row: 2; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-buffs { grid-column: 2 / -1; grid-row: 3; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-kpis { grid-column: 1 / -1; grid-row: 4; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-spark { grid-column: 1 / -1; grid-row: 5; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr); }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-sec-events { grid-column: 1 / -1; grid-row: 6; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] > .wv-sum-events { grid-column: 1 / -1; grid-row: 7; }
+}
+@container wvsum (min-width: 480px) {
+  .wv-slot[data-summary-dock="bottom"] .wv-summary[data-sum-density="full"] .wv-sum-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }

@@ -1846,16 +1846,17 @@
                 : 'Drops da sessão: nenhum ainda'}</div>`;
 
             const buffsSection = buffs
-                ? `<div class="wv-sum-sec">Buffs das lives</div><div class="pcard-buffs wv-sum-buffs">${buffs}</div>`
+                ? `<div class="wv-sum-sec wv-sum-sec-buffs">Buffs das lives</div><div class="pcard-buffs wv-sum-buffs">${buffs}</div>`
                 : '';
 
             const accColor = window.nexoIcons?.accountAccent?.(acc) || 'azul';
-            const eventsHtml = `<div class="wv-sum-sec">Eventos recentes</div><ul class="wv-sum-events">${evs.map((e) => {
+            const eventsHtml = `<div class="wv-sum-sec wv-sum-sec-events">Eventos recentes</div><ul class="wv-sum-events">${evs.map((e) => {
                 const meta = classifyLogEntry(e);
                 return `<li class="ev ${esc(meta.vKind)}" data-acc="${acc}" data-acc-color="${esc(accColor)}">${IC(meta.icon)}<span class="ev-text">${escapeHtml(meta.cleanText)}</span><time>${relTime(e.ts)}</time></li>`;
             }).join('') || '<li class="ev empty">Sem eventos ainda.</li>'}</ul>`;
 
-            box.innerHTML = headHtml + pokeHtml + kpisHtml + dropsHtml + sparkHtml + buffsSection + eventsHtml;
+            // Os buffs das lives ocupam o lugar de KPIs e gráficos (logo abaixo do Pokémon); KPIs e gráficos vão para onde os buffs ficavam.
+            box.innerHTML = headHtml + pokeHtml + buffsSection + dropsHtml + kpisHtml + sparkHtml + eventsHtml;
         }
     }
 
