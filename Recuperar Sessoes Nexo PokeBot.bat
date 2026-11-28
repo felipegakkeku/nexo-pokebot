@@ -741,18 +741,41 @@ if ($selected.Kind -eq 'external-leveldb') {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
     $backupDir = Join-Path $dataDir ".pokebot-backup-$stamp"
     $backedUp = $false
+    $lockFiles = @('LOCK', 'SingletonLock', 'SingletonCookie', 'SingletonSocket', 'DevToolsActivePort', 'lockfile')
+    $cfgName = '.pokebot-headless-config.json'
     foreach ($m in $selected.Items) {
         $srcPath = Join-Path $selected.Path $m
         $dstPath = Join-Path $dataDir $m
-        if (Test-Path -LiteralPath $dstPath) {
+        $isDir = (Get-Item -LiteralPath $srcPath -Force).PSIsContainer
+        $exists = Test-Path -LiteralPath $dstPath
+
+        # A configuracao atual da pessoa nunca e trocada pela de uma origem antiga.
+        if (-not $isDir -and $m -eq $cfgName -and $exists) {
+            Write-Ok "  = Configuracao atual mantida: $m"
+            continue
+        }
+
+        if ($isDir -and $m -eq '.pokebot-accounts') {
+            # So sessoes: copia por cima o que a origem tem de mais novo, sem tocar configuracoes nem perfis de navegador.
+            $null = robocopy $srcPath $dstPath /E /XO /R:2 /W:1 /NFL /NDL /NJH /NJS /NC /NS /XF $cfgName @lockFiles /XD '.pokebot-browser-profile' '.pokebot-live-profile'
+            if ($LASTEXITCODE -ge 8) {
+                Write-Err "Falha ao copiar pasta $m (robocopy exit $LASTEXITCODE)."
+                exit 1
+            }
+            Write-Ok "  + Sessoes das contas 2 a 4 recuperadas (configuracoes mantidas): $m"
+            continue
+        }
+
+        # Perfis de navegador e arquivos de sessao: substitui inteiro (mistura de arquivos de LevelDB corrompe), com backup.
+        if ($exists) {
             if (-not $backedUp) {
                 New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
                 $backedUp = $true
             }
             Move-Item -LiteralPath $dstPath -Destination (Join-Path $backupDir $m) -Force
         }
-        if ((Get-Item -LiteralPath $srcPath -Force).PSIsContainer) {
-            $null = robocopy $srcPath $dstPath /E /R:2 /W:1 /NFL /NDL /NJH /NJS /NC /NS /XF "LOCK" "SingletonLock" "SingletonCookie" "SingletonSocket" "DevToolsActivePort" "lockfile"
+        if ($isDir) {
+            $null = robocopy $srcPath $dstPath /E /R:2 /W:1 /NFL /NDL /NJH /NJS /NC /NS /XF @lockFiles
             if ($LASTEXITCODE -ge 8) {
                 Write-Err "Falha ao copiar pasta $m (robocopy exit $LASTEXITCODE)."
                 exit 1
