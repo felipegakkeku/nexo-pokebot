@@ -4835,3 +4835,145 @@ button.btn.claim-btn.claim-ready {
 /* Atividade: aviso igual de várias contas numa linha, com um selo por conta */
 .log-accs { display: flex; flex-wrap: wrap; gap: 2px; max-width: 62px; }
 .log-row.multi { border-left-color: var(--border-hi); }
+
+/* ===== Grade responsiva (28/11): cada tela tem um tamanho mínimo útil ===================
+   Antes, 4 contas em Linhas viravam faixas de ~130px de altura e em Colunas viravam colunas de
+   ~260px com o cabeçalho cortado. Agora a trilha nunca fica abaixo do mínimo (renderer.js usa
+   --cell-min-w e --cell-min-h) e, sem espaço, a grade rola em vez de espremer o jogo. */
+.workspace.mode-grid .browser-stage {
+  --cell-min-w: 330px;
+  --cell-min-h: 380px;
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--border-hi) 65%, transparent) transparent;
+}
+.workspace.mode-grid .browser-stage[data-layout="rows"] { --cell-min-h: 400px; }
+.workspace.mode-grid .browser-stage[data-layout="focus"] { --cell-min-h: 280px; }
+.workspace.mode-grid .browser-stage[data-layout="single"] { --cell-min-w: 0px; --cell-min-h: 0px; }
+/* a barra de ferramentas fica fixa quando a grade rola, com a largura da área visível */
+.workspace.mode-grid .grid-toolbar {
+  position: sticky;
+  top: 0;
+  left: 8px;
+  z-index: 6;
+  width: var(--stage-w, auto);
+  background: var(--bg-deep);
+}
+/* tamanho do container da tela: a altura também manda (resumo e cabeçalho reagem a ela) */
+.workspace.mode-grid .wv-slot { container: wvslot / size; }
+
+/* cabeçalho da tela: os botões quebram em outra linha em vez de sair pela borda */
+.wv-bar-actions { flex: 0 1 auto; max-width: 100%; }
+.wv-bar-left { flex: 1 1 120px; }
+@container wvslot (max-width: 380px) {
+  .wv-bar-actions .btn.sm { padding: 3px 5px; }
+  .wv-bar-actions { gap: 4px; }
+}
+
+/* resumo: nenhuma linha encolhe até sumir (o "Drops" caía em cima do título "Buffs das lives") */
+.wv-summary > * { flex-shrink: 0; min-height: min-content; }
+.wv-sum-drops { overflow: clip; }
+.wv-sum-kpis dd { white-space: normal; overflow-wrap: anywhere; }
+/* KPIs: 2 colunas na lateral e 4 quando o resumo é largo; o rótulo nunca é cortado */
+.wv-slot .wv-summary .wv-sum-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.wv-sum-kpis dt { overflow: visible; text-overflow: clip; }
+@container wvsum (min-width: 760px) {
+  .wv-slot .wv-summary .wv-sum-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* Tela larga e baixa (Linhas, ou 2x2 em monitor largo): o resumo "embaixo" tomava a altura do
+   jogo. Ele passa para a lateral até a tela ficar alta de novo; a escolha salva não muda. */
+@container wvslot (min-width: 800px) and (max-height: 620px) {
+  .wv-slot[data-summary-dock="bottom"] .wv-main { flex-direction: row; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary {
+    display: flex;
+    flex-direction: column;
+    width: clamp(260px, 28%, 340px) !important;
+    max-width: 45%;
+    height: auto !important;
+    max-height: none;
+    border-top: 0;
+    border-left: 1px solid var(--border);
+  }
+  .wv-slot[data-summary-dock="bottom"] .wv-sum-resizer { display: none; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary .wv-sum-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* Tela baixa e estreita com o resumo embaixo: só o Pokémon e 4 números; o resto fica no Detalhes
+   da tela maior ou no painel. Abaixo de 400px de altura o resumo some e o jogo fica com tudo
+   (o balão sobre o jogo já mostra XP/h, lucro, abates e shinies). */
+@container wvslot (max-width: 799px) and (max-height: 519px) {
+  .wv-slot[data-summary-dock="bottom"] .wv-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    align-items: center;
+    height: auto !important;
+    max-height: none;
+    overflow: hidden;
+    padding: 6px 8px;
+    gap: 6px 8px;
+  }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary > :is(.wv-sum-head, .wv-sum-spark, .wv-sum-drops, .wv-sum-sec, .wv-sum-buffs, .wv-sum-events, .wv-sum-compact-meta) { display: none; }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary > :is(.wv-sum-poke, .wv-sum-kpis) { grid-column: auto; grid-row: auto; }
+  .wv-slot[data-summary-dock="bottom"] .wv-sum-kpis > div:nth-child(n+5) { display: none; }
+  .wv-slot[data-summary-dock="bottom"] .wv-sum-resizer { display: none; }
+}
+@container wvslot (max-width: 600px) and (max-height: 519px) {
+  .wv-slot:is([data-summary-dock="right"], [data-summary-dock="left"]) .wv-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+    align-items: center;
+    max-height: none;
+    overflow: hidden;
+    padding: 6px 8px;
+    gap: 6px 8px;
+  }
+  .wv-slot:is([data-summary-dock="right"], [data-summary-dock="left"]) .wv-summary > :is(.wv-sum-head, .wv-sum-spark, .wv-sum-drops, .wv-sum-sec, .wv-sum-buffs, .wv-sum-events, .wv-sum-compact-meta) { display: none; }
+  .wv-slot:is([data-summary-dock="right"], [data-summary-dock="left"]) .wv-sum-kpis > div:nth-child(n+5) { display: none; }
+}
+@container wvslot (max-width: 799px) and (max-height: 399px) {
+  .wv-slot[data-summary-dock="bottom"] .wv-summary,
+  .wv-slot[data-summary-dock="bottom"] .wv-sum-resizer { display: none; }
+}
+@container wvslot (max-width: 600px) and (max-height: 399px) {
+  .wv-slot:is([data-summary-dock="right"], [data-summary-dock="left"]) .wv-summary { display: none; }
+}
+
+/* Barra da grade: em janela estreita os títulos óbvios saem e o "Som em todas" fica só no ícone,
+   para tudo caber em uma linha. */
+@media (max-width: 1180px) {
+  .grid-tb-group:has([data-grid-layout]) .grid-tb-label,
+  .grid-tb-group:has(#gridSortSelect) .grid-tb-label,
+  #btnGridMuteAll span { display: none; }
+  .workspace.mode-grid .grid-toolbar { gap: 6px 10px; }
+  .grid-tb-btn { padding: 3px 7px; }
+}
+
+/* Topo em janela estreita: o nome da marca cede lugar ao nome de cada conta nas abas. */
+@media (max-width: 1180px) {
+  .brand-title, .brand-ver { display: none; }
+  .brand { padding-right: 8px; }
+  .acc-meta { display: flex; }
+  .acc-name { max-width: 72px; font-size: var(--fs-sm); }
+  .acc-tab { padding-right: 8px; gap: 5px; flex-shrink: 0; }
+  /* o som já tem botão na barra de cada tela */
+  .acc-tab .acc-audio { display: none; }
+  .acc-sort-sel { max-width: 112px; }
+}
+
+/* Muito estreito: só a aba ativa mostra o nome, as outras ficam com número e avatar (o title de cada aba traz o nome). */
+@media (max-width: 1400px) {
+  .acc-tab:not(.active) .acc-meta { display: none; }
+  .acc-tab:not(.active) { padding-right: 6px; }
+}
+@media (max-width: 1000px) {
+  .acc-tab:not(.active) .acc-avatar { display: none; }
+}
+
+/* Entre 1181 e 1700 px o topo ainda aperta as abas ("1. F."): rótulos dos modos e som da aba saem, o nome da conta fica inteiro. */
+@media (min-width: 1181px) and (max-width: 1700px) {
+  .seg-label { display: none; }
+  .seg-btn { padding: 6px 8px; }
+  .acc-tab .acc-audio { display: none; }
+  .acc-tab { flex-shrink: 0; }
+}

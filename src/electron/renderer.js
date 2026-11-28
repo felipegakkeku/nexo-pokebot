@@ -682,6 +682,7 @@ function applyGridLayout() {
         if (bar) bar.draggable = inGrid;
     }
     if (!inGrid) {
+        delete stage.dataset.layout;
         stage.style.gridTemplateColumns = '';
         stage.style.gridTemplateRows = '';
         for (const acc of ACCOUNTS) {
@@ -705,7 +706,10 @@ function applyGridLayout() {
     const n = visible.length;
     const cs = gridState.colSplit;
     const rs = gridState.rowSplit;
-    const fr = (a) => `minmax(0, ${a.toFixed(3)}fr)`;
+    // Cada tela tem um mínimo útil (--cell-min-w/--cell-min-h no CSS): sem espaço, a grade rola em vez de
+    // espremer o jogo numa faixa ou numa coluna estreita demais.
+    const frC = (a) => `minmax(var(--cell-min-w, 0px), ${a.toFixed(3)}fr)`;
+    const frR = (a) => `minmax(var(--cell-min-h, 0px), ${a.toFixed(3)}fr)`;
     const place = new Map(); // conta -> [linha, coluna] (linha 1 e a barra de ferramentas)
     let cols = 'minmax(0, 1fr)';
     let rows = 'minmax(0, 1fr)';
@@ -714,23 +718,23 @@ function applyGridLayout() {
     if (n <= 1) {
         if (n === 1) place.set(visible[0], ['2', '1']);
     } else if (gridState.layout === 'cols') {
-        cols = visible.map((_, i) => fr(gridState.colWeights[i] || 1)).join(' ');
+        cols = visible.map((_, i) => frC(gridState.colWeights[i] || 1)).join(' ');
         visible.forEach((acc, i) => place.set(acc, ['2', String(i + 1)]));
         gutters.multiV = Math.max(0, n - 1);
     } else if (gridState.layout === 'rows') {
-        rows = visible.map((_, i) => fr(gridState.rowWeights[i] || 1)).join(' ');
+        rows = visible.map((_, i) => frR(gridState.rowWeights[i] || 1)).join(' ');
         visible.forEach((acc, i) => place.set(acc, [String(i + 2), '1']));
         gutters.multiH = Math.max(0, n - 1);
     } else if (gridState.layout === 'focus') {
-        cols = `${fr(cs)} ${fr(1 - cs)}`;
-        rows = `repeat(${n - 1}, minmax(0, 1fr))`;
+        cols = `${frC(cs)} ${frC(1 - cs)}`;
+        rows = `repeat(${n - 1}, ${frR(1)})`;
         place.set(visible[0], [`2 / ${n + 1}`, '1']);
         visible.slice(1).forEach((acc, i) => place.set(acc, [String(i + 2), '2']));
         gutters.v = true;
     } else {
         const rowCount = Math.ceil(n / 2);
-        cols = `${fr(cs)} ${fr(1 - cs)}`;
-        rows = rowCount === 2 ? `${fr(rs)} ${fr(1 - rs)}` : 'minmax(0, 1fr)';
+        cols = `${frC(cs)} ${frC(1 - cs)}`;
+        rows = rowCount === 2 ? `${frR(rs)} ${frR(1 - rs)}` : frR(1);
         visible.forEach((acc, i) => {
             const spanAll = n === 3 && i === 2;
             place.set(acc, [String(Math.floor(i / 2) + 2), spanAll ? '1 / -1' : String((i % 2) + 1)]);
@@ -739,6 +743,7 @@ function applyGridLayout() {
         gutters.h = rowCount === 2;
     }
 
+    stage.dataset.layout = n <= 1 ? 'single' : gridState.layout;
     stage.style.gridTemplateColumns = cols;
     stage.style.gridTemplateRows = n > 0 ? `auto ${rows}` : 'auto';
     for (const acc of ACCOUNTS) {
@@ -769,26 +774,33 @@ function positionGridGutters(gutters) {
     gv.hidden = !gutters.v;
     gh.hidden = !gutters.h;
     const sr = stage.getBoundingClientRect();
-    const tb = $('gridToolbar')?.getBoundingClientRect();
-    const top = (tb ? tb.bottom : sr.top) - sr.top + 4;
+    // a grade pode rolar (tela mínima respeitada): as divisórias moram no conteúdo, não na janela
+    const sx = stage.scrollLeft;
+    const sy = stage.scrollTop;
+    const contentW = Math.max(sr.width, stage.scrollWidth);
+    const contentH = Math.max(sr.height, stage.scrollHeight);
     const visible = getEffectiveAccountOrder().filter((acc) => !gridState.hidden.includes(acc));
     const rect = (acc) => $(`wv-slot-${acc}`)?.getBoundingClientRect();
+    // topo da área das telas (a barra de ferramentas fica fixa ao rolar, então não serve de régua)
+    const firstRect = visible.length ? rect(visible[0]) : null;
+    const tb = $('gridToolbar')?.getBoundingClientRect();
+    const top = (firstRect ? firstRect.top - 4 : (tb ? tb.bottom : sr.top)) - sr.top + sy;
     if (gutters.v && visible.length >= 2) {
         const a = rect(visible[0]);
         const b = rect(visible[1]);
         if (a && b) {
-            gv.style.left = `${(a.right + b.left) / 2 - sr.left}px`;
+            gv.style.left = `${(a.right + b.left) / 2 - sr.left + sx}px`;
             gv.style.top = `${top}px`;
-            gv.style.height = `${sr.height - top - 8}px`;
+            gv.style.height = `${contentH - top - 8}px`;
         }
     }
     if (gutters.h && visible.length >= 3) {
         const a = rect(visible[0]);
         const c = rect(visible[2]);
         if (a && c) {
-            gh.style.top = `${(a.bottom + c.top) / 2 - sr.top}px`;
+            gh.style.top = `${(a.bottom + c.top) / 2 - sr.top + sy}px`;
             gh.style.left = '8px';
-            gh.style.width = `${sr.width - 16}px`;
+            gh.style.width = `${contentW - 16}px`;
         }
     }
     for (let idx = 0; idx < 3; idx++) {
@@ -806,9 +818,9 @@ function positionGridGutters(gutters) {
             const b = rect(visible[idx + 1]);
             dv.hidden = !(a && b);
             if (a && b) {
-                dv.style.left = `${(a.right + b.left) / 2 - sr.left}px`;
+                dv.style.left = `${(a.right + b.left) / 2 - sr.left + sx}px`;
                 dv.style.top = `${top}px`;
-                dv.style.height = `${sr.height - top - 8}px`;
+                dv.style.height = `${contentH - top - 8}px`;
             }
         } else if (dv) {
             dv.hidden = true;
@@ -827,9 +839,9 @@ function positionGridGutters(gutters) {
             const b = rect(visible[idx + 1]);
             dh.hidden = !(a && b);
             if (a && b) {
-                dh.style.top = `${(a.bottom + b.top) / 2 - sr.top}px`;
+                dh.style.top = `${(a.bottom + b.top) / 2 - sr.top + sy}px`;
                 dh.style.left = '8px';
-                dh.style.width = `${sr.width - 16}px`;
+                dh.style.width = `${contentW - 16}px`;
             }
         } else if (dh) {
             dh.hidden = true;
@@ -948,11 +960,12 @@ function wireGridGutter(el, axis) {
         const move = (e) => {
             const r = stage.getBoundingClientRect();
             if (axis === 'v') {
-                gridState.colSplit = clampSplit((e.clientX - r.left - 8) / Math.max(1, r.width - 16));
+                gridState.colSplit = clampSplit((e.clientX - r.left + stage.scrollLeft - 8) / Math.max(1, Math.max(r.width, stage.scrollWidth) - 16));
             } else {
-                const tb = $('gridToolbar').getBoundingClientRect();
-                const top = tb.bottom + 8;
-                gridState.rowSplit = clampSplit((e.clientY - top) / Math.max(1, r.bottom - 8 - top));
+                const first = $('wv-slot-' + getEffectiveAccountOrder().find((a) => !gridState.hidden.includes(a)))?.getBoundingClientRect();
+                const top = first ? first.top : $('gridToolbar').getBoundingClientRect().bottom + 8;
+                const contentBottom = r.top - stage.scrollTop + Math.max(r.height, stage.scrollHeight);
+                gridState.rowSplit = clampSplit((e.clientY - top) / Math.max(1, contentBottom - 8 - top));
             }
             applyGridLayout();
         };
@@ -1792,6 +1805,8 @@ function initGridControls() {
     const stage = $('browserStage');
     if (stage && typeof ResizeObserver === 'function') {
         new ResizeObserver(() => {
+            // a barra de ferramentas fica fixa quando a grade rola: largura = área visível, não o conteúdo
+            stage.style.setProperty('--stage-w', `${Math.max(0, stage.clientWidth - 16)}px`);
             if (viewMode === 'grid') positionGridGutters(gridGutters);
         }).observe(stage);
     }
@@ -2195,7 +2210,8 @@ function renderTopTabsAndSlots() {
         const tabBtn = document.querySelector(`.acc-tab[data-acc="${acc}"]`);
         if (tabBtn) {
             tabBtn.classList.toggle('has-mode-warn', warns.length > 0);
-            tabBtn.title = warns.length > 0 ? warns.map((w) => w.title).join(' | ') : '';
+            // sem aviso, a dica diz quem é a conta (o nome some das abas em janela estreita)
+            tabBtn.title = warns.length > 0 ? warns.map((w) => w.title).join(' | ') : `${acc}. ${nick} · ${stLabel}`;
         }
         const dot = $(`dot-${acc}`);
         if (dot) dot.className = `acc-dot ${status}`;
