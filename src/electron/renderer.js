@@ -768,8 +768,7 @@ function applyGridLayout() {
     const n = visible.length;
     const cs = gridState.colSplit;
     const rs = gridState.rowSplit;
-    // Cada tela tem um mínimo útil (--cell-min-w/--cell-min-h no CSS): sem espaço, a grade rola em vez de
-    // espremer o jogo numa faixa ou numa coluna estreita demais.
+    // --cell-min-w/--cell-min-h (CSS) ficam em 0: todas as telas dividem a área e a grade nunca rola.
     const frC = (a) => `minmax(var(--cell-min-w, 0px), ${a.toFixed(3)}fr)`;
     const frR = (a) => `minmax(var(--cell-min-h, 0px), ${a.toFixed(3)}fr)`;
     const place = new Map(); // conta -> [linha, coluna] (linha 1 e a barra de ferramentas)

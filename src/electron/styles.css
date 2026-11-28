@@ -4836,20 +4836,15 @@ button.btn.claim-btn.claim-ready {
 .log-accs { display: flex; flex-wrap: wrap; gap: 2px; max-width: 62px; }
 .log-row.multi { border-left-color: var(--border-hi); }
 
-/* ===== Grade responsiva (28/11): cada tela tem um tamanho mínimo útil ===================
-   Antes, 4 contas em Linhas viravam faixas de ~130px de altura e em Colunas viravam colunas de
-   ~260px com o cabeçalho cortado. Agora a trilha nunca fica abaixo do mínimo (renderer.js usa
-   --cell-min-w e --cell-min-h) e, sem espaço, a grade rola em vez de espremer o jogo. */
+/* ===== Grade sem rolagem (28/11): todas as telas aparecem juntas, sempre ====================
+   Antes cada tela tinha um tamanho mínimo e, sem espaço, a grade rolava. Agora as trilhas dividem a área
+   inteira (renderer.js usa --cell-min-w e --cell-min-h, que ficam em 0) e o jogo dentro de cada tela
+   se ajusta ao tamanho que sobrar; cabeçalho e resumo reagem ao tamanho da tela pelos container queries. */
 .workspace.mode-grid .browser-stage {
-  --cell-min-w: 330px;
-  --cell-min-h: 380px;
-  overflow: auto;
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--border-hi) 65%, transparent) transparent;
+  --cell-min-w: 0px;
+  --cell-min-h: 0px;
+  overflow: hidden;
 }
-.workspace.mode-grid .browser-stage[data-layout="rows"] { --cell-min-h: 400px; }
-.workspace.mode-grid .browser-stage[data-layout="focus"] { --cell-min-h: 280px; }
-.workspace.mode-grid .browser-stage[data-layout="single"] { --cell-min-w: 0px; --cell-min-h: 0px; }
 /* a barra de ferramentas fica fixa quando a grade rola, com a largura da área visível */
 .workspace.mode-grid .grid-toolbar {
   position: sticky;
@@ -4881,26 +4876,11 @@ button.btn.claim-btn.claim-ready {
   .wv-slot .wv-summary .wv-sum-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
-/* Tela larga e baixa (Linhas, ou 2x2 em monitor largo): o resumo "embaixo" tomava a altura do
-   jogo. Ele passa para a lateral até a tela ficar alta de novo; a escolha salva não muda. */
-@container wvslot (min-width: 800px) and (max-height: 620px) {
-  .wv-slot[data-summary-dock="bottom"] .wv-main { flex-direction: row; }
-  .wv-slot[data-summary-dock="bottom"] .wv-summary {
-    display: flex;
-    flex-direction: column;
-    width: clamp(260px, 28%, 340px) !important;
-    max-width: 45%;
-    height: auto !important;
-    max-height: none;
-    border-top: 0;
-    border-left: 1px solid var(--border);
-  }
-  .wv-slot[data-summary-dock="bottom"] .wv-sum-resizer { display: none; }
-  .wv-slot[data-summary-dock="bottom"] .wv-summary .wv-sum-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
+/* "Embaixo" fica embaixo em qualquer tamanho de tela: a escolha da pessoa manda (a altura do resumo já é limitada
+   a uma fração da tela, e o jogo se ajusta ao que sobra). */
 
 /* Tela baixa e estreita com o resumo embaixo: só o Pokémon e 4 números; o resto fica no Detalhes
-   da tela maior ou no painel. Abaixo de 400px de altura o resumo some e o jogo fica com tudo
+   da tela maior ou no painel. Abaixo de 290px de altura o resumo some e o jogo fica com tudo
    (o balão sobre o jogo já mostra XP/h, lucro, abates e shinies). */
 @container wvslot (max-width: 799px) and (max-height: 519px) {
   .wv-slot[data-summary-dock="bottom"] .wv-summary {
@@ -4931,11 +4911,11 @@ button.btn.claim-btn.claim-ready {
   .wv-slot:is([data-summary-dock="right"], [data-summary-dock="left"]) .wv-summary > :is(.wv-sum-head, .wv-sum-spark, .wv-sum-drops, .wv-sum-sec, .wv-sum-buffs, .wv-sum-events, .wv-sum-compact-meta) { display: none; }
   .wv-slot:is([data-summary-dock="right"], [data-summary-dock="left"]) .wv-sum-kpis > div:nth-child(n+5) { display: none; }
 }
-@container wvslot (max-width: 799px) and (max-height: 399px) {
+@container wvslot (max-width: 799px) and (max-height: 289px) {
   .wv-slot[data-summary-dock="bottom"] .wv-summary,
   .wv-slot[data-summary-dock="bottom"] .wv-sum-resizer { display: none; }
 }
-@container wvslot (max-width: 600px) and (max-height: 399px) {
+@container wvslot (max-width: 600px) and (max-height: 289px) {
   .wv-slot:is([data-summary-dock="right"], [data-summary-dock="left"]) .wv-summary { display: none; }
 }
 
@@ -5341,3 +5321,9 @@ body.is-popout .window-bar { display: none !important; }
 }
 .wv-sum-pvp .pvp-marks i.w { box-shadow: 0 0 8px -3px var(--green-hi); }
 .wv-sum-pvp .pvp-marks i.l { box-shadow: 0 0 8px -3px var(--red); }
+
+/* Resumo embaixo numa tela baixa e larga: o Pokémon e os 4 números numa faixa só, para o jogo ficar com a altura */
+@container wvslot (min-width: 640px) and (max-width: 799px) and (max-height: 519px) {
+  .wv-slot[data-summary-dock="bottom"] .wv-summary { grid-template-columns: minmax(180px, 1fr) minmax(0, 2.4fr); }
+  .wv-slot[data-summary-dock="bottom"] .wv-summary .wv-sum-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
