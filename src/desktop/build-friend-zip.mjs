@@ -85,6 +85,7 @@ export function buildFriendPackage(options = {}) {
             'Abrir Nexo PokeBot.bat',
             'Abrir Nexo PokeBot Eco (1 Processo).bat',
             'Recuperar Sessoes Nexo PokeBot.bat',
+            'Restaurar Config Nexo PokeBot.bat',
             'package.json',
             'README.md',
             'LICENSE',
