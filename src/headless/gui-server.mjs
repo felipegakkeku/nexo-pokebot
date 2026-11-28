@@ -27,6 +27,7 @@ import {
     discoverBrowserUserDataDirs,
     extractSessionFromLevelDbDir,
     saveSessionCache,
+    inspectSessionCache,
     decodeJwtPayload,
 } from './session-extractor.mjs';
 import {
@@ -7073,6 +7074,41 @@ export function createHeadlessController(options = {}) {
         return false;
     };
 
+    // Conta sem nome e sem conectar costuma ser sessão que existe mas não abre (arquivo de outro PC/usuário,
+    // corrompido) ou token vencido. Antes era silencioso; agora vira aviso com botão de recuperação.
+    let lastSessionIssueKind = null;
+    const buildSessionWarning = () => {
+        if (session?.token) {
+            lastSessionIssueKind = null;
+            return null;
+        }
+        const found = memoDerived('sessionIssue', 'x', () => inspectSessionCache(
+            options.sessionFile ? resolve(options.sessionFile) : resolve(cwd, '.pokebot-session.json'),
+        ));
+        if (found.state !== 'unreadable' && found.state !== 'expired') {
+            lastSessionIssueKind = null;
+            return null;
+        }
+        const title = found.state === 'expired'
+            ? `A sessão de ${found.nick || 'esta conta'} venceu`
+            : 'A sessão desta conta existe, mas não abre';
+        const detail = found.state === 'expired'
+            ? 'O login salvo expirou, então a conta não conecta. Entre de novo no jogo (ou no PokeIdleMulti) e recupere as sessões.'
+            : `Sem sessão a conta fica sem nome e não conecta: ${found.reason}. Recupere as sessões de outro app (PokeIdleMulti, IdleDeck, PokeGrid) ou entre de novo.`;
+        if (lastSessionIssueKind !== found.state) {
+            lastSessionIssueKind = found.state;
+            pushLog('warn', `${title}. ${detail}`);
+        }
+        return {
+            code: `session-${found.state}`,
+            severity: 'danger',
+            title,
+            detail,
+            fixAction: 'recover-sessions',
+            fixLabel: 'Recuperar sessões',
+        };
+    };
+
     const DERIVED_MEMO_TTL_MS = 8_000;
     const derivedMemo = new Map();
     const memoDerived = (name, sig, compute) => {
@@ -7191,6 +7227,8 @@ export function createHeadlessController(options = {}) {
             capStatus,
             state,
         });
+        const sessionWarning = buildSessionWarning();
+        if (sessionWarning) modeWarnings.unshift(sessionWarning);
 
         const serverNowSnap = now + serverClockOffsetMs;
         const weeklySetSnap = getEffectiveWeeklyCaughtSet();

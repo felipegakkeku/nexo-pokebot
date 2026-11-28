@@ -1114,6 +1114,40 @@ export function loadSessionCache(cachePath) {
     }
 }
 
+/**
+ * Diagnostica o arquivo de sessão sem lançar erro: por que uma conta aparece sem nome e sem conectar?
+ * `missing` = nunca teve sessão (não é defeito); `unreadable` = existe mas não abre; `expired` = token vencido.
+ * @returns {{ state: 'missing'|'ok'|'unreadable'|'expired', reason?: string, nick?: string }}
+ */
+export function inspectSessionCache(cachePath, nowMs = Date.now()) {
+    const target = resolveDefaultCachePath(cachePath);
+    if (!existsSync(target)) return { state: 'missing' };
+    let raw;
+    try {
+        raw = readFileSync(target, 'utf8').trim();
+    } catch {
+        return { state: 'unreadable', reason: 'o arquivo da sessão está bloqueado ou sem permissão de leitura' };
+    }
+    if (!raw) return { state: 'unreadable', reason: 'o arquivo da sessão está vazio' };
+    let text = raw;
+    if (isEncrypted(raw)) {
+        if (!isSecretStoreAvailable()) {
+            return { state: 'unreadable', reason: 'a chave de criptografia do Windows (DPAPI) não está disponível neste PC ou usuário' };
+        }
+        text = decryptText(raw, SESSION_CONTEXT);
+        if (text === null) {
+            return { state: 'unreadable', reason: 'o arquivo foi criptografado em outro PC ou usuário do Windows e esta chave não o abre' };
+        }
+    }
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { return { state: 'unreadable', reason: 'o arquivo da sessão está corrompido' }; }
+    if (!parsed || typeof parsed !== 'object' || !parsed.token || !parsed.nick) {
+        return { state: 'unreadable', reason: 'o arquivo da sessão não tem nick ou token' };
+    }
+    if (!isTokenValid(decodeJwtPayload(parsed.token), nowMs)) return { state: 'expired', nick: String(parsed.nick) };
+    return { state: 'ok', nick: String(parsed.nick) };
+}
+
 function writeSessionFile(target, data) {
     const json = JSON.stringify(data, null, 2) + '\n';
     const sealed = encryptText(json, SESSION_CONTEXT);

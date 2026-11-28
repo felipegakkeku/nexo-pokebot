@@ -43,6 +43,7 @@ contextBridge.exposeInMainWorld('pokeHub', {
         ipcRenderer.on('hub:minihud-state', fn);
         return () => ipcRenderer.removeListener('hub:minihud-state', fn);
     },
+    recoverSessions: () => ipcRenderer.invoke('hub:recover-sessions'),
     getUpdateState: () => ipcRenderer.invoke('hub:update-get-state'),
     checkUpdate: () => ipcRenderer.invoke('hub:update-check'),
     installUpdate: () => ipcRenderer.invoke('hub:update-install'),

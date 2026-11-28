@@ -2061,6 +2061,23 @@ function renderModeWarningsBanner(data) {
         setClass(detail, 'mode-warn-detail');
         setText(detail, w.detail);
         card.append(head, detail);
+        if (w.fixAction === 'recover-sessions') {
+            const actRow = document.createElement('div');
+            setClass(actRow, 'mode-warn-actions');
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            setClass(btn, 'btn sm primary');
+            setText(btn, w.fixLabel || 'Recuperar sessões');
+            btn.title = 'Abre o assistente que importa as contas do PokeIdleMulti, IdleDeck ou PokeGrid. O Nexo fecha durante a importação.';
+            btn.addEventListener('click', async () => {
+                const res = await window.pokeHub.recoverSessions().catch((e) => ({ ok: false, error: e?.message || String(e) }));
+                if (!res?.ok) {
+                    showToast({ kind: 'warn', title: 'Recuperar sessões', text: res?.error || 'Não consegui abrir o assistente.', account: activeAccount });
+                }
+            });
+            actRow.appendChild(btn);
+            card.appendChild(actRow);
+        }
         if (w.fixConfig) {
             const actRow = document.createElement('div');
             setClass(actRow, 'mode-warn-actions');

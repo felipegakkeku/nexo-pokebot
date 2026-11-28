@@ -2409,6 +2409,14 @@ function registerIpcHandlers() {
     });
     ipcMain.handle('hub:sound-data', (_ev, { event } = {}) => soundDataUrl(String(event || '')));
 
+    // Abre o .bat de recuperação (importa as sessões do PokeIdleMulti/IdleDeck/PokeGrid). Ele fecha o Nexo,
+    // grava na pasta de dados e oferece reabrir.
+    ipcMain.handle('hub:recover-sessions', async () => {
+        const bat = join(ROOT, 'Recuperar Sessoes Nexo PokeBot.bat');
+        if (!existsSync(bat)) return { ok: false, error: 'O arquivo "Recuperar Sessoes Nexo PokeBot.bat" não está na pasta do app.' };
+        const err = await shell.openPath(bat);
+        return err ? { ok: false, error: err } : { ok: true };
+    });
     ipcMain.handle('hub:update-get-state', () => updateState);
     ipcMain.handle('hub:update-check', () => runManualUpdateCheck());
     ipcMain.handle('hub:update-install', () => runUpdateInstall());
