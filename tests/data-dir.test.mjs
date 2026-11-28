@@ -76,6 +76,28 @@ test('migração: nunca sobrescreve o que já existe na pasta nova', () => {
     }
 });
 
+test('migração: sessões de contas 3 e 4 gravadas na pasta antiga entram mesmo com .pokebot-accounts já na nova', () => {
+    const t = sandbox();
+    try {
+        // o app já criou a pasta nova com as contas 1 e 2; o .bat gravou as contas 2 (nova sessão), 3 e 4 na antiga
+        mkdirSync(join(t.data, '.pokebot-accounts', '2'), { recursive: true });
+        writeFileSync(join(t.data, '.pokebot-accounts', '2', '.pokebot-session.json'), '{"token":"jwt-2-novo"}');
+        for (const acc of ['3', '4']) {
+            mkdirSync(join(t.legacy, '.pokebot-accounts', acc), { recursive: true });
+            writeFileSync(join(t.legacy, '.pokebot-accounts', acc, '.pokebot-session.json'), `{"token":"jwt-${acc}"}`);
+        }
+        const res = migrateLegacyData({ legacyRoot: t.legacy, dataRoot: t.data });
+        assert.equal(res.failed.length, 0);
+        assert.equal(readFileSync(join(t.data, '.pokebot-accounts', '3', '.pokebot-session.json'), 'utf8'), '{"token":"jwt-3"}');
+        assert.equal(readFileSync(join(t.data, '.pokebot-accounts', '4', '.pokebot-session.json'), 'utf8'), '{"token":"jwt-4"}');
+        // nunca sobrescreve o que já existe na nova
+        assert.equal(readFileSync(join(t.data, '.pokebot-accounts', '2', '.pokebot-session.json'), 'utf8'), '{"token":"jwt-2-novo"}');
+        assert.equal(readFileSync(join(t.legacy, '.pokebot-accounts', '2', '.pokebot-session.json'), 'utf8'), '{"token":"jwt-2"}');
+    } finally {
+        t.done();
+    }
+});
+
 test('migração: se renomear não der, copia, confere e só então apaga a origem', () => {
     const t = sandbox();
     try {

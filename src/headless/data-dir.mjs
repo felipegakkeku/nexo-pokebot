@@ -58,6 +58,50 @@ function measure(path) {
     return { files, bytes };
 }
 
+/** Move um item (renomeia; se não der, copia, confere e só então apaga a origem). Lança erro e deixa a origem intacta. */
+function moveItem(src, dst, { renameImpl, copyImpl }) {
+    try {
+        renameImpl(src, dst);
+    } catch {
+        const before = measure(src);
+        try {
+            copyImpl(src, dst, { recursive: true, errorOnExist: true, force: false });
+            const after = measure(dst);
+            if (after.files !== before.files || after.bytes !== before.bytes) {
+                throw new Error(`cópia incompleta (${after.files}/${before.files} arquivos)`);
+            }
+        } catch (err) {
+            rmSync(dst, { recursive: true, force: true });
+            throw err;
+        }
+        rmSync(src, { recursive: true, force: true });
+    }
+}
+
+/** Leva de `src` para `dst` só o que não existe em `dst`, descendo até `depth` níveis nas pastas que existem nos dois. */
+function mergeMissing(src, dst, depth, impls) {
+    const out = { moved: [], failed: [] };
+    let names = [];
+    try { names = readdirSync(src); } catch { return out; }
+    for (const name of names) {
+        const s = join(src, name);
+        const d = join(dst, name);
+        try {
+            if (!existsSync(d)) {
+                moveItem(s, d, impls);
+                out.moved.push(name);
+            } else if (depth > 1 && lstatSync(s).isDirectory() && lstatSync(d).isDirectory()) {
+                const sub = mergeMissing(s, d, depth - 1, impls);
+                for (const m of sub.moved) out.moved.push(`${name}/${m}`);
+                for (const f of sub.failed) out.failed.push({ name: `${name}/${f.name}`, reason: f.reason });
+            }
+        } catch (err) {
+            out.failed.push({ name, reason: err?.message || String(err) });
+        }
+    }
+    return out;
+}
+
 /**
  * Move os dados antigos para a pasta nova. Nunca sobrescreve: se o destino já existe, o item antigo fica onde
  * está. Tenta renomear (atômico no mesmo volume); se não der, copia, confere arquivos e bytes e só então apaga
@@ -77,26 +121,21 @@ export function migrateLegacyData({ legacyRoot, dataRoot, log = () => {}, rename
         const src = join(from, name);
         const dst = join(to, name);
         if (existsSync(dst)) {
+            // `.pokebot-accounts` guarda uma pasta por conta (2 a 4). Se o app já criou a dele na pasta nova,
+            // sessões importadas depois na pasta antiga (o .bat de recuperação gravava lá) ficariam presas
+            // para sempre. Junta por conta/arquivo, só o que falta no destino, sem sobrescrever nada.
+            if (name === '.pokebot-accounts' && lstatSync(src).isDirectory() && lstatSync(dst).isDirectory()) {
+                const merged = mergeMissing(src, dst, 2, { renameImpl, copyImpl });
+                for (const m of merged.moved) result.moved.push(`${name}/${m}`);
+                for (const f of merged.failed) result.failed.push({ name: `${name}/${f.name}`, reason: f.reason });
+                if (!merged.moved.length && !merged.failed.length) result.skipped.push({ name, reason: 'já existe na pasta nova' });
+                continue;
+            }
             result.skipped.push({ name, reason: 'já existe na pasta nova' });
             continue;
         }
         try {
-            try {
-                renameImpl(src, dst);
-            } catch {
-                const before = measure(src);
-                try {
-                    copyImpl(src, dst, { recursive: true, errorOnExist: true, force: false });
-                    const after = measure(dst);
-                    if (after.files !== before.files || after.bytes !== before.bytes) {
-                        throw new Error(`cópia incompleta (${after.files}/${before.files} arquivos)`);
-                    }
-                } catch (err) {
-                    rmSync(dst, { recursive: true, force: true });
-                    throw err;
-                }
-                rmSync(src, { recursive: true, force: true });
-            }
+            moveItem(src, dst, { renameImpl, copyImpl });
             result.moved.push(name);
         } catch (err) {
             result.failed.push({ name, reason: err?.message || String(err) });

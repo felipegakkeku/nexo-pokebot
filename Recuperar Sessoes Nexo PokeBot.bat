@@ -68,6 +68,12 @@ if (-not (Test-IsNexoAppDir $targetDir)) {
 }
 
 Write-Info "Destino (Nexo PokeBot v1.0): $targetDir"
+
+# Desde a 1.0.26 o app le sessoes, cookies e perfis de %LOCALAPPDATA%\Nexo PokeBot (NEXO_DATA_DIR manda),
+# nao mais da pasta do programa. Gravar na pasta antiga deixava as contas 3 e 4 sem sessao.
+$dataDir = if ($env:NEXO_DATA_DIR -and $env:NEXO_DATA_DIR.Trim()) { $env:NEXO_DATA_DIR.Trim() } else { Join-Path $(if ($env:LOCALAPPDATA) { $env:LOCALAPPDATA } else { Join-Path $env:USERPROFILE 'AppData\Local' }) 'Nexo PokeBot' }
+New-Item -ItemType Directory -Path $dataDir -Force | Out-Null
+Write-Info "Dados (sessoes e perfis): $dataDir"
 Write-Host ''
 
 # 1. Fecha apps concorrentes para liberar bancos LevelDB e evitar desconexao mutua
@@ -510,7 +516,7 @@ $sessionMarkers = @(
 
 function Inspect-PokeBotDataDir($dirPath) {
     $normDir = $dirPath.TrimEnd('\', '/')
-    if ($normDir.Equals($targetDir.TrimEnd('\', '/'), [System.StringComparison]::OrdinalIgnoreCase)) { return $null }
+    if ($normDir.Equals($dataDir.TrimEnd('\', '/'), [System.StringComparison]::OrdinalIgnoreCase)) { return $null }
     $foundItems = @()
     $latestTime = [DateTime]::MinValue
     foreach ($m in $sessionMarkers) {
@@ -589,6 +595,7 @@ foreach ($base in @(
 }
 
 $dirsToCheck = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+[void]$dirsToCheck.Add($targetDir)  # pasta antiga do app: sessoes gravadas ali por versoes anteriores do .bat
 foreach ($root in ($candidateRoots | Select-Object -Unique)) {
     [void]$dirsToCheck.Add($root)
     Get-ChildItem -LiteralPath $root -Directory -Force -ErrorAction SilentlyContinue | ForEach-Object {
@@ -709,7 +716,7 @@ Write-Info "[3/4] Importando sessoes de: $($selected.DisplayPath)"
 
 if ($selected.Kind -eq 'external-leveldb') {
     $applyRes = Invoke-LevelDbExtractor $targetDir 'apply' ([PSCustomObject]@{
-        targetDir = $targetDir
+        targetDir = $dataDir
         accounts  = @($selected.Accounts)
     })
     if (-not $applyRes -or -not $applyRes.ok) {
@@ -732,11 +739,11 @@ if ($selected.Kind -eq 'external-leveldb') {
     }
 } else {
     $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $backupDir = Join-Path $targetDir ".pokebot-backup-$stamp"
+    $backupDir = Join-Path $dataDir ".pokebot-backup-$stamp"
     $backedUp = $false
     foreach ($m in $selected.Items) {
         $srcPath = Join-Path $selected.Path $m
-        $dstPath = Join-Path $targetDir $m
+        $dstPath = Join-Path $dataDir $m
         if (Test-Path -LiteralPath $dstPath) {
             if (-not $backedUp) {
                 New-Item -ItemType Directory -Path $backupDir -Force | Out-Null
