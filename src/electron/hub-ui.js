@@ -2037,7 +2037,11 @@
             // Faixa fina do resumo: só o tipo e a porcentagem; o tempo de Kick e Twitch fica na dica.
             if (mini) {
                 const off = !parts.length;
-                return `<span class="pbuff ${k}${off ? ' off' : ''}" title="${esc(tip)}"><b>${label}<em>${off ? '-' : `${pct.toFixed(0)}%`}</em></b><i><u style="width:${pct.toFixed(0)}%"></u></i></span>`;
+                // Duas barras finas: roxa = Twitch, verde = Kick (as cores das plataformas dispensam o nome).
+                const twPct = Math.min(100, (twMin / target) * 100);
+                const kkPct = Math.min(100, (kkMin / target) * 100);
+                const bars = `<i class="tw${twOn || twMin > 0 ? '' : ' off'}"><u style="width:${twPct.toFixed(0)}%"></u></i><i class="kk${kkOn || kkMin > 0 ? '' : ' off'}"><u style="width:${kkPct.toFixed(0)}%"></u></i>`;
+                return `<span class="pbuff ${k}${off ? ' off' : ''}" title="${esc(tip)}"><b>${label}<em>${off ? '-' : `${pct.toFixed(0)}%`}</em></b>${bars}</span>`;
             }
             return `<span class="pbuff ${k}" title="${esc(tip)}"><b>${label}</b><i><u style="width:${pct.toFixed(0)}%"></u></i><small>${escapeHtml(val)}</small></span>`;
         }).join('');

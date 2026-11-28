@@ -5271,3 +5271,12 @@ button.btn.claim-btn.claim-ready {
 @container wvsum (max-width: 260px) {
   .wv-sum-chips { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* Buffs no resumo: roxo = Twitch, verde = Kick (cores das plataformas, sem nome na tela). */
+.wv-sum-buffs .pbuff { gap: 2px; }
+.wv-sum-buffs .pbuff i { height: 4px; }
+.wv-sum-buffs .pbuff i.tw u { background: #a970ff; }
+.wv-sum-buffs .pbuff i.kk u { background: #53fc18; }
+.wv-sum-buffs .pbuff i.tw { background: color-mix(in srgb, #9146ff 18%, transparent); }
+.wv-sum-buffs .pbuff i.kk { background: color-mix(in srgb, #53fc18 14%, transparent); }
+.wv-sum-buffs .pbuff i.off { opacity: 0.3; }
